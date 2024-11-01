@@ -1,0 +1,4 @@
+.direnv/
+.zig-cache/
+zig-out/
+build/
