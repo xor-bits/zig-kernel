@@ -80,6 +80,8 @@ fn init_uart() void {
         };
 
         Uart.init();
+
+        uart_lazy_init.finishInit();
     }
 }
 
