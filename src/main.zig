@@ -3,6 +3,8 @@ const limine = @import("limine");
 
 const font = @import("font");
 
+const lazy = @import("lazy.zig");
+
 //
 
 const Glyph = font.Glyph;
@@ -106,36 +108,7 @@ fn init_uart() void {
     }
 }
 
-pub var uart_lazy_init: LazyInit = LazyInit.new();
-
-pub const LazyInit = struct {
-    initialized: bool = false,
-    initializing: bool = false,
-
-    const Self = @This();
-
-    pub fn new() Self {
-        return .{};
-    }
-
-    pub fn isInitialized(self: *Self) bool {
-        return @atomicLoad(bool, &self.initialized, std.builtin.AtomicOrder.acquire);
-    }
-
-    pub fn wait(self: *Self) void {
-        while (!self.isInitialized()) {}
-    }
-
-    pub fn startInit(self: *Self) !void {
-        if (@atomicRmw(bool, &self.initializing, std.builtin.AtomicRmwOp.Xchg, true, .acquire)) {
-            return error.AlreadyInitializing;
-        }
-    }
-
-    pub fn finishInit(self: *Self) void {
-        @atomicStore(bool, &self.initialized, true, .release);
-    }
-};
+pub var uart_lazy_init = lazy.LazyInit.new();
 
 pub const Uart = struct {
     const PORT: u16 = 0x3f8;
