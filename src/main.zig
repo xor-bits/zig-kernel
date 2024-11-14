@@ -88,7 +88,7 @@ fn init_fb() void {
     }
 
     const fb_raw = framebuffer_response.framebuffers()[0];
-    fb = Image([*]u8){
+    fb = Image([*]volatile u8){
         .width = @intCast(fb_raw.width),
         .height = @intCast(fb_raw.height),
         .pitch = @intCast(fb_raw.pitch),
@@ -99,7 +99,7 @@ fn init_fb() void {
 
 var cursor_x: u32 = 5;
 var cursor_y: u32 = 5;
-var fb: Image([*]u8) = undefined;
+var fb: Image([*]volatile u8) = undefined;
 var fb_lazy_init = lazy.LazyInit.new();
 
 pub const Parser = struct {
@@ -220,7 +220,7 @@ fn Image(storage: type) type {
                 for (0..self.width) |x| {
                     const bit: u8 = @truncate((glyph.img[y] >> @intCast(x)) & 1);
                     const is_white: u8 = bit * 255;
-                    const dst: *[4]u8 = @ptrCast(&self.pixel_array[x * pixel_size + y * self.pitch]);
+                    const dst: *volatile [4]u8 = @ptrCast(&self.pixel_array[x * pixel_size + y * self.pitch]);
                     dst.* = [4]u8{ is_white, is_white, is_white, 0 };
                 }
             }
