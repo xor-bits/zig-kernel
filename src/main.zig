@@ -91,33 +91,6 @@ fn generateGlyphs() [256]Glyph {
     return font;
 }
 
-// fn generateGlyphs() !Image([256 * 1024]u8) {
-//     @setEvalBranchQuota(100000);
-
-//     var font = Image([256 * 1024]u8){
-//         .width = 4096,
-//         .height = 16,
-//         .pitch = 4096 * 4,
-//         .bits_per_pixel = 32,
-//         .pixel_array = std.mem.zeroes([256 * 1024]u8),
-//     };
-
-//     const font_raw = try parse_bmp(@embedFile("asset/font.bmp"));
-
-//     for (0..16) |y| {
-//         for (0..4096) |x| {
-//             const to_pix: *[4]u8 = @ptrCast(&font.pixel_array[x * 4 + y * font.pitch]);
-//             if (font_raw.pixel_array[x * 3 + (15 - y) * font_raw.pitch] == 0) {
-//                 to_pix.* = .{ 255, 255, 255, 0 };
-//             } else {
-//                 to_pix.* = .{ 0, 0, 0, 0 };
-//             }
-//         }
-//     }
-
-//     return font;
-// }
-
 pub fn print(comptime fmt: []const u8, args: anytype) void {
     init_uart();
 
@@ -191,61 +164,6 @@ pub const LazyInit = struct {
         @atomicStore(bool, &self.initialized, true, .release);
     }
 };
-
-pub fn Lazy(comptime T: type, comptime K: type) type {
-    return struct {
-        value: T = undefined,
-        initialized: bool = false,
-        initializing: bool = false,
-
-        const Self = @This();
-
-        pub fn new() Self {
-            return .{};
-        }
-
-        pub fn tryGet(self: *Self) ?*T {
-            if (@atomicLoad(bool, &self.initialized, std.builtin.AtomicOrder.acquire)) {
-                return &self.value;
-            } else {
-                @setCold(true);
-                return null;
-            }
-        }
-
-        pub fn wait(self: *Self) *T {
-            while (true) {
-                if (self.tryGet()) |initialized| {
-                    return initialized;
-                }
-            }
-        }
-
-        pub fn get(self: *Self) *T {
-            if (self.tryGet()) |initialized| {
-                // already initialized
-                return initialized;
-            }
-
-            if (@atomicRmw(bool, &self.initializing, std.builtin.AtomicRmwOp.Xchg, true, .acquire)) {
-                // something else is already initializing it
-                return self.wait();
-            }
-
-            // now we are initializing it
-            self.value = K.call();
-            @atomicStore(bool, &self.initialized, true, .release);
-
-            return &self.value;
-        }
-    };
-}
-
-pub var uart = Lazy(Uart, struct {
-    fn call() Uart {
-        return Uart.init();
-    }
-}).new();
 
 pub const Uart = struct {
     const PORT: u16 = 0x3f8;
