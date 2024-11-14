@@ -38,6 +38,24 @@ export fn _start() callconv(.C) noreturn {
 
 fn main() !void {
     print("kernel main", .{});
+
+    // TODO: page allocator
+    // TODO: GDT + IDT
+    // TODO: virtual memory mapper
+    // TODO: cpu locals (rdpid, rdtscp)
+    // TODO: ACPI + APIC + HPET
+    // TODO: scheduler
+    // TODO: flat binary loader
+    // TODO: userland
+    // TODO: syscalls
+    // TODO: IPC
+    // TODO: elf64 loader
+    // TODO: RDRAND,RDSEED,PRNG,CRNG
+    // TODO: vfs
+    // TODO: ps2 interrupts (kb&m)
+    // TODO: RTC time
+    // TODO: PCIe
+    // TODO: USB
 }
 
 pub fn print(comptime fmt: []const u8, args: anytype) void {
