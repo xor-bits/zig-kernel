@@ -17,31 +17,106 @@ export fn _start() callconv(.C) noreturn {
         hcf();
     }
 
+    main() catch |err| {
+        print("error: {any}", .{err});
+    };
+
+    print("done", .{});
+    hcf();
+}
+
+fn main() !void {
     // crash if there is no framebuffer response
-    const framebuffer_response = framebuffer.response orelse hcf();
+    const framebuffer_response = framebuffer.response orelse {
+        return error.NoFramebuffer;
+    };
 
     // crash if there isn't at least 1 framebuffer
     if (framebuffer_response.framebuffer_count < 1) {
-        hcf();
+        return error.NoFramebuffer;
     }
 
-    const fb = framebuffer_response.framebuffers()[0];
+    const fb_raw = framebuffer_response.framebuffers()[0];
+    const fb = Image([*]u8){
+        .width = @intCast(fb_raw.width),
+        .height = @intCast(fb_raw.height),
+        .pitch = @intCast(fb_raw.pitch),
+        .bits_per_pixel = fb_raw.bpp,
+        .pixel_array = fb_raw.address,
+    };
 
-    const font = @embedFile("asset/font.bmp");
-    parse_bmp(font) catch hcf();
+    print("fb: {*}..{*}", .{ fb_raw.address, fb_raw.address + fb_raw.height * fb_raw.pitch });
 
-    print("hello\n", .{});
-    print("world\n", .{});
+    var cursor_x: u32 = 50;
+    for ("hello world") |b| {
+        const letter_f = &glyphs[b];
+        var to = try fb.subimage(cursor_x, 50, 8, 16);
+        to.fillGlyph(letter_f);
+        cursor_x += 8;
+    }
+}
 
-    for (0..50) |y| {
-        for (0..50) |x| {
-            const pixel_offs = (y + 100) * fb.pitch + (x + 100) * 4;
-            @as(*u32, @ptrCast(@alignCast(fb.address + pixel_offs))).* = 0xffff_ffff;
+const glyphs = generateGlyphs();
+
+const Glyph = struct {
+    img: [16]u16,
+    wide: bool,
+};
+
+fn generateGlyphs() [256]Glyph {
+    @setEvalBranchQuota(75000);
+    const font_raw = try parse_bmp(@embedFile("asset/font.bmp"));
+    var font = std.mem.zeroes([256]Glyph);
+
+    for (0..16) |y| {
+        for (0..256) |i| {
+            for (0..16) |x| {
+                // the weird for loop order is for cache locality
+                const is_white: u16 =
+                    @intCast(@intFromBool(255 != font_raw.pixel_array[x * 3 + i * 16 * 3 + y * font_raw.pitch]));
+                font[i].img[15 - y] |= is_white << x;
+            }
         }
     }
 
-    hcf();
+    for (0..256) |i| {
+        for (0..16) |y| {
+            if (font[i].img[y] >= 0x100) {
+                font[i].wide = true;
+                break;
+            }
+        }
+    }
+
+    return font;
 }
+
+// fn generateGlyphs() !Image([256 * 1024]u8) {
+//     @setEvalBranchQuota(100000);
+
+//     var font = Image([256 * 1024]u8){
+//         .width = 4096,
+//         .height = 16,
+//         .pitch = 4096 * 4,
+//         .bits_per_pixel = 32,
+//         .pixel_array = std.mem.zeroes([256 * 1024]u8),
+//     };
+
+//     const font_raw = try parse_bmp(@embedFile("asset/font.bmp"));
+
+//     for (0..16) |y| {
+//         for (0..4096) |x| {
+//             const to_pix: *[4]u8 = @ptrCast(&font.pixel_array[x * 4 + y * font.pitch]);
+//             if (font_raw.pixel_array[x * 3 + (15 - y) * font_raw.pitch] == 0) {
+//                 to_pix.* = .{ 255, 255, 255, 0 };
+//             } else {
+//                 to_pix.* = .{ 0, 0, 0, 0 };
+//             }
+//         }
+//     }
+
+//     return font;
+// }
 
 pub fn print(comptime fmt: []const u8, args: anytype) void {
     init_uart();
@@ -64,6 +139,7 @@ pub fn print(comptime fmt: []const u8, args: anytype) void {
     // _ = fmt;
     // _ = args;
     std.fmt.format(UartWriter{}, fmt, args) catch {};
+    Uart.writeByte('\n');
 }
 
 fn init_uart() void {
@@ -299,9 +375,131 @@ pub const Parser = struct {
 
         return instance;
     }
+
+    pub fn bytesLeft(self: *const Parser) []const u8 {
+        return self.bytes;
+    }
 };
 
-fn parse_bmp(bmp: []const u8) !void {
+fn Image(storage: type) type {
+    return struct {
+        width: u32,
+        height: u32,
+        pitch: u32,
+        bits_per_pixel: u16,
+        pixel_array: storage,
+
+        const Self = @This();
+
+        fn debug(self: *const Self) void {
+            print("addr: {*}, size: {d}", .{ self.pixel_array, self.height * self.pitch });
+        }
+
+        fn subimage(self: *const Self, x: u32, y: u32, w: u32, h: u32) error{OutOfBounds}!Image(@TypeOf(self.pixel_array[0..])) {
+            if (self.width < x + w or self.height < y + h) {
+                return error.OutOfBounds;
+            }
+
+            const offs = x * self.bits_per_pixel / 8 + y * self.pitch;
+
+            return .{
+                .width = w,
+                .height = h,
+                .pitch = self.pitch,
+                .bits_per_pixel = self.bits_per_pixel,
+                .pixel_array = @ptrCast(self.pixel_array[offs..]),
+            };
+        }
+
+        fn fill(self: *const Self, r: u8, g: u8, b: u8) void {
+            const pixel = [4]u8{ r, g, b, 0 }; // 4 becomes a u32
+            const pixel_size = self.bits_per_pixel / 8;
+
+            for (0..self.height) |y| {
+                for (0..self.width) |x| {
+                    const dst: *[4]u8 = @ptrCast(&self.pixel_array[x * pixel_size + y * self.pitch]);
+                    dst.* = pixel;
+                }
+            }
+        }
+
+        fn fillGlyph(self: *const Self, glyph: *const Glyph) void {
+            // if (self.width != 16) {
+            //     return
+            // }
+
+            const pixel_size = self.bits_per_pixel / 8;
+
+            for (0..self.height) |y| {
+                for (0..self.width) |x| {
+                    const bit: u8 = @truncate((glyph.img[y] >> @intCast(x)) & 1);
+                    const is_white: u8 = bit * 255;
+                    const dst: *[4]u8 = @ptrCast(&self.pixel_array[x * pixel_size + y * self.pitch]);
+                    dst.* = [4]u8{ is_white, is_white, is_white, 0 };
+                }
+            }
+        }
+
+        fn copyTo(from: *const Self, to: anytype) error{ SizeMismatch, BppMismatch }!void {
+            if (from.width != to.width or from.height != to.height) {
+                return error.SizeMismatch;
+            }
+
+            if (from.bits_per_pixel != to.bits_per_pixel) {
+                return error.BppMismatch;
+            }
+
+            const from_row_width = from.width * from.bits_per_pixel / 8;
+            const to_row_width = to.width * to.bits_per_pixel / 8;
+
+            for (0..to.height) |y| {
+                const from_row = y * from.pitch;
+                const to_row = y * to.pitch;
+                const from_row_slice = from.pixel_array[from_row .. from_row + from_row_width];
+                const to_row_slice = to.pixel_array[to_row .. to_row + to_row_width];
+                std.mem.copyForwards(u8, to_row_slice, from_row_slice);
+            }
+        }
+
+        fn copyPixelsTo(from: *const Self, to: anytype) error{SizeMismatch}!void {
+            if (from.width != to.width or from.height != to.height) {
+                return error.SizeMismatch;
+            }
+
+            if (from.bits_per_pixel == to.bits_per_pixel) {
+                return copyTo(from, to) catch unreachable;
+            }
+
+            const from_pixel_size = from.bits_per_pixel / 8;
+            const to_pixel_size = to.bits_per_pixel / 8;
+
+            for (0..to.height) |y| {
+                for (0..to.width) |x| {
+                    const from_idx = x * from_pixel_size + y * from.pitch;
+                    const from_pixel: *const Pixel = @ptrCast(&from.pixel_array[from_idx]);
+
+                    const to_idx = x * to_pixel_size + y * to.pitch;
+                    const to_pixel: *Pixel = @ptrCast(&to.pixel_array[to_idx]);
+
+                    // print("loc: {d},{d}", .{ x, y });
+                    // print("from: {*} to: {*}", .{ from_pixel, to_pixel });
+
+                    to_pixel.* = from_pixel.*;
+                }
+            }
+        }
+
+        // fn pixel_at(x: u32, y: u32) void {}
+    };
+}
+
+const Pixel = struct {
+    red: u8,
+    green: u8,
+    blue: u8,
+};
+
+fn parse_bmp(bmp: []const u8) !Image([]const u8) {
     var parser = Parser.init(bmp);
 
     const bmp_header = parser.readStruct(struct {
@@ -318,7 +516,7 @@ fn parse_bmp(bmp: []const u8) !void {
         color_planes_len: u16,
         bits_per_pixel: u16,
         pixel_array_compression: u32,
-        size: u32,
+        image_size: u32,
         pixel_per_meter_horizontal: u32,
         pixel_per_meter_vertical: u32,
         colors_len: u32,
@@ -334,9 +532,7 @@ fn parse_bmp(bmp: []const u8) !void {
         blue_gamma: u32,
     }) catch return BmpError.UnexpectedEof;
 
-    print("{any}\n", .{bmp_header});
-    print("{any}\n", .{dib_header});
-
+    // TODO: if either is zero
     if (dib_header.width != 4096 or dib_header.height != 16) {
         return BmpError.UnexpectedSize;
     }
@@ -344,6 +540,18 @@ fn parse_bmp(bmp: []const u8) !void {
     if (bmp_header.ident != 0x4D42) {
         return BmpError.InvalidIndentifier;
     }
+
+    if (bmp.len < bmp_header.offs + dib_header.image_size) {
+        return BmpError.UnexpectedEof;
+    }
+
+    return .{
+        .width = dib_header.width,
+        .height = dib_header.height,
+        .pitch = dib_header.image_size / dib_header.height,
+        .bits_per_pixel = dib_header.bits_per_pixel,
+        .pixel_array = @constCast(bmp[bmp_header.offs .. bmp_header.offs + dib_header.image_size]),
+    };
 }
 
 inline fn hcf() noreturn {
