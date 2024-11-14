@@ -24,6 +24,7 @@ pub export var memory: limine.MemoryMapRequest = .{};
 export fn _start() callconv(.C) noreturn {
     // crash if bootloader is unsupported
     if (!base_revision.is_supported()) {
+        uart.print("bootloader unsupported", .{});
         hcf();
     }
 
