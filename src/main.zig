@@ -4,6 +4,7 @@ const limine = @import("limine");
 const font = @import("font");
 
 const uart = @import("uart.zig");
+const lazy = @import("lazy.zig");
 
 //
 
@@ -35,39 +36,70 @@ export fn _start() callconv(.C) noreturn {
 }
 
 fn main() !void {
+    print("kernel main", .{});
+}
+
+pub fn print(comptime fmt: []const u8, args: anytype) void {
+    uart.print(fmt, args);
+
+    const FbWriter = struct {
+        pub const Error = error{};
+        pub const Self = @This();
+
+        pub fn writeAll(_: *const Self, bytes: []const u8) !void {
+            for (bytes) |b| {
+                if (b == '\n') {
+                    cursor_x = 5;
+                    cursor_y += 16;
+                    continue;
+                }
+
+                const letter = &glyphs[b];
+                var to = try fb.subimage(cursor_x, cursor_y, 8, 16);
+                to.fillGlyph(letter);
+                cursor_x += 8;
+            }
+        }
+
+        pub fn writeBytesNTimes(self: *const Self, bytes: []const u8, n: usize) !void {
+            for (0..n) |_| {
+                try self.writeAll(bytes);
+            }
+        }
+    };
+
+    fb_lazy_init.waitOrInit(init_fb);
+    std.fmt.format(FbWriter{}, fmt, args) catch {};
+    std.fmt.format(FbWriter{}, "\n", .{}) catch {};
+}
+
+fn init_fb() void {
     // crash if there is no framebuffer response
     const framebuffer_response = framebuffer.response orelse {
-        return error.NoFramebuffer;
+        uart.print("no framebuffer", .{});
+        hcf();
     };
 
     // crash if there isn't at least 1 framebuffer
     if (framebuffer_response.framebuffer_count < 1) {
-        return error.NoFramebuffer;
+        uart.print("no framebuffer", .{});
+        hcf();
     }
 
     const fb_raw = framebuffer_response.framebuffers()[0];
-    const fb = Image([*]u8){
+    fb = Image([*]u8){
         .width = @intCast(fb_raw.width),
         .height = @intCast(fb_raw.height),
         .pitch = @intCast(fb_raw.pitch),
         .bits_per_pixel = fb_raw.bpp,
         .pixel_array = fb_raw.address,
     };
-
-    print("fb: {*}..{*}", .{ fb_raw.address, fb_raw.address + fb_raw.height * fb_raw.pitch });
-
-    var cursor_x: u32 = 50;
-    for ("hello world") |b| {
-        const letter_f = &glyphs[b];
-        var to = try fb.subimage(cursor_x, 50, 8, 16);
-        to.fillGlyph(letter_f);
-        cursor_x += 8;
-    }
 }
 
-pub fn print(comptime fmt: []const u8, args: anytype) void {
-    uart.print(fmt, args);
-}
+var cursor_x: u32 = 5;
+var cursor_y: u32 = 5;
+var fb: Image([*]u8) = undefined;
+var fb_lazy_init = lazy.LazyInit.new();
 
 pub const Parser = struct {
     bytes: []const u8,

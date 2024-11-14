@@ -23,29 +23,12 @@ pub fn print(comptime fmt: []const u8, args: anytype) void {
         }
     };
 
-    // _ = fmt;
-    // _ = args;
     std.fmt.format(UartWriter{}, fmt, args) catch {};
     Uart.writeByte('\n');
 }
 
 fn init() void {
-    if (!uart_lazy_init.isInitialized()) {
-        // very low chance to not be initialized (only the first time)
-        @setCold(true);
-
-        uart_lazy_init.startInit() catch {
-            // super low chance to not be initialized and currently initializing
-            // (only when one thread accesses it for the first time and the current thread just a short time later)
-            @setCold(true);
-            uart_lazy_init.wait();
-            return;
-        };
-
-        Uart.init();
-
-        uart_lazy_init.finishInit();
-    }
+    uart_lazy_init.waitOrInit(Uart.init);
 }
 
 var uart_lazy_init = lazy.LazyInit.new();
