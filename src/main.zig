@@ -3,7 +3,7 @@ const limine = @import("limine");
 
 const font = @import("font");
 
-const lazy = @import("lazy.zig");
+const uart = @import("uart.zig");
 
 //
 
@@ -66,111 +66,7 @@ fn main() !void {
 }
 
 pub fn print(comptime fmt: []const u8, args: anytype) void {
-    init_uart();
-
-    const UartWriter = struct {
-        pub const Error = error{};
-        pub const Self = @This();
-
-        pub fn writeAll(_: *const Self, bytes: []const u8) !void {
-            Uart.writeAll(bytes);
-        }
-
-        pub fn writeBytesNTimes(self: *const Self, bytes: []const u8, n: usize) !void {
-            for (0..n) |_| {
-                try self.writeAll(bytes);
-            }
-        }
-    };
-
-    // _ = fmt;
-    // _ = args;
-    std.fmt.format(UartWriter{}, fmt, args) catch {};
-    Uart.writeByte('\n');
-}
-
-fn init_uart() void {
-    if (!uart_lazy_init.isInitialized()) {
-        // very low chance to not be initialized (only the first time)
-        @setCold(true);
-
-        uart_lazy_init.startInit() catch {
-            // super low chance to not be initialized and currently initializing
-            // (only when one thread accesses it for the first time and the current thread just a short time later)
-            @setCold(true);
-            uart_lazy_init.wait();
-            return;
-        };
-
-        Uart.init();
-
-        uart_lazy_init.finishInit();
-    }
-}
-
-pub var uart_lazy_init = lazy.LazyInit.new();
-
-pub const Uart = struct {
-    const PORT: u16 = 0x3f8;
-
-    pub const Self = @This();
-
-    pub fn init() void {
-        outb(PORT + 1, 0x00);
-        outb(PORT + 3, 0x80);
-        outb(PORT + 0, 0x03);
-        outb(PORT + 1, 0x00);
-        outb(PORT + 3, 0x03);
-        outb(PORT + 2, 0xc7);
-        outb(PORT + 4, 0x0b);
-        outb(PORT + 4, 0x1e);
-        outb(PORT + 0, 0xae);
-
-        if (inb(PORT + 0) != 0xAE) {
-            hcf();
-        }
-
-        outb(PORT + 4, 0x0f);
-    }
-
-    pub fn readByte() u8 {
-        while (inb(PORT + 5) & 1 == 0) {}
-        return inb(PORT);
-    }
-
-    pub fn writeByte(byte: u8) void {
-        while (inb(PORT + 5) & 0x20 == 0) {}
-        outb(PORT, byte);
-    }
-
-    pub fn writeAll(bytes: []const u8) void {
-        for (bytes) |byte| {
-            Self.writeByte(byte);
-        }
-    }
-
-    pub fn writeBytesNTimes(bytes: []const u8, times: usize) void {
-        for (0..times) |_| {
-            Self.writeAll(bytes);
-        }
-    }
-};
-
-pub fn outb(port: u16, byte: u8) void {
-    asm volatile (
-        \\ outb %[byte], %[port]
-        :
-        : [byte] "{al}" (byte),
-          [port] "N{dx}" (port),
-    );
-}
-
-pub fn inb(port: u16) u8 {
-    return asm volatile (
-        \\ inb %[port], %[byte]
-        : [byte] "={al}" (-> u8),
-        : [port] "N{dx}" (port),
-    );
+    uart.print(fmt, args);
 }
 
 pub const Parser = struct {
@@ -354,11 +250,28 @@ const Pixel = struct {
     blue: u8,
 };
 
-inline fn hcf() noreturn {
+pub inline fn hcf() noreturn {
     while (true) {
         asm volatile (
             \\ cli
             \\ hlt
         );
     }
+}
+
+pub fn outb(port: u16, byte: u8) void {
+    asm volatile (
+        \\ outb %[byte], %[port]
+        :
+        : [byte] "{al}" (byte),
+          [port] "N{dx}" (port),
+    );
+}
+
+pub fn inb(port: u16) u8 {
+    return asm volatile (
+        \\ inb %[port], %[byte]
+        : [byte] "={al}" (-> u8),
+        : [port] "N{dx}" (port),
+    );
 }
