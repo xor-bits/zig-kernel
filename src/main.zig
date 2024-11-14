@@ -1,6 +1,13 @@
 const std = @import("std");
 const limine = @import("limine");
 
+const font = @import("font");
+
+//
+
+const Glyph = font.Glyph;
+const glyphs = font.glyphs;
+
 //
 
 pub export var framebuffer: limine.FramebufferRequest = .{};
@@ -54,41 +61,6 @@ fn main() !void {
         to.fillGlyph(letter_f);
         cursor_x += 8;
     }
-}
-
-const glyphs = generateGlyphs();
-
-const Glyph = struct {
-    img: [16]u16,
-    wide: bool,
-};
-
-fn generateGlyphs() [256]Glyph {
-    @setEvalBranchQuota(75000);
-    const font_raw = try parse_bmp(@embedFile("asset/font.bmp"));
-    var font = std.mem.zeroes([256]Glyph);
-
-    for (0..16) |y| {
-        for (0..256) |i| {
-            for (0..16) |x| {
-                // the weird for loop order is for cache locality
-                const is_white: u16 =
-                    @intCast(@intFromBool(255 != font_raw.pixel_array[x * 3 + i * 16 * 3 + y * font_raw.pitch]));
-                font[i].img[15 - y] |= is_white << x;
-            }
-        }
-    }
-
-    for (0..256) |i| {
-        for (0..16) |y| {
-            if (font[i].img[y] >= 0x100) {
-                font[i].wide = true;
-                break;
-            }
-        }
-    }
-
-    return font;
 }
 
 pub fn print(comptime fmt: []const u8, args: anytype) void {
@@ -227,12 +199,6 @@ pub fn inb(port: u16) u8 {
         : [port] "N{dx}" (port),
     );
 }
-
-pub const BmpError = error{
-    UnexpectedEof,
-    InvalidIndentifier,
-    UnexpectedSize,
-};
 
 pub const Parser = struct {
     bytes: []const u8,
@@ -406,8 +372,6 @@ fn Image(storage: type) type {
                 }
             }
         }
-
-        // fn pixel_at(x: u32, y: u32) void {}
     };
 }
 
@@ -416,61 +380,6 @@ const Pixel = struct {
     green: u8,
     blue: u8,
 };
-
-fn parse_bmp(bmp: []const u8) !Image([]const u8) {
-    var parser = Parser.init(bmp);
-
-    const bmp_header = parser.readStruct(struct {
-        ident: u16,
-        bmp_header_size: u32,
-        _pad: [2]u16,
-        offs: u32,
-    }) catch return BmpError.UnexpectedEof;
-
-    const dib_header = parser.readStruct(struct {
-        dib_header_size: u32,
-        width: u32,
-        height: u32,
-        color_planes_len: u16,
-        bits_per_pixel: u16,
-        pixel_array_compression: u32,
-        image_size: u32,
-        pixel_per_meter_horizontal: u32,
-        pixel_per_meter_vertical: u32,
-        colors_len: u32,
-        important_colors_len: u32,
-        red_mask: u32,
-        green_mask: u32,
-        blue_mask: u32,
-        alpha_mask: u32,
-        color_space: u32,
-        color_space_endpoints: [0x24]u32,
-        red_gamma: u32,
-        green_gamma: u32,
-        blue_gamma: u32,
-    }) catch return BmpError.UnexpectedEof;
-
-    // TODO: if either is zero
-    if (dib_header.width != 4096 or dib_header.height != 16) {
-        return BmpError.UnexpectedSize;
-    }
-
-    if (bmp_header.ident != 0x4D42) {
-        return BmpError.InvalidIndentifier;
-    }
-
-    if (bmp.len < bmp_header.offs + dib_header.image_size) {
-        return BmpError.UnexpectedEof;
-    }
-
-    return .{
-        .width = dib_header.width,
-        .height = dib_header.height,
-        .pitch = dib_header.image_size / dib_header.height,
-        .bits_per_pixel = dib_header.bits_per_pixel,
-        .pixel_array = @constCast(bmp[bmp_header.offs .. bmp_header.offs + dib_header.image_size]),
-    };
-}
 
 inline fn hcf() noreturn {
     while (true) {

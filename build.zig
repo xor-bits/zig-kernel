@@ -27,6 +27,16 @@ pub fn build(b: *std.Build) !void {
 
     const optimize = b.standardOptimizeOption(.{});
 
+    // convert the font.bmp into a more usable format
+    const font_tool = b.addExecutable(.{
+        .name = "generate kernel font",
+        .root_source_file = b.path("tools/generate_font.zig"),
+        .target = b.host,
+    });
+
+    const font_tool_run = b.addRunArtifact(font_tool);
+    const font_zig = font_tool_run.addOutputFileArg("font.zig");
+
     // build the kernel ELF
     const kernel_elf_step = b.addExecutable(.{
         .name = "kernel.elf",
@@ -38,6 +48,7 @@ pub fn build(b: *std.Build) !void {
     kernel_elf_step.setLinkerScript(b.path("linker/x86_64.ld"));
     kernel_elf_step.want_lto = false;
     kernel_elf_step.root_module.addImport("limine", b.dependency("limine", .{}).module("limine"));
+    kernel_elf_step.root_module.addAnonymousImport("font", .{ .root_source_file = font_zig });
 
     // clone & configure limine (WARNING: this runs a Makefile from a dependency at compile time)
     const limine_bootloader_pkg = b.dependency("limine_bootloader", .{});

@@ -1,0 +1,225 @@
+const std = @import("std");
+
+//
+
+pub fn main() !void {
+    const glyphs = try generateGlyphs();
+
+    var arena_state = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const args = try std.process.argsAlloc(arena);
+    if (args.len != 2) return error.@"missing output file argument";
+
+    var output_file = try std.fs.cwd().createFile(args[1], .{});
+    defer output_file.close();
+
+    // std.fmt.format(, , )
+    try output_file.writeAll(
+        \\pub const Glyph = struct {
+        \\    img: [16]u16,
+        \\    wide: bool,
+        \\};
+        \\
+        \\pub const glyphs: [256]Glyph = .{
+        \\
+    );
+    for (glyphs) |glyph| {
+        try output_file.writeAll("    .{");
+        try output_file.writeAll(".wide=");
+        if (glyph.wide) {
+            try output_file.writeAll("true,");
+        } else {
+            try output_file.writeAll("false,");
+        }
+        try output_file.writeAll(".img=.{");
+        for (glyph.img) |row| {
+            try std.fmt.format(FileFmt{ .file = output_file }, "{d}", .{row});
+            try output_file.writeAll(",");
+        }
+        try output_file.writeAll("}");
+        try output_file.writeAll("},\n");
+    }
+    // try std.fmt.format(FileFmt{ .file = output_file }, "{any}", .{glyphs});
+    try output_file.writeAll("};");
+}
+
+const FileFmt = struct {
+    file: std.fs.File,
+    pub const Error = std.fs.File.WriteError;
+    pub fn writeAll(self: *const FileFmt, bytes: []const u8) Error!void {
+        try self.file.writeAll(bytes);
+    }
+    pub fn writeBytesNTimes(self: *const FileFmt, bytes: []const u8, n: usize) Error!void {
+        for (0..n) |_| {
+            try self.file.writeAll(bytes);
+        }
+    }
+};
+
+const Glyph = struct {
+    img: [16]u16,
+    wide: bool,
+};
+
+fn generateGlyphs() ![256]Glyph {
+    const font_raw = try parse_bmp(@embedFile("./font.bmp"));
+    var font = std.mem.zeroes([256]Glyph);
+
+    for (0..16) |y| {
+        for (0..256) |i| {
+            for (0..16) |x| {
+                // the weird for loop order is for cache locality
+                const is_white: u16 =
+                    @intCast(@intFromBool(255 != font_raw.pixel_array[x * 3 + i * 16 * 3 + y * font_raw.pitch]));
+                font[i].img[15 - y] |= is_white << @intCast(x);
+            }
+        }
+    }
+
+    for (0..256) |i| {
+        for (0..16) |y| {
+            if (font[i].img[y] >= 0x100) {
+                font[i].wide = true;
+                break;
+            }
+        }
+    }
+
+    return font;
+}
+
+const Image = struct {
+    width: u32,
+    height: u32,
+    pitch: u32,
+    bits_per_pixel: u16,
+    pixel_array: []const u8,
+};
+
+pub const BmpError = error{
+    UnexpectedEof,
+    InvalidIndentifier,
+    UnexpectedSize,
+};
+
+pub const Parser = struct {
+    bytes: []const u8,
+
+    pub fn init(bytes: []const u8) Parser {
+        return .{ .bytes = bytes };
+    }
+
+    pub fn read(self: *Parser, comptime T: type) !T {
+        switch (@typeInfo(T)) {
+            .Int => return try self.readInt(T),
+            .Array => return try self.readArray(T),
+            .Struct => return try self.readStruct(T),
+            else => @compileError("unsupported type"),
+        }
+    }
+
+    pub fn readInt(self: *Parser, comptime T: type) !T {
+        const size = @sizeOf(T);
+        if (self.bytes.len <= size) {
+            return error.UnexpectedEof;
+        }
+
+        const value: *align(1) const T = @ptrCast(self.bytes);
+        self.bytes = self.bytes[size..];
+
+        return value.*;
+    }
+
+    pub fn readArray(self: *Parser, comptime T: type) !T {
+        if (self.bytes.len <= @sizeOf(T)) {
+            return error.UnexpectedEof;
+        }
+
+        const array = @typeInfo(T).Array;
+
+        var instance: [array.len]array.child = undefined;
+
+        inline for (0..array.len) |i| {
+            instance[i] = try self.read(array.child);
+        }
+
+        return instance;
+    }
+
+    pub fn readStruct(self: *Parser, comptime T: type) !T {
+        if (self.bytes.len <= @sizeOf(T)) {
+            return error.UnexpectedEof;
+        }
+
+        const fields = @typeInfo(T).Struct.fields;
+
+        var instance: T = undefined;
+
+        inline for (fields) |field| {
+            @field(instance, field.name) = try self.read(field.type);
+        }
+
+        return instance;
+    }
+
+    pub fn bytesLeft(self: *const Parser) []const u8 {
+        return self.bytes;
+    }
+};
+
+fn parse_bmp(bmp: []const u8) !Image {
+    var parser = Parser.init(bmp);
+
+    const bmp_header = parser.readStruct(struct {
+        ident: u16,
+        bmp_header_size: u32,
+        _pad: [2]u16,
+        offs: u32,
+    }) catch return BmpError.UnexpectedEof;
+
+    const dib_header = parser.readStruct(struct {
+        dib_header_size: u32,
+        width: u32,
+        height: u32,
+        color_planes_len: u16,
+        bits_per_pixel: u16,
+        pixel_array_compression: u32,
+        image_size: u32,
+        pixel_per_meter_horizontal: u32,
+        pixel_per_meter_vertical: u32,
+        colors_len: u32,
+        important_colors_len: u32,
+        red_mask: u32,
+        green_mask: u32,
+        blue_mask: u32,
+        alpha_mask: u32,
+        color_space: u32,
+        color_space_endpoints: [0x24]u32,
+        red_gamma: u32,
+        green_gamma: u32,
+        blue_gamma: u32,
+    }) catch return BmpError.UnexpectedEof;
+
+    // TODO: if either is zero
+    if (dib_header.width != 4096 or dib_header.height != 16) {
+        return BmpError.UnexpectedSize;
+    }
+
+    if (bmp_header.ident != 0x4D42) {
+        return BmpError.InvalidIndentifier;
+    }
+
+    if (bmp.len < bmp_header.offs + dib_header.image_size) {
+        return BmpError.UnexpectedEof;
+    }
+
+    return .{
+        .width = dib_header.width,
+        .height = dib_header.height,
+        .pitch = dib_header.image_size / dib_header.height,
+        .bits_per_pixel = dib_header.bits_per_pixel,
+        .pixel_array = @constCast(bmp[bmp_header.offs .. bmp_header.offs + dib_header.image_size]),
+    };
+}
