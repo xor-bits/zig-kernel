@@ -6,6 +6,7 @@ const main = @import("main.zig");
 const lazy = @import("lazy.zig");
 const alloc = @import("alloc.zig");
 const uart = @import("uart.zig");
+const arch = @import("arch.zig");
 
 //
 
@@ -55,13 +56,13 @@ fn init_fb() void {
     // crash if there is no framebuffer response
     const framebuffer_response = framebuffer.response orelse {
         std.log.scoped(.fb).err("no framebuffer", .{});
-        main.hcf();
+        arch.hcf();
     };
 
     // crash if there isn't at least 1 framebuffer
     if (framebuffer_response.framebuffer_count < 1) {
         std.log.scoped(.fb).err("no framebuffer", .{});
-        main.hcf();
+        arch.hcf();
     }
 
     const fb_raw = framebuffer_response.framebuffers()[0];
@@ -80,7 +81,7 @@ fn init_fb() void {
     const terminal_buf_size = terminal_size.w * terminal_size.h;
     const whole_terminal_buf = alloc.page_allocator.alloc(u8, terminal_buf_size * 2) catch {
         std.log.scoped(.fb).err("OOM", .{});
-        main.hcf();
+        arch.hcf();
     };
 
     for (whole_terminal_buf) |*b| {

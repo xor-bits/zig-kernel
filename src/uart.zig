@@ -1,7 +1,13 @@
 const std = @import("std");
 
-const main = @import("main.zig");
+const arch = @import("arch.zig");
 const lazy = @import("lazy.zig");
+
+//
+
+const outb = arch.x86_64.outb;
+const inb = arch.x86_64.inb;
+const hcf = arch.hcf;
 
 //
 
@@ -37,31 +43,31 @@ const Uart = struct {
     const Self = @This();
 
     fn init() void {
-        main.outb(PORT + 1, 0x00);
-        main.outb(PORT + 3, 0x80);
-        main.outb(PORT + 0, 0x03);
-        main.outb(PORT + 1, 0x00);
-        main.outb(PORT + 3, 0x03);
-        main.outb(PORT + 2, 0xc7);
-        main.outb(PORT + 4, 0x0b);
-        main.outb(PORT + 4, 0x1e);
-        main.outb(PORT + 0, 0xae);
+        outb(PORT + 1, 0x00);
+        outb(PORT + 3, 0x80);
+        outb(PORT + 0, 0x03);
+        outb(PORT + 1, 0x00);
+        outb(PORT + 3, 0x03);
+        outb(PORT + 2, 0xc7);
+        outb(PORT + 4, 0x0b);
+        outb(PORT + 4, 0x1e);
+        outb(PORT + 0, 0xae);
 
-        if (main.inb(PORT + 0) != 0xAE) {
-            main.hcf();
+        if (inb(PORT + 0) != 0xAE) {
+            hcf();
         }
 
-        main.outb(PORT + 4, 0x0f);
+        outb(PORT + 4, 0x0f);
     }
 
     fn readByte() u8 {
-        while (main.inb(PORT + 5) & 1 == 0) {}
-        return main.inb(PORT);
+        while (inb(PORT + 5) & 1 == 0) {}
+        return inb(PORT);
     }
 
     fn writeByte(byte: u8) void {
-        while (main.inb(PORT + 5) & 0x20 == 0) {}
-        main.outb(PORT, byte);
+        while (inb(PORT + 5) & 0x20 == 0) {}
+        outb(PORT, byte);
     }
 
     fn writeAll(bytes: []const u8) void {

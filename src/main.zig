@@ -6,6 +6,7 @@ const uart = @import("uart.zig");
 const fb = @import("fb.zig");
 const lazy = @import("lazy.zig");
 const mem = @import("alloc.zig");
+const arch = @import("arch.zig");
 const NumberPrefix = @import("byte_fmt.zig").NumberPrefix;
 
 const log = std.log;
@@ -40,12 +41,12 @@ export fn _start() callconv(.C) noreturn {
     // crash if bootloader is unsupported
     if (!base_revision.is_supported()) {
         log.scoped(.critical).err("bootloader unsupported", .{});
-        hcf();
+        arch.hcf();
     }
 
     const hhdm_response = hhdm.response orelse {
         log.scoped(.critical).err("no HHDM", .{});
-        hcf();
+        arch.hcf();
     };
     hhdm_offset = hhdm_response.offset;
 
@@ -54,7 +55,7 @@ export fn _start() callconv(.C) noreturn {
     };
 
     log.scoped(._start).info("done", .{});
-    hcf();
+    arch.hcf();
 }
 
 fn main() !void {
@@ -269,29 +270,3 @@ const Pixel = struct {
     green: u8,
     blue: u8,
 };
-
-pub inline fn hcf() noreturn {
-    while (true) {
-        asm volatile (
-            \\ cli
-            \\ hlt
-        );
-    }
-}
-
-pub fn outb(port: u16, byte: u8) void {
-    asm volatile (
-        \\ outb %[byte], %[port]
-        :
-        : [byte] "{al}" (byte),
-          [port] "N{dx}" (port),
-    );
-}
-
-pub fn inb(port: u16) u8 {
-    return asm volatile (
-        \\ inb %[port], %[byte]
-        : [byte] "={al}" (-> u8),
-        : [port] "N{dx}" (port),
-    );
-}

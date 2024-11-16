@@ -2,6 +2,7 @@ const std = @import("std");
 const limine = @import("limine");
 
 const main = @import("main.zig");
+const arch = @import("arch.zig");
 const lazy = @import("lazy.zig");
 const NumberPrefix = @import("byte_fmt.zig").NumberPrefix;
 
@@ -54,6 +55,9 @@ pub fn printInfo() void {
 
     std.log.scoped(.alloc).info("usable memory: {0any}B ({0any:.1024}B)", .{
         NumberPrefix(usize, .binary).new(usable_memory),
+    });
+    std.log.scoped(.alloc).info("bootloader (reclaimable) overhead: {any}B", .{
+        NumberPrefix(usize, .binary).new(reclaimable),
     });
     std.log.scoped(.alloc).info("bootloader (reclaimable) overhead: {any}B", .{
         NumberPrefix(usize, .binary).new(reclaimable),
@@ -214,7 +218,7 @@ fn init() void {
     var memory_bottom: usize = std.math.maxInt(usize);
     const memory_response: *limine.MemoryMapResponse = memory.response orelse {
         std.log.scoped(.alloc).err("no memory", .{});
-        main.hcf();
+        arch.hcf();
     };
 
     for (memory_response.entries()) |memory_map_entry| {
@@ -258,7 +262,7 @@ fn init() void {
     base = memory_bottom;
     page_refcounts = page_refcounts_null orelse {
         std.log.scoped(.alloc).err("not enough contiguous memory", .{});
-        main.hcf();
+        arch.hcf();
     };
     // std.log.scoped(.alloc).err("page_refcounts at: {*}", .{page_refcounts});
     for (page_refcounts) |*r| {
