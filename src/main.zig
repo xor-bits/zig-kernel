@@ -72,6 +72,11 @@ fn main() !void {
         NumberPrefix(usize, .binary).new(mem.totalPages() << 12),
     });
 
+    const gdt = try mem.page_allocator.create(arch.x86_64.Gdt);
+    gdt.* = arch.x86_64.Gdt.new();
+
+    gdt.load();
+
     // TODO: GDT + IDT
     // TODO: virtual memory mapper
     // TODO: cpu locals (rdpid, rdtscp)
