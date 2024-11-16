@@ -3,6 +3,7 @@ const limine = @import("limine");
 
 const main = @import("main.zig");
 const lazy = @import("lazy.zig");
+const NumberPrefix = @import("byte_fmt.zig").NumberPrefix;
 
 //
 
@@ -42,7 +43,9 @@ pub fn printInfo() void {
         std.log.scoped(.alloc).info("{s:>22}: [ 0x{x:0>16}..0x{x:0>16} ]", .{ ty, from, to });
     }
 
-    std.log.scoped(.alloc).info("usable memory: {d}kB", .{usable_memory >> 12});
+    std.log.scoped(.alloc).info("usable memory: {0any}B ({0any:.500})", .{
+        NumberPrefix(usize, .binary).new(usable_memory),
+    });
 }
 
 //
