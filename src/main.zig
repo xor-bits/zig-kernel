@@ -7,10 +7,22 @@ const uart = @import("uart.zig");
 const lazy = @import("lazy.zig");
 const mem = @import("alloc.zig");
 
+const log = std.log;
+
 //
 
 const Glyph = font.Glyph;
 const glyphs = font.glyphs;
+
+pub const std_options: std.Options = .{
+    .logFn = logFn,
+};
+
+fn logFn(comptime message_level: std.log.Level, comptime scope: @TypeOf(.enum_literal), comptime format: []const u8, args: anytype) void {
+    const level_txt = comptime message_level.asText();
+    const prefix2 = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
+    print(level_txt ++ prefix2 ++ format, args);
+}
 
 //
 
@@ -25,22 +37,26 @@ pub var hhdm_offset: usize = undefined;
 export fn _start() callconv(.C) noreturn {
     // crash if bootloader is unsupported
     if (!base_revision.is_supported()) {
-        uart.print("bootloader unsupported", .{});
+        log.scoped(.critical).err("bootloader unsupported", .{});
         hcf();
     }
 
-    hhdm_offset = hhdm.response.?.offset;
+    const hhdm_response = hhdm.response orelse {
+        log.scoped(.critical).err("no HHDM", .{});
+        hcf();
+    };
+    hhdm_offset = hhdm_response.offset;
 
     main() catch |err| {
-        print("error: {any}", .{err});
+        log.scoped(._start).err("failed to initialize: {any}", .{err});
     };
 
-    print("done", .{});
+    log.scoped(._start).info("done", .{});
     hcf();
 }
 
 fn main() !void {
-    print("kernel main", .{});
+    log.scoped(.main).info("kernel main", .{});
 
     const alloc = mem.page_allocator;
     var arena_state = std.heap.ArenaAllocator.init(alloc);
