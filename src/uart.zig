@@ -26,11 +26,10 @@ pub fn print(comptime fmt: []const u8, args: anytype) void {
     std.fmt.format(UartWriter{}, fmt, args) catch {};
 }
 
+var uart_lazy_init = lazy.LazyInit.new();
 fn init() void {
     uart_lazy_init.waitOrInit(Uart.init);
 }
-
-var uart_lazy_init = lazy.LazyInit.new();
 
 const Uart = struct {
     const PORT: u16 = 0x3f8;

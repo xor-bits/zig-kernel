@@ -59,8 +59,6 @@ export fn _start() callconv(.C) noreturn {
 fn main() !void {
     log.scoped(.main).info("kernel main", .{});
 
-    log.info("hellooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo", .{});
-
     const alloc = mem.page_allocator;
     var arena_state = std.heap.ArenaAllocator.init(alloc);
     defer arena_state.deinit();

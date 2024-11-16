@@ -31,6 +31,23 @@ pub const LazyInit = struct {
         }
     }
 
+    /// does not wait but can fail
+    pub fn getOrInit(self: *Self, init: *const fn () void) !void {
+        if (!self.isInitialized()) {
+            // very low chance to not be initialized (only the first time)
+            @setCold(true);
+
+            self.startInit() catch {
+                @setCold(true);
+                return error.NotInitialized;
+            };
+
+            init();
+
+            self.finishInit();
+        }
+    }
+
     pub fn isInitialized(self: *Self) bool {
         return @atomicLoad(bool, &self.initialized, std.builtin.AtomicOrder.acquire);
     }
