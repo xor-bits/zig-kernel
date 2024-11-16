@@ -5,6 +5,7 @@ const font = @import("font");
 
 const uart = @import("uart.zig");
 const lazy = @import("lazy.zig");
+const mem = @import("alloc.zig");
 
 //
 
@@ -13,11 +14,11 @@ const glyphs = font.glyphs;
 
 //
 
-pub export var framebuffer: limine.FramebufferRequest = .{};
-
 pub export var base_revision: limine.BaseRevision = .{ .revision = 2 };
+pub export var framebuffer: limine.FramebufferRequest = .{};
+pub export var hhdm: limine.HhdmRequest = .{};
 
-pub export var memory: limine.MemoryMapRequest = .{};
+pub var hhdm_offset: usize = undefined;
 
 //
 
@@ -27,6 +28,8 @@ export fn _start() callconv(.C) noreturn {
         uart.print("bootloader unsupported", .{});
         hcf();
     }
+
+    hhdm_offset = hhdm.response.?.offset;
 
     main() catch |err| {
         print("error: {any}", .{err});
@@ -38,6 +41,19 @@ export fn _start() callconv(.C) noreturn {
 
 fn main() !void {
     print("kernel main", .{});
+
+    const alloc = mem.page_allocator;
+    var arena_state = std.heap.ArenaAllocator.init(alloc);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const terminal = try arena.alloc(u8, 80 * 40);
+    for (terminal) |*b| {
+        // print("hhdm: {x}", .{hhdm_offset});
+        // print("ptr: {*}", .{b});
+        const _b: *volatile u8 = @volatileCast(b);
+        _b.* = 53;
+    }
 
     // TODO: page allocator
     // TODO: GDT + IDT
