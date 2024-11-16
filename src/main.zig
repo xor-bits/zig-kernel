@@ -1,9 +1,9 @@
 const std = @import("std");
 const limine = @import("limine");
-
-const font = @import("font");
+const Glyph = @import("font").Glyph;
 
 const uart = @import("uart.zig");
+const fb = @import("fb.zig");
 const lazy = @import("lazy.zig");
 const mem = @import("alloc.zig");
 
@@ -11,23 +11,23 @@ const log = std.log;
 
 //
 
-const Glyph = font.Glyph;
-const glyphs = font.glyphs;
-
 pub const std_options: std.Options = .{
     .logFn = logFn,
 };
 
 fn logFn(comptime message_level: std.log.Level, comptime scope: @TypeOf(.enum_literal), comptime format: []const u8, args: anytype) void {
     const level_txt = comptime message_level.asText();
-    const prefix2 = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
-    print(level_txt ++ prefix2 ++ format, args);
+    const fmt = "[ " ++ level_txt ++ if (scope == .default) "" else " " ++ @tagName(scope) ++ " ]: " ++ format ++ "\n";
+
+    uart.print(fmt, args);
+    if (scope != .critical) {
+        fb.print(fmt, args);
+    }
 }
 
 //
 
 pub export var base_revision: limine.BaseRevision = .{ .revision = 2 };
-pub export var framebuffer: limine.FramebufferRequest = .{};
 pub export var hhdm: limine.HhdmRequest = .{};
 
 pub var hhdm_offset: usize = undefined;
@@ -89,68 +89,6 @@ fn main() !void {
     // TODO: PCIe
     // TODO: USB
 }
-
-pub fn print(comptime fmt: []const u8, args: anytype) void {
-    uart.print(fmt, args);
-
-    const FbWriter = struct {
-        pub const Error = error{OutOfBounds};
-        pub const Self = @This();
-
-        pub fn writeAll(_: *const Self, bytes: []const u8) Error!void {
-            for (bytes) |b| {
-                if (b == '\n') {
-                    cursor_x = 5;
-                    cursor_y += 16;
-                    continue;
-                }
-
-                const letter = &glyphs[b];
-                var to = try fb.subimage(cursor_x, cursor_y, 8, 16);
-                to.fillGlyph(letter);
-                cursor_x += 8;
-            }
-        }
-
-        pub fn writeBytesNTimes(self: *const Self, bytes: []const u8, n: usize) !void {
-            for (0..n) |_| {
-                try self.writeAll(bytes);
-            }
-        }
-    };
-
-    fb_lazy_init.waitOrInit(init_fb);
-    std.fmt.format(FbWriter{}, fmt, args) catch {};
-    std.fmt.format(FbWriter{}, "\n", .{}) catch {};
-}
-
-fn init_fb() void {
-    // crash if there is no framebuffer response
-    const framebuffer_response = framebuffer.response orelse {
-        uart.print("no framebuffer", .{});
-        hcf();
-    };
-
-    // crash if there isn't at least 1 framebuffer
-    if (framebuffer_response.framebuffer_count < 1) {
-        uart.print("no framebuffer", .{});
-        hcf();
-    }
-
-    const fb_raw = framebuffer_response.framebuffers()[0];
-    fb = Image([*]volatile u8){
-        .width = @intCast(fb_raw.width),
-        .height = @intCast(fb_raw.height),
-        .pitch = @intCast(fb_raw.pitch),
-        .bits_per_pixel = fb_raw.bpp,
-        .pixel_array = fb_raw.address,
-    };
-}
-
-var cursor_x: u32 = 5;
-var cursor_y: u32 = 5;
-var fb: Image([*]volatile u8) = undefined;
-var fb_lazy_init = lazy.LazyInit.new();
 
 pub const Parser = struct {
     bytes: []const u8,
@@ -217,7 +155,7 @@ pub const Parser = struct {
     }
 };
 
-fn Image(storage: type) type {
+pub fn Image(storage: type) type {
     return struct {
         width: u32,
         height: u32,
@@ -227,11 +165,11 @@ fn Image(storage: type) type {
 
         const Self = @This();
 
-        fn debug(self: *const Self) void {
-            print("addr: {*}, size: {d}", .{ self.pixel_array, self.height * self.pitch });
+        pub fn debug(self: *const Self) void {
+            std.log.debug("addr: {*}, size: {d}", .{ self.pixel_array, self.height * self.pitch });
         }
 
-        fn subimage(self: *const Self, x: u32, y: u32, w: u32, h: u32) error{OutOfBounds}!Image(@TypeOf(self.pixel_array[0..])) {
+        pub fn subimage(self: *const Self, x: u32, y: u32, w: u32, h: u32) error{OutOfBounds}!Image(@TypeOf(self.pixel_array[0..])) {
             if (self.width < x + w or self.height < y + h) {
                 return error.OutOfBounds;
             }
@@ -247,7 +185,7 @@ fn Image(storage: type) type {
             };
         }
 
-        fn fill(self: *const Self, r: u8, g: u8, b: u8) void {
+        pub fn fill(self: *const Self, r: u8, g: u8, b: u8) void {
             const pixel = [4]u8{ r, g, b, 0 }; // 4 becomes a u32
             const pixel_size = self.bits_per_pixel / 8;
 
@@ -259,7 +197,7 @@ fn Image(storage: type) type {
             }
         }
 
-        fn fillGlyph(self: *const Self, glyph: *const Glyph) void {
+        pub fn fillGlyph(self: *const Self, glyph: *const Glyph) void {
             // if (self.width != 16) {
             //     return
             // }
@@ -276,7 +214,7 @@ fn Image(storage: type) type {
             }
         }
 
-        fn copyTo(from: *const Self, to: anytype) error{ SizeMismatch, BppMismatch }!void {
+        pub fn copyTo(from: *const Self, to: anytype) error{ SizeMismatch, BppMismatch }!void {
             if (from.width != to.width or from.height != to.height) {
                 return error.SizeMismatch;
             }
@@ -297,7 +235,7 @@ fn Image(storage: type) type {
             }
         }
 
-        fn copyPixelsTo(from: *const Self, to: anytype) error{SizeMismatch}!void {
+        pub fn copyPixelsTo(from: *const Self, to: anytype) error{SizeMismatch}!void {
             if (from.width != to.width or from.height != to.height) {
                 return error.SizeMismatch;
             }

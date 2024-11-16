@@ -4,9 +4,6 @@ const limine = @import("limine");
 const main = @import("main.zig");
 const lazy = @import("lazy.zig");
 
-const print = main.print;
-const hcf = main.hcf;
-
 //
 
 pub export var memory: limine.MemoryMapRequest = .{};
@@ -76,7 +73,7 @@ fn allocateContiguous(n_pages: usize) ?[]Page {
         return pages;
     }
 
-    print("OOM", .{});
+    std.log.scoped(.alloc).err("OOM", .{});
     return null;
 }
 
@@ -135,10 +132,10 @@ fn deallocateContiguousZeroed(pages: []Page) void {
 }
 
 fn allocate(refcount: *u8) bool {
-    // print("{any}", .{page_refcounts});
+    // std.log.scoped(.alloc).err("{any}", .{page_refcounts});
     // const bef = @atomicLoad(u8, refcount, std.builtin.AtomicOrder.acquire);
     const val = @cmpxchgStrong(u8, refcount, 0, 1, std.builtin.AtomicOrder.acquire, std.builtin.AtomicOrder.monotonic);
-    // print("{any} {any}", .{ bef, val });
+    // std.log.scoped(.alloc).err("{any} {any}", .{ bef, val });
     return val == null;
 }
 
@@ -153,8 +150,8 @@ fn init() void {
     var memory_top: usize = 0;
     var memory_bottom: usize = std.math.maxInt(usize);
     const memory_response: *limine.MemoryMapResponse = memory.response orelse {
-        print("no memory", .{});
-        hcf();
+        std.log.scoped(.alloc).err("no memory", .{});
+        main.hcf();
     };
 
     for (memory_response.entries()) |memory_map_entry| {
@@ -163,7 +160,7 @@ fn init() void {
         const len = to - from;
 
         const ty = @tagName(memory_map_entry.kind);
-        print("{s:>22}: [ 0x{x:0>16}..0x{x:0>16} ]", .{ ty, from, to });
+        std.log.scoped(.alloc).info("{s:>22}: [ 0x{x:0>16}..0x{x:0>16} ]", .{ ty, from, to });
 
         if (memory_map_entry.kind == .usable) {
             usable_memory += len;
@@ -176,12 +173,12 @@ fn init() void {
     }
 
     const memory_pages = (memory_top - memory_bottom) >> 12;
-    print("immediately usable memory: {d}kB", .{usable_memory >> 12});
-    print("usable memory: {d}kB", .{memory_pages});
-    print("usable range: [ 0x{x:0>16}..0x{x:0>16} ]", .{ memory_bottom, memory_top });
+    std.log.scoped(.alloc).info("immediately usable memory: {d}kB", .{usable_memory >> 12});
+    std.log.scoped(.alloc).info("usable memory: {d}kB", .{memory_pages});
+    std.log.scoped(.alloc).info("usable range: [ 0x{x:0>16}..0x{x:0>16} ]", .{ memory_bottom, memory_top });
 
     const page_refcounts_len: usize = memory_pages / @sizeOf(u8); // u8 is the physical page refcounter for forks
-    // print("page_refcounts size: {d}", .{page_refcounts_len});
+    // std.log.scoped(.alloc).err("page_refcounts size: {d}", .{page_refcounts_len});
 
     var page_refcounts_null: ?[]u8 = null;
     for (memory_response.entries()) |memory_map_entry| {
@@ -199,15 +196,15 @@ fn init() void {
     }
     base = memory_bottom;
     page_refcounts = page_refcounts_null orelse {
-        print("not enough contiguous memory", .{});
-        hcf();
+        std.log.scoped(.alloc).err("not enough contiguous memory", .{});
+        main.hcf();
     };
-    // print("page_refcounts at: {*}", .{page_refcounts});
+    // std.log.scoped(.alloc).err("page_refcounts at: {*}", .{page_refcounts});
     for (page_refcounts) |*r| {
         r.* = 1;
     }
 
-    // print("zeroed", .{});
+    // std.log.scoped(.alloc).err("zeroed", .{});
     for (memory_response.entries()) |memory_map_entry| {
         if (memory_map_entry.kind == .usable) {
             const first_page = physToIndex(memory_map_entry.base) catch unreachable;
@@ -218,7 +215,7 @@ fn init() void {
         }
     }
 
-    print("PFA initialized", .{});
+    std.log.scoped(.alloc).info("PFA initialized", .{});
 }
 
 //
@@ -231,7 +228,7 @@ fn _alloc(_: *anyopaque, len: usize, ptr_align: u8, ret_addr: usize) ?[*]u8 {
     const aligned_len = std.mem.alignForward(usize, len, 1 << 12);
     if (ptr_align > aligned_len) {
         @setCold(true);
-        print("FIXME: page alloc with higher than page size alignment", .{});
+        std.log.scoped(.alloc).err("FIXME: page alloc with higher than page size alignment", .{});
         return null;
     }
 
@@ -244,7 +241,7 @@ fn _alloc(_: *anyopaque, len: usize, ptr_align: u8, ret_addr: usize) ?[*]u8 {
 
 fn _resize(_: *anyopaque, buf: []u8, buf_align: u8, new_len: usize, ret_addr: usize) bool {
     _ = .{ buf, buf_align, new_len, ret_addr };
-    print("FIXME: resize", .{});
+    std.log.scoped(.alloc).err("FIXME: resize", .{});
     // TODO:
     return false;
 }

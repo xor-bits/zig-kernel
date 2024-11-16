@@ -24,7 +24,6 @@ pub fn print(comptime fmt: []const u8, args: anytype) void {
     };
 
     std.fmt.format(UartWriter{}, fmt, args) catch {};
-    Uart.writeByte('\n');
 }
 
 fn init() void {
