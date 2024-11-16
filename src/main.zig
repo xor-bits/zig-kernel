@@ -17,7 +17,8 @@ pub const std_options: std.Options = .{
 
 fn logFn(comptime message_level: std.log.Level, comptime scope: @TypeOf(.enum_literal), comptime format: []const u8, args: anytype) void {
     const level_txt = comptime message_level.asText();
-    const fmt = "[ " ++ level_txt ++ if (scope == .default) "" else " " ++ @tagName(scope) ++ " ]: " ++ format ++ "\n";
+    const scope_txt = if (scope == .default) "" else " " ++ @tagName(scope);
+    const fmt = "[ " ++ level_txt ++ scope_txt ++ " ]: " ++ format ++ "\n";
 
     uart.print(fmt, args);
     if (scope != .critical) {
@@ -57,6 +58,8 @@ export fn _start() callconv(.C) noreturn {
 
 fn main() !void {
     log.scoped(.main).info("kernel main", .{});
+
+    log.info("hellooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo", .{});
 
     const alloc = mem.page_allocator;
     var arena_state = std.heap.ArenaAllocator.init(alloc);
