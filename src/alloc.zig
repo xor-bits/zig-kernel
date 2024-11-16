@@ -26,6 +26,27 @@ pub const Page = [512]u64;
 
 //
 
+pub fn printInfo() void {
+    const memory_response: *limine.MemoryMapResponse = memory.response orelse {
+        return;
+    };
+
+    var usable_memory: usize = 0;
+    for (memory_response.entries()) |memory_map_entry| {
+        const from = memory_map_entry.base;
+        const to = memory_map_entry.base + memory_map_entry.length;
+        const len = memory_map_entry.length;
+
+        usable_memory += len;
+        const ty = @tagName(memory_map_entry.kind);
+        std.log.scoped(.alloc).info("{s:>22}: [ 0x{x:0>16}..0x{x:0>16} ]", .{ ty, from, to });
+    }
+
+    std.log.scoped(.alloc).info("usable memory: {d}kB", .{usable_memory >> 12});
+}
+
+//
+
 /// tells if the frame allocator can be used already
 var pfa_lazy_init = lazy.LazyInit.new();
 
@@ -145,6 +166,10 @@ fn deallocate(refcount: *u8) void {
 
 //
 
+fn tryInit() void {
+    pfa_lazy_init.waitOrInit(init);
+}
+
 fn init() void {
     var usable_memory: usize = 0;
     var memory_top: usize = 0;
@@ -155,12 +180,15 @@ fn init() void {
     };
 
     for (memory_response.entries()) |memory_map_entry| {
-        const from = std.mem.alignBackward(usize, memory_map_entry.base, 1 << 12);
-        const to = std.mem.alignForward(usize, memory_map_entry.base + memory_map_entry.length, 1 << 12);
-        const len = to - from;
+        // const from = std.mem.alignBackward(usize, memory_map_entry.base, 1 << 12);
+        // const to = std.mem.alignForward(usize, memory_map_entry.base + memory_map_entry.length, 1 << 12);
+        // const len = to - from;
+        const from = memory_map_entry.base;
+        const to = memory_map_entry.base + memory_map_entry.length;
+        const len = memory_map_entry.length;
 
-        const ty = @tagName(memory_map_entry.kind);
-        std.log.scoped(.alloc).info("{s:>22}: [ 0x{x:0>16}..0x{x:0>16} ]", .{ ty, from, to });
+        // const ty = @tagName(memory_map_entry.kind);
+        // std.log.scoped(.alloc).info("{s:>22}: [ 0x{x:0>16}..0x{x:0>16} ]", .{ ty, from, to });
 
         if (memory_map_entry.kind == .usable) {
             usable_memory += len;
@@ -173,12 +201,7 @@ fn init() void {
     }
 
     const memory_pages = (memory_top - memory_bottom) >> 12;
-    std.log.scoped(.alloc).info("immediately usable memory: {d}kB", .{usable_memory >> 12});
-    std.log.scoped(.alloc).info("usable memory: {d}kB", .{memory_pages});
-    std.log.scoped(.alloc).info("usable range: [ 0x{x:0>16}..0x{x:0>16} ]", .{ memory_bottom, memory_top });
-
     const page_refcounts_len: usize = memory_pages / @sizeOf(u8); // u8 is the physical page refcounter for forks
-    // std.log.scoped(.alloc).err("page_refcounts size: {d}", .{page_refcounts_len});
 
     var page_refcounts_null: ?[]u8 = null;
     for (memory_response.entries()) |memory_map_entry| {
@@ -214,8 +237,6 @@ fn init() void {
             }
         }
     }
-
-    std.log.scoped(.alloc).info("PFA initialized", .{});
 }
 
 //
@@ -223,7 +244,7 @@ fn init() void {
 fn _alloc(_: *anyopaque, len: usize, ptr_align: u8, ret_addr: usize) ?[*]u8 {
     _ = ret_addr;
 
-    pfa_lazy_init.waitOrInit(init);
+    tryInit();
 
     const aligned_len = std.mem.alignForward(usize, len, 1 << 12);
     if (ptr_align > aligned_len) {

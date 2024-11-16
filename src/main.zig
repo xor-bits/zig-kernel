@@ -59,20 +59,8 @@ export fn _start() callconv(.C) noreturn {
 fn main() !void {
     log.scoped(.main).info("kernel main", .{});
 
-    const alloc = mem.page_allocator;
-    var arena_state = std.heap.ArenaAllocator.init(alloc);
-    defer arena_state.deinit();
-    const arena = arena_state.allocator();
+    mem.printInfo();
 
-    const terminal = try arena.alloc(u8, 80 * 40);
-    for (terminal) |*b| {
-        // print("hhdm: {x}", .{hhdm_offset});
-        // print("ptr: {*}", .{b});
-        const _b: *volatile u8 = @volatileCast(b);
-        _b.* = 53;
-    }
-
-    // TODO: page allocator
     // TODO: GDT + IDT
     // TODO: virtual memory mapper
     // TODO: cpu locals (rdpid, rdtscp)
