@@ -36,7 +36,9 @@ pub const LazyInit = struct {
     }
 
     pub fn wait(self: *Self) void {
-        while (!self.isInitialized()) {}
+        while (!self.isInitialized()) {
+            std.atomic.spinLoopHint();
+        }
     }
 
     pub fn startInit(self: *Self) !void {
