@@ -62,10 +62,10 @@ pub fn print(comptime fmt: []const u8, args: anytype) void {
     uart.print(fmt, args);
 
     const FbWriter = struct {
-        pub const Error = error{};
+        pub const Error = error{OutOfBounds};
         pub const Self = @This();
 
-        pub fn writeAll(_: *const Self, bytes: []const u8) !void {
+        pub fn writeAll(_: *const Self, bytes: []const u8) Error!void {
             for (bytes) |b| {
                 if (b == '\n') {
                     cursor_x = 5;
