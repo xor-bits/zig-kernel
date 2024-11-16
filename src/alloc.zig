@@ -34,6 +34,7 @@ pub fn printInfo() void {
 
     var usable_memory: usize = 0;
     var kernel_usage: usize = 0;
+    var reclaimable: usize = 0;
     for (memory_response.entries()) |memory_map_entry| {
         const from = memory_map_entry.base;
         const to = memory_map_entry.base + memory_map_entry.length;
@@ -41,15 +42,21 @@ pub fn printInfo() void {
 
         if (memory_map_entry.kind == .kernel_and_modules) {
             kernel_usage += len;
+        } else if (memory_map_entry.kind == .usable) {
+            usable_memory += len;
+        } else if (memory_map_entry.kind == .bootloader_reclaimable) {
+            reclaimable += len;
         }
 
-        usable_memory += len;
         const ty = @tagName(memory_map_entry.kind);
         std.log.scoped(.alloc).info("{s:>22}: [ 0x{x:0>16}..0x{x:0>16} ]", .{ ty, from, to });
     }
 
-    std.log.scoped(.alloc).info("usable memory: {0any}B ({0any:.500})", .{
+    std.log.scoped(.alloc).info("usable memory: {0any}B ({0any:.1024}B)", .{
         NumberPrefix(usize, .binary).new(usable_memory),
+    });
+    std.log.scoped(.alloc).info("bootloader (reclaimable) overhead: {any}B", .{
+        NumberPrefix(usize, .binary).new(reclaimable),
     });
     std.log.scoped(.alloc).info("page allocator overhead: {any}B", .{
         NumberPrefix(usize, .binary).new(page_refcounts.len),
