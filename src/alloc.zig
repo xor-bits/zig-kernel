@@ -33,10 +33,15 @@ pub fn printInfo() void {
     };
 
     var usable_memory: usize = 0;
+    var kernel_usage: usize = 0;
     for (memory_response.entries()) |memory_map_entry| {
         const from = memory_map_entry.base;
         const to = memory_map_entry.base + memory_map_entry.length;
         const len = memory_map_entry.length;
+
+        if (memory_map_entry.kind == .kernel_and_modules) {
+            kernel_usage += len;
+        }
 
         usable_memory += len;
         const ty = @tagName(memory_map_entry.kind);
@@ -46,6 +51,24 @@ pub fn printInfo() void {
     std.log.scoped(.alloc).info("usable memory: {0any}B ({0any:.500})", .{
         NumberPrefix(usize, .binary).new(usable_memory),
     });
+    std.log.scoped(.alloc).info("page allocator overhead: {any}B", .{
+        NumberPrefix(usize, .binary).new(page_refcounts.len),
+    });
+    std.log.scoped(.alloc).info("kernel code overhead: {any}B", .{
+        NumberPrefix(usize, .binary).new(kernel_usage),
+    });
+}
+
+pub fn usedPages() usize {
+    return @atomicLoad(usize, &used, std.builtin.AtomicOrder.monotonic);
+}
+
+pub fn freePages() usize {
+    return totalPages() - usedPages();
+}
+
+pub fn totalPages() usize {
+    return usable;
 }
 
 //
@@ -62,6 +85,12 @@ var page_refcounts: []u8 = undefined;
 /// just an atomic index hint to rotate around the memory instead of starting the
 /// finding process from 0 every time, because pages arent usually freed almost instantly
 var next: usize = 0;
+
+/// how many pages are currently in use (approx)
+var used: usize = 0;
+
+/// how many pages are usable
+var usable: usize = 0;
 
 fn physToPtr(comptime T: type, phys: usize) *T {
     return @ptrFromInt(phys + main.hhdm_offset);
@@ -131,6 +160,7 @@ fn allocateContiguousFrom(n_pages: usize, from: usize) ?[]Page {
                 break;
             }
         } else {
+            _ = @atomicRmw(usize, &used, std.builtin.AtomicRmwOp.Add, n_pages, std.builtin.AtomicOrder.monotonic);
             const pages: [*]Page = @ptrCast(physToPtr(Page, base + first_page * (1 << 12)));
             return pages[0..n_pages];
         }
@@ -146,6 +176,7 @@ fn deallocateContiguous(pages: []Page) void {
         const page_i = physToIndex(ptrToPhys(page)) catch unreachable;
         deallocate(&page_refcounts[page_i]);
     }
+    _ = @atomicRmw(usize, &used, std.builtin.AtomicRmwOp.Sub, pages.len, std.builtin.AtomicOrder.monotonic);
 }
 
 fn deallocateContiguousZeroed(pages: []Page) void {
@@ -153,14 +184,11 @@ fn deallocateContiguousZeroed(pages: []Page) void {
         const page_i = physToIndex(ptrToPhys(page)) catch unreachable;
         deallocate(&page_refcounts[page_i]);
     }
+    _ = @atomicRmw(usize, &used, std.builtin.AtomicRmwOp.Sub, pages.len, std.builtin.AtomicOrder.monotonic);
 }
 
 fn allocate(refcount: *u8) bool {
-    // std.log.scoped(.alloc).err("{any}", .{page_refcounts});
-    // const bef = @atomicLoad(u8, refcount, std.builtin.AtomicOrder.acquire);
-    const val = @cmpxchgStrong(u8, refcount, 0, 1, std.builtin.AtomicOrder.acquire, std.builtin.AtomicOrder.monotonic);
-    // std.log.scoped(.alloc).err("{any} {any}", .{ bef, val });
-    return val == null;
+    return null == @cmpxchgStrong(u8, refcount, 0, 1, std.builtin.AtomicOrder.acquire, std.builtin.AtomicOrder.monotonic);
 }
 
 fn deallocate(refcount: *u8) void {
@@ -238,6 +266,7 @@ fn init() void {
             for (first_page..first_page + n_pages) |page| {
                 page_refcounts[page] = 0;
             }
+            usable += n_pages;
         }
     }
 }

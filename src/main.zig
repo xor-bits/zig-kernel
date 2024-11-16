@@ -6,6 +6,7 @@ const uart = @import("uart.zig");
 const fb = @import("fb.zig");
 const lazy = @import("lazy.zig");
 const mem = @import("alloc.zig");
+const NumberPrefix = @import("byte_fmt.zig").NumberPrefix;
 
 const log = std.log;
 
@@ -60,6 +61,15 @@ fn main() !void {
     log.scoped(.main).info("kernel main", .{});
 
     mem.printInfo();
+    log.scoped(.main).info("used memory: {any}B", .{
+        NumberPrefix(usize, .binary).new(mem.usedPages() << 12),
+    });
+    log.scoped(.main).info("free memory: {any}B", .{
+        NumberPrefix(usize, .binary).new(mem.freePages() << 12),
+    });
+    log.scoped(.main).info("total memory: {any}B", .{
+        NumberPrefix(usize, .binary).new(mem.totalPages() << 12),
+    });
 
     // TODO: GDT + IDT
     // TODO: virtual memory mapper
