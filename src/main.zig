@@ -28,6 +28,12 @@ fn logFn(comptime message_level: std.log.Level, comptime scope: @TypeOf(.enum_li
     }
 }
 
+pub fn panic(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace, ret_addr: ?usize) noreturn {
+    _ = error_return_trace;
+    log.scoped(.panic).err("CPU panicked: {s} ({?x})", .{ msg, ret_addr });
+    arch.hcf();
+}
+
 //
 
 pub export var base_revision: limine.BaseRevision = .{ .revision = 2 };
