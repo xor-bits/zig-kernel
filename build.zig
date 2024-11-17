@@ -50,6 +50,8 @@ pub fn build(b: *std.Build) !void {
     kernel_elf_step.root_module.addImport("limine", b.dependency("limine", .{}).module("limine"));
     kernel_elf_step.root_module.addAnonymousImport("font", .{ .root_source_file = font_zig });
 
+    b.installArtifact(kernel_elf_step);
+
     // clone & configure limine (WARNING: this runs a Makefile from a dependency at compile time)
     const limine_bootloader_pkg = b.dependency("limine_bootloader", .{});
     const limine_step = b.addSystemCommand(&.{
@@ -137,6 +139,9 @@ pub fn build(b: *std.Build) !void {
     });
     qemu_step.addPrefixedFileArg("format=raw,file=", os_iso);
     qemu_step.step.dependOn(&limine_install_step.step);
+
+    const install_iso = b.addInstallFile(os_iso, "os.iso");
+    b.getInstallStep().dependOn(&install_iso.step);
 
     const run_step = b.step("run", "Run in QEMU");
     run_step.dependOn(&qemu_step.step);
