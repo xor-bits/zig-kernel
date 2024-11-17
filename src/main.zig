@@ -64,6 +64,11 @@ export fn _start() callconv(.C) noreturn {
     arch.hcf();
 }
 
+// pub fn blackBox(comptime T: type, value: anytype) T {
+//     asm volatile ("" ::: "memory");
+//     return value;
+// }
+
 fn main() !void {
     log.scoped(.main).info("kernel main", .{});
 
@@ -80,8 +85,17 @@ fn main() !void {
 
     const gdt = try mem.page_allocator.create(arch.x86_64.Gdt);
     gdt.* = arch.x86_64.Gdt.new();
-
     gdt.load();
+
+    const idt = try mem.page_allocator.create(arch.x86_64.Idt);
+    idt.* = arch.x86_64.Idt.new();
+    idt.load();
+
+    arch.x86_64.ints.int3();
+
+    asm volatile (
+        \\ mov %rax, (0)
+    );
 
     // TODO: GDT + IDT
     // TODO: virtual memory mapper
