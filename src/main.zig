@@ -83,13 +83,7 @@ fn main() !void {
         NumberPrefix(usize, .binary).new(mem.totalPages() << 12),
     });
 
-    const gdt = try mem.page_allocator.create(arch.x86_64.Gdt);
-    gdt.* = arch.x86_64.Gdt.new();
-    gdt.load();
-
-    const idt = try mem.page_allocator.create(arch.x86_64.Idt);
-    idt.* = arch.x86_64.Idt.new();
-    idt.load();
+    try arch.init();
 
     arch.x86_64.ints.int3();
 
@@ -97,9 +91,7 @@ fn main() !void {
         \\ mov %rax, (0)
     );
 
-    // TODO: GDT + IDT
     // TODO: virtual memory mapper
-    // TODO: cpu locals (rdpid, rdtscp)
     // TODO: ACPI + APIC + HPET
     // TODO: scheduler
     // TODO: flat binary loader
