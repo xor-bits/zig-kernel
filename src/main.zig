@@ -93,20 +93,76 @@ fn main() !void {
         \\ mov %rax, (0)
     );
 
-    // TODO: virtual memory mapper
-    // TODO: ACPI + APIC + HPET
-    // TODO: scheduler
-    // TODO: flat binary loader
-    // TODO: userland
-    // TODO: syscalls
-    // TODO: IPC
-    // TODO: elf64 loader
-    // TODO: RDRAND,RDSEED,PRNG,CRNG
-    // TODO: vfs
-    // TODO: ps2 interrupts (kb&m)
-    // TODO: RTC time
-    // TODO: PCIe
-    // TODO: USB
+    // NOTE: /path/to/something is a short form for fs:///path/to/something
+    // TODO: kernel
+    //  - virtual memory mapping
+    //  - ACPI, APIC, HPET
+    //  - scheduler
+    //  - binary loader
+    //  - message IPC, shared memory IPC
+    //  - userland
+    //  - figure out userland interrupts (ps2 keyboard, ..)
+    //  - syscalls:
+    //    - syscall for bootstrap to grow the heap
+    //    - syscall to print logs
+    //    - syscall to exec a binary (based on a provided mem map)
+    //    - syscall to create a vfs proto
+    //    - syscall to accept a vfs proto cmd
+    //    - syscall to return a vfs proto cmd result
+    //    - syscall to read the root kernel cli arg
+    //    - syscalls for unix sockets
+    //
+    // TODO: bootstrap/initfsd process
+    //  - map flat binary to 0x200_000
+    //  - map initfs.tar.gz to 0x400_000
+    //  - map heap to 0x1_000_000
+    //  - enter bootstrap in ring3
+    //  - inflate&initialize initfs in heap
+    //  - create initfs:// vfs proto
+    //  - exec flat binary initfs:///sbin/initd
+    //  - rename to initfsd
+    //  - start processing vfs proto cmds
+    //
+    // TODO: initfs:///sbin/initd process
+    //  - launch initfs:///sbin/rngd
+    //  - launch initfs:///sbin/vfsd
+    //  - launch services from initfs://
+    //  // - launch /bin/wm
+    //
+    // TODO: initfs:///sbin/rngd process
+    //  - create rng:// vfs proto
+    //  - start processing vfs proto cmds
+    //
+    // TODO: /sbin/inputd process
+    //
+    // TODO: /sbin/outputd process
+    //
+    // TODO: /sbin/kbd process
+    //
+    // TODO: /sbin/moused process
+    //
+    // TODO: /sbin/timed process
+    //
+    // TODO: /sbin/fbd process
+    //
+    // TODO: /sbin/pcid process
+    //
+    // TODO: /sbin/usbd process
+    //
+    // TODO: initfs:///sbin/vfsd process
+    //  - create fs:// vfs proto
+    //  - get the root device with syscall (either device or fstab for initfs:///etc/fstab)
+    //  - exec required root filesystem drivers
+    //  - mount root (root= kernel cli arg) to /
+    //  - remount root using /etc/fstab
+    //  - exec other filesystem drivers lazily
+    //  - mount everything according to /etc/fstab
+    //  - start processing vfs proto cmds
+    //
+    // TODO: initfs:///sbin/fsd.fat32
+    //  - connect to the /sbin/vfsd process using a unix socket
+    //  - register a fat32 filesystem
+    //  - start processing cmds
 }
 
 pub const Parser = struct {
