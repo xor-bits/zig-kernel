@@ -25,3 +25,9 @@ pub inline fn init() error{OutOfMemory}!void {
     }
 }
 var cpu_id_next = std.atomic.Value(usize).init(0);
+
+pub inline fn reset() void {
+    if (builtin.cpu.arch == .x86_64) {
+        x86_64.reset();
+    }
+}

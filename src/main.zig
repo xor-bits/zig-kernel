@@ -87,6 +87,8 @@ fn main() !void {
 
     arch.x86_64.ints.int3();
 
+    arch.reset();
+
     asm volatile (
         \\ mov %rax, (0)
     );

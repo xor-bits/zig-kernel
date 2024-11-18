@@ -251,6 +251,18 @@ pub fn cpu_id() u32 {
     }
 }
 
+pub fn reset() void {
+    std.log.info("triple fault reset", .{});
+    ints.disable();
+    // load 0 size IDT
+    var idt = Idt.new();
+    idt.load(0);
+    // enable interrupts
+    ints.enable();
+    // and cause a triple fault if it hasn't already happened
+    ints.int3();
+}
+
 pub const GdtDescriptor = packed struct {
     raw: u64,
 
@@ -493,10 +505,10 @@ pub const Idt = extern struct {
         };
     }
 
-    pub fn load(self: *Self) void {
+    pub fn load(self: *Self, size_override: ?u16) void {
         self.ptr = .{
             .base = @intFromPtr(&self.entries),
-            .limit = 256 * @sizeOf(Entry) - 1,
+            .limit = size_override orelse (256 * @sizeOf(Entry) - 1),
         };
         loadRaw(&self.ptr.limit);
     }
@@ -543,15 +555,13 @@ pub const CpuConfig = struct {
         // extremely important to disable interrupts before modifying GDT
         ints.disable();
         self.gdt.load();
-        self.idt.load();
+        self.idt.load(null);
         ints.enable();
 
         std.log.info("cpu_id: {d} cpuconfig size: {d}", .{ this_cpu_id, @sizeOf(CpuConfig) });
 
         wrmsr(IA32_TCS_AUX, this_cpu_id);
-        std.log.info("PID: {d}", .{this_cpu_id()});
-
-        std.debug.panic("manual panic", .{});
+        std.log.info("PID: {d}", .{cpu_id()});
     }
 };
 
