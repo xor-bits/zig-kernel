@@ -104,11 +104,11 @@ var used: usize = 0;
 var usable: usize = 0;
 
 fn physToPtr(comptime T: type, phys: usize) *T {
-    return @ptrFromInt(phys + main.hhdm_offset);
+    return @ptrFromInt(phys + main.hhdm_offset.load(.monotonic));
 }
 
 fn ptrToPhys(ptr: *anyopaque) usize {
-    return @intFromPtr(ptr) - main.hhdm_offset;
+    return @intFromPtr(ptr) - main.hhdm_offset.load(.monotonic);
 }
 
 fn physToIndex(phys: usize) !usize {

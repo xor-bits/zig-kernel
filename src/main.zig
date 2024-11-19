@@ -39,7 +39,7 @@ pub fn panic(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace, ret_
 pub export var base_revision: limine.BaseRevision = .{ .revision = 2 };
 pub export var hhdm: limine.HhdmRequest = .{};
 
-pub var hhdm_offset: usize = undefined;
+pub var hhdm_offset = std.atomic.Value(usize).init(undefined);
 
 //
 
@@ -54,7 +54,8 @@ export fn _start() callconv(.C) noreturn {
         log.scoped(.critical).err("no HHDM", .{});
         arch.hcf();
     };
-    hhdm_offset = hhdm_response.offset;
+    hhdm_offset.store(hhdm_response.offset, .seq_cst);
+    @fence(.seq_cst);
 
     main() catch |err| {
         log.scoped(._start).err("failed to initialize: {any}", .{err});
