@@ -71,7 +71,7 @@ pub fn printInfo() void {
 }
 
 pub fn usedPages() usize {
-    return @atomicLoad(usize, &used, std.builtin.AtomicOrder.monotonic);
+    return used.load(.monotonic);
 }
 
 pub fn freePages() usize {
@@ -79,7 +79,7 @@ pub fn freePages() usize {
 }
 
 pub fn totalPages() usize {
-    return usable;
+    return usable.load(.monotonic);
 }
 
 //
@@ -91,17 +91,17 @@ var pfa_lazy_init = lazy.LazyInit.new();
 var base: usize = undefined;
 
 /// each page has a ref counter, 0 = not allocated, N = N process(es) is using it
-var page_refcounts: []u8 = undefined;
+var page_refcounts: []std.atomic.Value(u8) = undefined;
 
 /// just an atomic index hint to rotate around the memory instead of starting the
 /// finding process from 0 every time, because pages arent usually freed almost instantly
-var next: usize = 0;
+var next = std.atomic.Value(usize).init(0);
 
 /// how many pages are currently in use (approx)
-var used: usize = 0;
+var used = std.atomic.Value(usize).init(0);
 
 /// how many pages are usable
-var usable: usize = 0;
+var usable = std.atomic.Value(usize).init(0);
 
 fn physToPtr(comptime T: type, phys: usize) *T {
     return @ptrFromInt(phys + main.hhdm_offset.load(.monotonic));
@@ -121,13 +121,7 @@ fn physToIndex(phys: usize) !usize {
 }
 
 fn allocateContiguous(n_pages: usize) ?[]Page {
-    const hint = @atomicRmw(
-        usize,
-        &next,
-        std.builtin.AtomicRmwOp.Add,
-        n_pages,
-        std.builtin.AtomicOrder.monotonic,
-    ) % page_refcounts.len;
+    const hint = next.fetchAdd(n_pages, .monotonic) % page_refcounts.len;
 
     if (allocateContiguousFrom(n_pages, hint)) |pages| {
         return pages;
@@ -171,7 +165,7 @@ fn allocateContiguousFrom(n_pages: usize, from: usize) ?[]Page {
                 break;
             }
         } else {
-            _ = @atomicRmw(usize, &used, std.builtin.AtomicRmwOp.Add, n_pages, std.builtin.AtomicOrder.monotonic);
+            _ = used.fetchAdd(n_pages, .monotonic);
             const pages: [*]Page = @ptrCast(physToPtr(Page, base + first_page * (1 << 12)));
             return pages[0..n_pages];
         }
@@ -187,7 +181,8 @@ fn deallocateContiguous(pages: []Page) void {
         const page_i = physToIndex(ptrToPhys(page)) catch unreachable;
         deallocate(&page_refcounts[page_i]);
     }
-    _ = @atomicRmw(usize, &used, std.builtin.AtomicRmwOp.Sub, pages.len, std.builtin.AtomicOrder.monotonic);
+
+    _ = used.fetchSub(pages.len, .monotonic);
 }
 
 fn deallocateContiguousZeroed(pages: []Page) void {
@@ -195,15 +190,16 @@ fn deallocateContiguousZeroed(pages: []Page) void {
         const page_i = physToIndex(ptrToPhys(page)) catch unreachable;
         deallocate(&page_refcounts[page_i]);
     }
-    _ = @atomicRmw(usize, &used, std.builtin.AtomicRmwOp.Sub, pages.len, std.builtin.AtomicOrder.monotonic);
+
+    _ = used.fetchSub(pages.len, .monotonic);
 }
 
-fn allocate(refcount: *u8) bool {
-    return null == @cmpxchgStrong(u8, refcount, 0, 1, std.builtin.AtomicOrder.acquire, std.builtin.AtomicOrder.monotonic);
+fn allocate(refcount: *std.atomic.Value(u8)) bool {
+    return null == refcount.cmpxchgStrong(0, 1, .acquire, .monotonic);
 }
 
-fn deallocate(refcount: *u8) void {
-    @atomicStore(u8, refcount, 0, std.builtin.AtomicOrder.release);
+fn deallocate(refcount: *std.atomic.Value(u8)) void {
+    refcount.store(0, .release);
 }
 
 //
@@ -245,14 +241,14 @@ fn init() void {
     const memory_pages = (memory_top - memory_bottom) >> 12;
     const page_refcounts_len: usize = memory_pages / @sizeOf(u8); // u8 is the physical page refcounter for forks
 
-    var page_refcounts_null: ?[]u8 = null;
+    var page_refcounts_null: ?[]std.atomic.Value(u8) = null;
     for (memory_response.entries()) |memory_map_entry| {
         if (memory_map_entry.kind != .usable) {
             continue;
         }
 
         if (memory_map_entry.length >= page_refcounts_len) {
-            const ptr: [*]u8 = @ptrCast(physToPtr(u8, memory_map_entry.base));
+            const ptr: [*]std.atomic.Value(u8) = @ptrCast(physToPtr(u8, memory_map_entry.base));
             page_refcounts_null = ptr[0..page_refcounts_len];
             memory_map_entry.base += page_refcounts_len;
             memory_map_entry.length -= page_refcounts_len;
@@ -266,7 +262,7 @@ fn init() void {
     };
     // std.log.scoped(.alloc).err("page_refcounts at: {*}", .{page_refcounts});
     for (page_refcounts) |*r| {
-        r.* = 1;
+        r.store(1, .seq_cst);
     }
 
     // std.log.scoped(.alloc).err("zeroed", .{});
@@ -275,9 +271,10 @@ fn init() void {
             const first_page = physToIndex(memory_map_entry.base) catch unreachable;
             const n_pages = memory_map_entry.length >> 12;
             for (first_page..first_page + n_pages) |page| {
-                page_refcounts[page] = 0;
+                page_refcounts[page].store(0, .seq_cst);
             }
-            usable += n_pages;
+
+            _ = usable.fetchAdd(n_pages, .monotonic);
         }
     }
 }
