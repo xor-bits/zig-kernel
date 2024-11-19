@@ -7,6 +7,7 @@ const fb = @import("fb.zig");
 const lazy = @import("lazy.zig");
 const pmem = @import("pmem.zig");
 const arch = @import("arch.zig");
+const acpi = @import("acpi.zig");
 const NumberPrefix = @import("byte_fmt.zig").NumberPrefix;
 
 //
@@ -96,6 +97,10 @@ fn main() void {
     };
 
     arch.x86_64.ints.int3();
+
+    acpi.init() catch |err| {
+        std.debug.panic("failed to initialize ACPI: {any}", .{err});
+    };
 
     arch.reset();
 
