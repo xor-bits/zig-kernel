@@ -22,6 +22,7 @@
             qemu_full
           ];
 
+          OVMF_FD = "${pkgs.OVMF.fd}/FV/OVMF.fd";
           LD_LIBRARY_PATH = "${pkgs.lib.makeLibraryPath buildInputs}";
         };
       }

@@ -124,8 +124,6 @@ pub fn build(b: *std.Build) !void {
         "stdio",
         "-rtc",
         "base=localtime",
-        // "-bios",
-        // "/usr/share/ovmf/x64/OVMF.fd",
         "-vga",
         "std",
         "-display",
@@ -139,6 +137,16 @@ pub fn build(b: *std.Build) !void {
     });
     qemu_step.addPrefixedFileArg("format=raw,file=", os_iso);
     qemu_step.step.dependOn(&limine_install_step.step);
+
+    const use_ovmf = b.option(
+        bool,
+        "uefi",
+        "use OVMF UEFI to boot in QEMU (OVMF is slower, but has more features) (default: false)",
+    ) orelse false;
+    if (use_ovmf) {
+        const ovmf_fd = std.posix.getenv("OVMF_FD") orelse "/usr/share/ovmf/x64/OVMF.fd";
+        qemu_step.addArgs(&.{ "-bios", ovmf_fd });
+    }
 
     const install_iso = b.addInstallFile(os_iso, "os.iso");
     b.getInstallStep().dependOn(&install_iso.step);
