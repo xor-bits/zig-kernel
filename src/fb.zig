@@ -4,7 +4,7 @@ const font = @import("font");
 
 const main = @import("main.zig");
 const lazy = @import("lazy.zig");
-const alloc = @import("alloc.zig");
+const pmem = @import("pmem.zig");
 const uart = @import("uart.zig");
 const arch = @import("arch.zig");
 
@@ -79,7 +79,7 @@ fn init_fb() void {
         .h = fb.height / 16,
     };
     const terminal_buf_size = terminal_size.w * terminal_size.h;
-    const whole_terminal_buf = alloc.page_allocator.alloc(u8, terminal_buf_size * 2) catch {
+    const whole_terminal_buf = pmem.page_allocator.alloc(u8, terminal_buf_size * 2) catch {
         std.log.scoped(.fb).err("OOM", .{});
         arch.hcf();
     };

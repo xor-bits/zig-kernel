@@ -5,7 +5,7 @@ const Glyph = @import("font").Glyph;
 const uart = @import("uart.zig");
 const fb = @import("fb.zig");
 const lazy = @import("lazy.zig");
-const mem = @import("alloc.zig");
+const pmem = @import("pmem.zig");
 const arch = @import("arch.zig");
 const NumberPrefix = @import("byte_fmt.zig").NumberPrefix;
 
@@ -80,15 +80,15 @@ fn main() void {
 
     log.info("kernel main", .{});
 
-    mem.printInfo();
+    pmem.printInfo();
     log.info("used memory: {any}B", .{
-        NumberPrefix(usize, .binary).new(mem.usedPages() << 12),
+        NumberPrefix(usize, .binary).new(pmem.usedPages() << 12),
     });
     log.info("free memory: {any}B", .{
-        NumberPrefix(usize, .binary).new(mem.freePages() << 12),
+        NumberPrefix(usize, .binary).new(pmem.freePages() << 12),
     });
     log.info("total memory: {any}B", .{
-        NumberPrefix(usize, .binary).new(mem.totalPages() << 12),
+        NumberPrefix(usize, .binary).new(pmem.totalPages() << 12),
     });
 
     arch.init() catch |err| {

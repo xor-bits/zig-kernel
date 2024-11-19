@@ -6,6 +6,8 @@ const arch = @import("arch.zig");
 const lazy = @import("lazy.zig");
 const NumberPrefix = @import("byte_fmt.zig").NumberPrefix;
 
+const log = std.log.scoped(.pmem);
+
 //
 
 pub export var memory: limine.MemoryMapRequest = .{};
@@ -50,22 +52,22 @@ pub fn printInfo() void {
         }
 
         const ty = @tagName(memory_map_entry.kind);
-        std.log.scoped(.alloc).info("{s:>22}: [ 0x{x:0>16}..0x{x:0>16} ]", .{ ty, from, to });
+        log.info("{s:>22}: [ 0x{x:0>16}..0x{x:0>16} ]", .{ ty, from, to });
     }
 
-    std.log.scoped(.alloc).info("usable memory: {0any}B ({0any:.1024}B)", .{
+    log.info("usable memory: {0any}B ({0any:.1024}B)", .{
         NumberPrefix(usize, .binary).new(usable_memory),
     });
-    std.log.scoped(.alloc).info("bootloader (reclaimable) overhead: {any}B", .{
+    log.info("bootloader (reclaimable) overhead: {any}B", .{
         NumberPrefix(usize, .binary).new(reclaimable),
     });
-    std.log.scoped(.alloc).info("bootloader (reclaimable) overhead: {any}B", .{
+    log.info("bootloader (reclaimable) overhead: {any}B", .{
         NumberPrefix(usize, .binary).new(reclaimable),
     });
-    std.log.scoped(.alloc).info("page allocator overhead: {any}B", .{
+    log.info("page allocator overhead: {any}B", .{
         NumberPrefix(usize, .binary).new(page_refcounts.len),
     });
-    std.log.scoped(.alloc).info("kernel code overhead: {any}B", .{
+    log.info("kernel code overhead: {any}B", .{
         NumberPrefix(usize, .binary).new(kernel_usage),
     });
 }
@@ -131,7 +133,7 @@ fn allocateContiguous(n_pages: usize) ?[]Page {
         return pages;
     }
 
-    std.log.scoped(.alloc).err("OOM", .{});
+    log.err("OOM", .{});
     return null;
 }
 
@@ -213,7 +215,7 @@ fn init() void {
     var memory_top: usize = 0;
     var memory_bottom: usize = std.math.maxInt(usize);
     const memory_response: *limine.MemoryMapResponse = memory.response orelse {
-        std.log.scoped(.alloc).err("no memory", .{});
+        log.err("no memory", .{});
         arch.hcf();
     };
 
@@ -226,7 +228,7 @@ fn init() void {
         const len = memory_map_entry.length;
 
         // const ty = @tagName(memory_map_entry.kind);
-        // std.log.scoped(.alloc).info("{s:>22}: [ 0x{x:0>16}..0x{x:0>16} ]", .{ ty, from, to });
+        // log.info("{s:>22}: [ 0x{x:0>16}..0x{x:0>16} ]", .{ ty, from, to });
 
         if (memory_map_entry.kind == .usable) {
             usable_memory += len;
@@ -257,15 +259,15 @@ fn init() void {
     }
     base = memory_bottom;
     page_refcounts = page_refcounts_null orelse {
-        std.log.scoped(.alloc).err("not enough contiguous memory", .{});
+        log.err("not enough contiguous memory", .{});
         arch.hcf();
     };
-    // std.log.scoped(.alloc).err("page_refcounts at: {*}", .{page_refcounts});
+    // log.err("page_refcounts at: {*}", .{page_refcounts});
     for (page_refcounts) |*r| {
         r.store(1, .seq_cst);
     }
 
-    // std.log.scoped(.alloc).err("zeroed", .{});
+    // log.err("zeroed", .{});
     for (memory_response.entries()) |memory_map_entry| {
         if (memory_map_entry.kind == .usable) {
             const first_page = physToIndex(memory_map_entry.base) catch unreachable;
@@ -289,7 +291,7 @@ fn _alloc(_: *anyopaque, len: usize, ptr_align: u8, ret_addr: usize) ?[*]u8 {
     const aligned_len = std.mem.alignForward(usize, len, 1 << 12);
     if (ptr_align > aligned_len) {
         @setCold(true);
-        std.log.scoped(.alloc).err("FIXME: page alloc with higher than page size alignment", .{});
+        log.err("FIXME: page alloc with higher than page size alignment", .{});
         return null;
     }
 
@@ -302,7 +304,7 @@ fn _alloc(_: *anyopaque, len: usize, ptr_align: u8, ret_addr: usize) ?[*]u8 {
 
 fn _resize(_: *anyopaque, buf: []u8, buf_align: u8, new_len: usize, ret_addr: usize) bool {
     _ = .{ buf, buf_align, new_len, ret_addr };
-    std.log.scoped(.alloc).err("FIXME: resize", .{});
+    log.err("FIXME: resize", .{});
     // TODO:
     return false;
 }

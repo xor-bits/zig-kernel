@@ -1,7 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const mem = @import("alloc.zig");
+const pmem = @import("pmem.zig");
 
 pub const x86_64 = @import("arch/x86_64.zig");
 
@@ -19,7 +19,7 @@ pub inline fn init() error{OutOfMemory}!void {
     const cpu_id = cpu_id_next.fetchAdd(1, .monotonic);
 
     if (builtin.cpu.arch == .x86_64) {
-        const cpu = try mem.page_allocator.create(x86_64.CpuConfig);
+        const cpu = try pmem.page_allocator.create(x86_64.CpuConfig);
         cpu.init(cpu_id);
         // leak the cpu config, because GDT and IDT are permanent
     }
