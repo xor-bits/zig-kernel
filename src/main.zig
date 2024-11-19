@@ -9,8 +9,6 @@ const mem = @import("alloc.zig");
 const arch = @import("arch.zig");
 const NumberPrefix = @import("byte_fmt.zig").NumberPrefix;
 
-const log = std.log;
-
 //
 
 pub const std_options: std.Options = .{
@@ -30,7 +28,14 @@ fn logFn(comptime message_level: std.log.Level, comptime scope: @TypeOf(.enum_li
 
 pub fn panic(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace, ret_addr: ?usize) noreturn {
     _ = error_return_trace;
-    log.scoped(.panic).err("CPU panicked: {s} ({?x})", .{ msg, ret_addr });
+    const log = std.log.scoped(.panic);
+
+    if (ret_addr) |at| {
+        log.err("CPU panicked at 0x{x}:\n{s}", .{ at, msg });
+    } else {
+        log.err("CPU panicked:\n{s}", .{msg});
+    }
+
     arch.hcf();
 }
 
@@ -44,24 +49,24 @@ pub var hhdm_offset = std.atomic.Value(usize).init(undefined);
 //
 
 export fn _start() callconv(.C) noreturn {
+    const log = std.log.scoped(.critical);
+
     // crash if bootloader is unsupported
     if (!base_revision.is_supported()) {
-        log.scoped(.critical).err("bootloader unsupported", .{});
+        log.err("bootloader unsupported", .{});
         arch.hcf();
     }
 
     const hhdm_response = hhdm.response orelse {
-        log.scoped(.critical).err("no HHDM", .{});
+        log.err("no HHDM", .{});
         arch.hcf();
     };
     hhdm_offset.store(hhdm_response.offset, .seq_cst);
     @fence(.seq_cst);
 
-    main() catch |err| {
-        log.scoped(._start).err("failed to initialize: {any}", .{err});
-    };
+    main();
 
-    log.scoped(._start).info("done", .{});
+    log.info("done", .{});
     arch.hcf();
 }
 
@@ -70,21 +75,25 @@ export fn _start() callconv(.C) noreturn {
 //     return value;
 // }
 
-fn main() !void {
-    log.scoped(.main).info("kernel main", .{});
+fn main() void {
+    const log = std.log.scoped(.main);
+
+    log.info("kernel main", .{});
 
     mem.printInfo();
-    log.scoped(.main).info("used memory: {any}B", .{
+    log.info("used memory: {any}B", .{
         NumberPrefix(usize, .binary).new(mem.usedPages() << 12),
     });
-    log.scoped(.main).info("free memory: {any}B", .{
+    log.info("free memory: {any}B", .{
         NumberPrefix(usize, .binary).new(mem.freePages() << 12),
     });
-    log.scoped(.main).info("total memory: {any}B", .{
+    log.info("total memory: {any}B", .{
         NumberPrefix(usize, .binary).new(mem.totalPages() << 12),
     });
 
-    try arch.init();
+    arch.init() catch |err| {
+        std.debug.panic("failed to initialize CPU: {any}", .{err});
+    };
 
     arch.x86_64.ints.int3();
 
