@@ -9,7 +9,6 @@ pub const x86_64 = @import("arch/x86_64.zig");
 
 /// Halt and Catch Fire
 pub inline fn hcf() noreturn {
-    // std.log.info("{*}", .{&x86_64.interrupt});
     if (builtin.cpu.arch == .x86_64) {
         x86_64.hcf();
     }

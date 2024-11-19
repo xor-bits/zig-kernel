@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const log = std.log.scoped(.arch);
+
 //
 
 const IA32_TCS_AUX = 0xC0000103;
@@ -235,15 +237,15 @@ pub fn cpu_id() u32 {
             @setCold(true);
 
             if (cpuid(0x7, 0).ecx & (1 << 22) != 0) {
-                std.log.info("RDPID support", .{});
+                log.info("RDPID support", .{});
                 cpu_id_mode.store(.rdpid, .release);
                 return @intCast(rdpid());
             } else if (cpuid(0x80000001, 0).edx & (1 << 27) != 0) {
-                std.log.info("RDTSCP support", .{});
+                log.info("RDTSCP support", .{});
                 cpu_id_mode.store(.rdtscp, .release);
                 return rdtscp().pid;
             } else {
-                std.log.info("fallback RDMSR", .{});
+                log.info("fallback RDMSR", .{});
                 cpu_id_mode.store(.rdmsr, .release);
                 return @intCast(rdmsr(IA32_TCS_AUX));
             }
@@ -252,7 +254,7 @@ pub fn cpu_id() u32 {
 }
 
 pub fn reset() void {
-    std.log.info("triple fault reset", .{});
+    log.info("triple fault reset", .{});
     ints.disable();
     // load 0 size IDT
     var idt = Idt.new();
@@ -411,7 +413,7 @@ pub const Entry = packed struct {
     }
 
     fn newAny(isr: usize) Self {
-        // std.log.info("interrupt at : {x}", .{isr});
+        // log.info("interrupt at : {x}", .{isr});
         return Self{
             .offset_0_15 = @truncate(isr & 0xFFFF),
             .segment_selector = 0x08,
@@ -470,7 +472,7 @@ pub const Idt = extern struct {
         entries[14] = Entry.generateWithEc(struct {
             fn handler(interrupt_stack_frame: *const InterruptStackFrame, ec: u64) void {
                 const pfec: PageFaultError = @bitCast(ec);
-                std.log.info("page fault ({any})\nframe: {any}", .{ pfec, interrupt_stack_frame });
+                log.info("page fault ({any})\nframe: {any}", .{ pfec, interrupt_stack_frame });
             }
         }).asInt();
         // reserved
@@ -536,11 +538,11 @@ const InterruptStackFrame = extern struct {
 };
 
 fn interrupt_ec(interrupt_stack_frame: *const InterruptStackFrame, ec: u64) callconv(.Interrupt) void {
-    std.log.err("default interrupt: {any} {any}", .{ interrupt_stack_frame, ec });
+    log.err("default interrupt: {any} {any}", .{ interrupt_stack_frame, ec });
 }
 
 fn interrupt(interrupt_stack_frame: *const InterruptStackFrame) callconv(.Interrupt) void {
-    std.log.err("default interrupt: {any} ", .{interrupt_stack_frame});
+    log.err("default interrupt: {any} ", .{interrupt_stack_frame});
 }
 
 pub const CpuConfig = struct {
@@ -558,10 +560,10 @@ pub const CpuConfig = struct {
         self.idt.load(null);
         ints.enable();
 
-        std.log.info("cpu_id: {d} cpuconfig size: {d}", .{ this_cpu_id, @sizeOf(CpuConfig) });
+        log.info("cpu_id: {d} cpuconfig size: {d}", .{ this_cpu_id, @sizeOf(CpuConfig) });
 
         wrmsr(IA32_TCS_AUX, this_cpu_id);
-        std.log.info("PID: {d}", .{cpu_id()});
+        log.info("PID: {d}", .{cpu_id()});
     }
 };
 
