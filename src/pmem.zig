@@ -84,13 +84,75 @@ pub fn totalPages() usize {
     return usable.load(.monotonic);
 }
 
+pub const PhysAddr = struct {
+    raw: usize,
+
+    const Self = @This();
+
+    pub fn new(addr: usize) Self {
+        return .{ .raw = addr };
+    }
+
+    pub fn add(self: Self, b: usize) Self {
+        return .{ .raw = self.raw + b };
+    }
+
+    pub fn sub(self: Self, b: usize) Self {
+        return .{ .raw = self.raw + b };
+    }
+
+    pub fn toHhdm(self: Self) HhdmAddr {
+        return .{ .raw = self.raw + main.hhdm_offset.load(.monotonic) };
+    }
+};
+
+pub const VirtAddr = struct {
+    raw: usize,
+
+    const Self = @This();
+
+    pub fn ptr(comptime T: type, self: Self) *T {
+        return @ptrFromInt(self.raw);
+    }
+};
+
+pub const HhdmAddr = struct {
+    raw: usize,
+
+    const Self = @This();
+
+    pub fn new(raw_ptr: *anyopaque) Self {
+        return .{ .raw = @intFromPtr(raw_ptr) };
+    }
+
+    pub fn add(self: Self, b: usize) Self {
+        return .{ .raw = self.raw + b };
+    }
+
+    pub fn sub(self: Self, b: usize) Self {
+        return .{ .raw = self.raw + b };
+    }
+
+    pub fn ptr(self: Self, comptime T: type) T {
+        return @ptrFromInt(self.raw);
+    }
+
+    pub fn toVirt(self: Self) VirtAddr {
+        return .{ .raw = self.raw };
+    }
+
+    pub fn toPhys(self: Self) PhysAddr {
+        return .{ .raw = self.raw - main.hhdm_offset.load(.monotonic) };
+    }
+};
+
 //
 
 /// tells if the frame allocator can be used already
 var pfa_lazy_init = lazy.LazyInit.new();
 
 /// base physical address from where the refcount array starts from
-var base: usize = undefined;
+var base: PhysAddr = undefined;
 
 /// each page has a ref counter, 0 = not allocated, N = N process(es) is using it
 var page_refcounts: []std.atomic.Value(u8) = undefined;
@@ -105,21 +167,13 @@ var used = std.atomic.Value(usize).init(0);
 /// how many pages are usable
 var usable = std.atomic.Value(usize).init(0);
 
-fn physToPtr(comptime T: type, phys: usize) *T {
-    return @ptrFromInt(phys + main.hhdm_offset.load(.monotonic));
-}
-
-fn ptrToPhys(ptr: *anyopaque) usize {
-    return @intFromPtr(ptr) - main.hhdm_offset.load(.monotonic);
-}
-
-fn physToIndex(phys: usize) !usize {
-    if (phys < base) {
+fn physToIndex(phys: PhysAddr) !usize {
+    if (phys.raw < base.raw) {
         @setCold(true);
         return error.OutOfBounds;
     }
 
-    return (phys - base) >> 12;
+    return (phys.raw - base.raw) >> 12;
 }
 
 fn allocateContiguous(n_pages: usize) ?[]Page {
@@ -168,7 +222,7 @@ fn allocateContiguousFrom(n_pages: usize, from: usize) ?[]Page {
             }
         } else {
             _ = used.fetchAdd(n_pages, .monotonic);
-            const pages: [*]Page = @ptrCast(physToPtr(Page, base + first_page * (1 << 12)));
+            const pages = base.add(first_page * (1 << 12)).toHhdm().ptr([*]Page);
             return pages[0..n_pages];
         }
     }
@@ -180,7 +234,7 @@ fn allocateContiguousFrom(n_pages: usize, from: usize) ?[]Page {
 
 fn deallocateContiguous(pages: []Page) void {
     for (pages) |*page| {
-        const page_i = physToIndex(ptrToPhys(page)) catch unreachable;
+        const page_i = physToIndex(HhdmAddr.new(page).toPhys()) catch unreachable;
         deallocate(&page_refcounts[page_i]);
     }
 
@@ -189,7 +243,7 @@ fn deallocateContiguous(pages: []Page) void {
 
 fn deallocateContiguousZeroed(pages: []Page) void {
     for (pages) |*page| {
-        const page_i = physToIndex(ptrToPhys(page)) catch unreachable;
+        const page_i = physToIndex(HhdmAddr.new(page).toPhys()) catch unreachable;
         deallocate(&page_refcounts[page_i]);
     }
 
@@ -250,14 +304,15 @@ fn init() void {
         }
 
         if (memory_map_entry.length >= page_refcounts_len) {
-            const ptr: [*]std.atomic.Value(u8) = @ptrCast(physToPtr(u8, memory_map_entry.base));
+            const ptr: [*]std.atomic.Value(u8) = PhysAddr.new(memory_map_entry.base)
+                .toHhdm().ptr([*]std.atomic.Value(u8));
             page_refcounts_null = ptr[0..page_refcounts_len];
             memory_map_entry.base += page_refcounts_len;
             memory_map_entry.length -= page_refcounts_len;
             break;
         }
     }
-    base = memory_bottom;
+    base = PhysAddr.new(memory_bottom);
     page_refcounts = page_refcounts_null orelse {
         log.err("not enough contiguous memory", .{});
         arch.hcf();
@@ -270,7 +325,7 @@ fn init() void {
     // log.err("zeroed", .{});
     for (memory_response.entries()) |memory_map_entry| {
         if (memory_map_entry.kind == .usable) {
-            const first_page = physToIndex(memory_map_entry.base) catch unreachable;
+            const first_page = physToIndex(PhysAddr.new(memory_map_entry.base)) catch unreachable;
             const n_pages = memory_map_entry.length >> 12;
             for (first_page..first_page + n_pages) |page| {
                 page_refcounts[page].store(0, .seq_cst);
