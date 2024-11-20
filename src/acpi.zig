@@ -13,7 +13,7 @@ pub export var rsdp_req: limine.RsdpRequest = .{};
 //
 
 pub fn init() !void {
-    log.info("init acpi", .{});
+    log.info("init ACPI", .{});
 
     const rsdp_resp: *limine.RsdpResponse = rsdp_req.response orelse {
         return error.NoRsdp;
@@ -60,7 +60,7 @@ fn acpiv1(rsdp: *const Rsdp) !void {
         }
 
         switch (SdtType.fromSignature(sdt.signature)) {
-            .APIC => try apic.madt(sdt),
+            .APIC => try apic.init(@ptrCast(sdt)),
             else => {},
         }
     }
@@ -94,7 +94,7 @@ fn acpiv2(rsdp: *const Rsdp) !void {
 
         // FIXME: load APIC always before HPET, because HPET uses APIC
         switch (SdtType.fromSignature(sdt.signature)) {
-            .APIC => try apic.madt(sdt),
+            .APIC => try apic.init(@ptrCast(sdt)),
             else => {},
         }
     }

@@ -56,6 +56,10 @@ pub fn inb(port: u16) u8 {
     );
 }
 
+pub fn io_wait() void {
+    outb(0x80, 0);
+}
+
 pub fn lgdt(v: u64) void {
     asm volatile (
         \\ lgdtq (%[v])
