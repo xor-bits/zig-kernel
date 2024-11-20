@@ -2,6 +2,7 @@ const std = @import("std");
 const limine = @import("limine");
 
 const pmem = @import("pmem.zig");
+const apic = @import("apic.zig");
 
 const log = std.log.scoped(.acpi);
 
@@ -53,10 +54,14 @@ fn acpiv1(rsdp: *const Rsdp) !void {
     for (rsdt.pointers()) |sdt_ptr| {
         const sdt: *const SdtHeader = pmem.PhysAddr.new(sdt_ptr).toHhdm().ptr(*const SdtHeader);
         log.info(" - {s}", .{sdt.signature});
+        if (!isChecksumValid(SdtHeader, sdt)) {
+            log.warn("skipping invalid SDT: {s}", .{sdt.signature});
+            continue;
+        }
 
         switch (SdtType.fromSignature(sdt.signature)) {
-            .APIC => madt(sdt),
-            .other => {},
+            .APIC => try apic.madt(sdt),
+            else => {},
         }
     }
 }
@@ -80,11 +85,17 @@ fn acpiv2(rsdp: *const Rsdp) !void {
     log.info("SDT Headers:", .{});
     for (xsdt.pointers()) |sdt_ptr| {
         const sdt: *const SdtHeader = pmem.PhysAddr.new(sdt_ptr).toHhdm().ptr(*const SdtHeader);
+        if (!isChecksumValid(SdtHeader, sdt)) {
+            log.warn("skipping invalid SDT: {s}", .{sdt.signature});
+            continue;
+        }
+
         log.info(" - {s}", .{sdt.signature});
 
+        // FIXME: load APIC always before HPET, because HPET uses APIC
         switch (SdtType.fromSignature(sdt.signature)) {
-            .APIC => madt(sdt),
-            .other => {},
+            .APIC => try apic.madt(sdt),
+            else => {},
         }
     }
 }
@@ -123,13 +134,9 @@ pub const SdtType = enum {
     }
 };
 
-fn madt(sdt: *const SdtHeader) !void {
-    _ = sdt;
-}
-
 //
 
-const Rsdp = extern struct {
+pub const Rsdp = extern struct {
     signature: [8]u8 align(1),
     checksum: u8 align(1),
     oem_id: [6]u8 align(1),
@@ -137,7 +144,7 @@ const Rsdp = extern struct {
     rsdt_addr: u32 align(1),
 };
 
-const Xsdp = extern struct {
+pub const Xsdp = extern struct {
     rsdp: Rsdp align(1),
 
     length: u32 align(1),
@@ -146,7 +153,7 @@ const Xsdp = extern struct {
     _reserved: [3]u8 align(1),
 };
 
-const SdtHeader = extern struct {
+pub const SdtHeader = extern struct {
     signature: [4]u8 align(1),
     length: u32 align(1),
     revision: u8 align(1),
@@ -158,7 +165,7 @@ const SdtHeader = extern struct {
     creator_revision: u32 align(1),
 };
 
-const Rsdt = extern struct {
+pub const Rsdt = extern struct {
     header: SdtHeader align(1),
 
     fn pointers(self: *const @This()) []align(1) const u32 {
@@ -168,7 +175,7 @@ const Rsdt = extern struct {
     }
 };
 
-const Xsdt = extern struct {
+pub const Xsdt = extern struct {
     header: SdtHeader align(1),
 
     fn pointers(self: *const @This()) []align(1) const u64 {
