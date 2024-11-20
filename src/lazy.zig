@@ -43,6 +43,15 @@ pub fn Lazy(comptime T: type) type {
             return &self.val;
         }
 
+        pub fn get(self: *Self) ?*T {
+            if (!self.isInitialized()) {
+                @setCold(true);
+                return null;
+            }
+
+            return &self.val;
+        }
+
         pub fn getOrInit(self: *Self, init: anytype) ?*T {
             if (!self.isInitialized()) {
                 // very low chance to not be initialized (only the first time)
