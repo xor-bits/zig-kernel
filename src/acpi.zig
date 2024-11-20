@@ -50,20 +50,7 @@ fn acpiv1(rsdp: *const Rsdp) !void {
         return error.InvalidRsdtSignature;
     }
 
-    log.info("SDT Headers:", .{});
-    for (rsdt.pointers()) |sdt_ptr| {
-        const sdt: *const SdtHeader = pmem.PhysAddr.new(sdt_ptr).toHhdm().ptr(*const SdtHeader);
-        log.info(" - {s}", .{sdt.signature});
-        if (!isChecksumValid(SdtHeader, sdt)) {
-            log.warn("skipping invalid SDT: {s}", .{sdt.signature});
-            continue;
-        }
-
-        switch (SdtType.fromSignature(sdt.signature)) {
-            .APIC => try apic.init(@ptrCast(sdt)),
-            else => {},
-        }
-    }
+    try walkTables(u32, rsdt.pointers());
 }
 
 fn acpiv2(rsdp: *const Rsdp) !void {
@@ -82,8 +69,15 @@ fn acpiv2(rsdp: *const Rsdp) !void {
         return error.InvalidXsdtSignature;
     }
 
+    try walkTables(u64, xsdt.pointers());
+}
+
+fn walkTables(comptime T: type, pointers: []align(1) const T) !void {
+    var maybe_apic: ?*const SdtHeader = null;
+    var maybe_hpet: ?*const SdtHeader = null;
+
     log.info("SDT Headers:", .{});
-    for (xsdt.pointers()) |sdt_ptr| {
+    for (pointers) |sdt_ptr| {
         const sdt: *const SdtHeader = pmem.PhysAddr.new(sdt_ptr).toHhdm().ptr(*const SdtHeader);
         if (!isChecksumValid(SdtHeader, sdt)) {
             log.warn("skipping invalid SDT: {s}", .{sdt.signature});
@@ -94,10 +88,21 @@ fn acpiv2(rsdp: *const Rsdp) !void {
 
         // FIXME: load APIC always before HPET, because HPET uses APIC
         switch (SdtType.fromSignature(sdt.signature)) {
-            .APIC => try apic.init(@ptrCast(sdt)),
+            .APIC => maybe_apic = sdt,
+            .HPET => maybe_hpet = sdt,
             else => {},
         }
     }
+
+    const apic_table = maybe_apic orelse {
+        return error.ApicTableMissing;
+    };
+    const hpet_table = maybe_hpet orelse {
+        return error.HpetTableMissing;
+    };
+    _ = hpet_table;
+
+    try apic.init(@ptrCast(apic_table));
 }
 
 pub const SdtType = enum {
