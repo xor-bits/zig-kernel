@@ -102,12 +102,6 @@ fn main() void {
         std.debug.panic("failed to initialize ACPI: {any}", .{err});
     };
 
-    arch.reset();
-
-    asm volatile (
-        \\ mov %rax, (0)
-    );
-
     // NOTE: /path/to/something is a short form for fs:///path/to/something
     // TODO: kernel
     //  - virtual memory mapping
