@@ -3,7 +3,6 @@ const limine = @import("limine");
 
 const uart = @import("uart.zig");
 const fb = @import("fb.zig");
-const lazy = @import("lazy.zig");
 const pmem = @import("pmem.zig");
 const arch = @import("arch.zig");
 const acpi = @import("acpi.zig");

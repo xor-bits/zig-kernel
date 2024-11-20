@@ -4,8 +4,32 @@ const builtin = @import("builtin");
 const acpi = @import("acpi.zig");
 const arch = @import("arch.zig");
 const pmem = @import("pmem.zig");
+const lazy = @import("lazy.zig");
 
 const log = std.log.scoped(.apic);
+
+//
+
+pub const IRQ_SPURIOUS: u8 = 0xFF;
+pub const IRQ_TIMER: u8 = 0x30;
+
+pub const IA32_APIC_XAPIC_ENABLE: u64 = 1 << 11;
+pub const IA32_APIC_X2APIC_ENABLE: u64 = 1 << 10;
+pub const APIC_SW_ENABLE: u32 = 1 << 8;
+pub const APIC_DISABLE: u32 = 1 << 16;
+pub const APIC_NMI: u32 = 4 << 8;
+pub const APIC_TIMER_MODE_ONESHOT: u32 = 0;
+pub const APIC_TIMER_MODE_PERIODIC: u32 = 0b01 << 17;
+pub const APIC_TIMER_MODE_TSC_DEADLINE: u32 = 0b10 << 17;
+
+// const APIC_TIMER_DIV: u32 = 0b1011; // div by 1
+// const APIC_TIMER_DIV: u32 = 0b0000; // div by 2
+// const APIC_TIMER_DIV: u32 = 0b0001; // div by 4
+const APIC_TIMER_DIV: u32 = 0b0010; // div by 8
+// const APIC_TIMER_DIV: u32 = 0b0011; // div by 16
+// const APIC_TIMER_DIV: u32 = 0b1000; // div by 32
+// const APIC_TIMER_DIV: u32 = 0b1001; // div by 64
+// const APIC_TIMER_DIV: u32 = 0b1010; // div by 128
 
 //
 
@@ -33,7 +57,8 @@ pub fn init(madt: *const Madt) !void {
             },
             1 => {
                 const entry: *const IoApic = @ptrCast(entry_base);
-                _ = entry;
+                // _ = entry;
+                log.info("I/O APIC at 0x{x}", .{entry.io_apic_addr});
                 // TODO: this is going to be used later for I/O APIC
             },
             2 => {
@@ -68,9 +93,135 @@ pub fn init(madt: *const Madt) !void {
     }
 
     log.info("found local apic addr: 0x{x}", .{lapic_addr});
+    const lapic: *volatile LocalApicRegs = pmem.PhysAddr.new(lapic_addr).toHhdm().ptr(*volatile LocalApicRegs);
+
+    apic_base.initNow(lapic);
+    @fence(.seq_cst); // init is release, not acquire
+
+    arch.x86_64.ints.disable();
+
+    // reset APIC to a well-known state
+    lapic.destination_format.val = 0xFFFF_FFFF;
+    lapic.logical_destination.val &= 0x00FF_FFFF;
+    lapic.lvt_timer.val = APIC_DISABLE;
+    lapic.lvt_performance_monitoring_counters.val = APIC_NMI;
+    lapic.lvt_lint0.val = APIC_DISABLE;
+    lapic.lvt_lint1.val = APIC_DISABLE;
+    lapic.task_priority.val = 0;
+
+    // enable
+    lapic.spurious_interrupt_vector.val = APIC_SW_ENABLE | @as(u32, IRQ_SPURIOUS);
+
+    // enable APIC
+    arch.x86_64.wrmsr(
+        arch.x86_64.IA32_APIC_BASE,
+        arch.x86_64.rdmsr(arch.x86_64.IA32_APIC_BASE) | IA32_APIC_XAPIC_ENABLE,
+    );
+
+    // enable timer interrupts
+    // const period = 4_000;
+    // lapic.divide_configuration.val = APIC_TIMER_DIV;
+    // lapic.lvt_timer.val = IRQ_TIMER | APIC_TIMER_MODE_PERIODIC;
+    // lapic.initial_count.val = period;
+    // lapic.lvt_thermal_sensor.val = 0;
+    // lapic.lvt_error.val = 0;
+    // lapic.divide_configuration.val = APIC_TIMER_DIV; // buggy hardware fix
+
+    log.info("APIC initialized", .{});
+    while (true) {
+        arch.x86_64.ints.wait();
+    }
+}
+
+pub fn spurious(_: *const anyopaque) void {
+    eoi();
+    log.info("SPURIOUS INTERRUPT", .{});
+}
+
+pub fn timer(_: *const anyopaque) void {
+    eoi();
+    log.info("TIMER INTERRUPT", .{});
+}
+
+fn eoi() void {
+    apic_base.get().?.*.eoi.val = 0;
 }
 
 //
+
+var apic_base = lazy.Lazy(*volatile LocalApicRegs).new();
+
+//
+
+pub const Register = extern struct {
+    val: u32 align(16),
+};
+
+pub const LocalApicRegs = extern struct {
+    _reserved0: [2]Register,
+    lapic_id: Register,
+    lapic_version: Register,
+    _reserved1: [4]Register,
+    task_priority: Register,
+    arbitration_priority: Register,
+    processor_priority: Register,
+    eoi: Register,
+    remote_read: Register,
+    logical_destination: Register,
+    destination_format: Register,
+    spurious_interrupt_vector: Register,
+    in_service: [8]Register,
+    trigger_mode: [8]Register,
+    interrupt_request: [8]Register,
+    error_status: Register,
+    _reserved2: [6]Register,
+    lvt_corrected_machine_check_interrupt: Register,
+    interrupt_command: [2]Register,
+    lvt_timer: Register,
+    lvt_thermal_sensor: Register,
+    lvt_performance_monitoring_counters: Register,
+    lvt_lint0: Register,
+    lvt_lint1: Register,
+    lvt_error: Register,
+    initial_count: Register,
+    current_count: Register,
+    _reserved3: [1]Register,
+    divide_configuration: Register,
+    _reserved4: [4]Register,
+
+    pub fn format(self: *volatile @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        const this = @typeInfo(@This()).Struct;
+
+        try writer.writeAll(@typeName(@This()));
+        try std.fmt.format(writer, " {{ ", .{});
+
+        inline for (this.fields) |field| {
+            if (field.name[0] == '_') {
+                continue;
+            }
+
+            switch (@typeInfo(field.type)) {
+                .Struct => {
+                    const s: *volatile Register = &@field(self, field.name);
+                    try std.fmt.format(writer, ".{s} = 0x{x}, ", .{ field.name, s.val });
+                },
+                .Array => {
+                    const s: []volatile Register = @field(self, field.name)[0..];
+
+                    try std.fmt.format(writer, ".{s} = .{{ ", .{field.name});
+                    for (s) |*reg| {
+                        // FIXME: i have no clue if Zig drops the volatile qualifier with ptr captures
+                        try std.fmt.format(writer, "0x{x}, ", .{reg.val});
+                    }
+                    try std.fmt.format(writer, "}}, ", .{});
+                },
+                else => {},
+            }
+        }
+
+        try std.fmt.format(writer, "}}", .{});
+    }
+};
 
 pub const Madt = extern struct {
     header: acpi.SdtHeader align(1),

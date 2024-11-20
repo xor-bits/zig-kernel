@@ -1,10 +1,13 @@
 const std = @import("std");
 
+const apic = @import("../apic.zig");
+
 const log = std.log.scoped(.arch);
 
 //
 
-const IA32_TCS_AUX = 0xC0000103;
+pub const IA32_TCS_AUX = 0xC0000103;
+pub const IA32_APIC_BASE = 0x1B;
 
 //
 
@@ -20,6 +23,15 @@ pub const ints = struct {
     pub inline fn enable() void {
         asm volatile (
             \\ sti
+        );
+    }
+
+    /// wait for the next interrupt
+    pub fn wait() callconv(.C) void {
+        asm volatile (
+            \\ sti
+            \\ hlt
+            \\ cli
         );
     }
 
@@ -445,65 +457,192 @@ pub const Idt = extern struct {
         var entries = std.mem.zeroes([256]u128);
 
         // division error
-        entries[0] = Entry.new(interrupt).asInt();
+        entries[0] = Entry.generate(struct {
+            fn handler(interrupt_stack_frame: *const InterruptStackFrame) void {
+                log.err("division error\nframe: {any}", .{interrupt_stack_frame});
+                std.debug.panic("unhandled CPU exception", .{});
+            }
+        }).asInt();
         // debug
-        entries[1] = Entry.new(interrupt).asInt();
+        entries[1] = Entry.generate(struct {
+            fn handler(interrupt_stack_frame: *const InterruptStackFrame) void {
+                log.err("debug\nframe: {any}", .{interrupt_stack_frame});
+                std.debug.panic("unhandled CPU exception", .{});
+            }
+        }).asInt();
         // non-maskable interrupt
-        entries[2] = Entry.new(interrupt).asInt();
+        entries[2] = Entry.generate(struct {
+            fn handler(interrupt_stack_frame: *const InterruptStackFrame) void {
+                log.info("non-maskable interrupt\nframe: {any}", .{interrupt_stack_frame});
+            }
+        }).asInt();
         // breakpoint
-        entries[3] = Entry.new(interrupt).asInt();
+        entries[3] = Entry.generate(struct {
+            fn handler(interrupt_stack_frame: *const InterruptStackFrame) void {
+                log.info("breakpoint\nframe: {any}", .{interrupt_stack_frame});
+            }
+        }).asInt();
         // overflow
-        entries[4] = Entry.new(interrupt).asInt();
+        entries[4] = Entry.generate(struct {
+            fn handler(interrupt_stack_frame: *const InterruptStackFrame) void {
+                log.err("overflow\nframe: {any}", .{interrupt_stack_frame});
+                std.debug.panic("unhandled CPU exception", .{});
+            }
+        }).asInt();
         // bound range exceeded
-        entries[5] = Entry.new(interrupt).asInt();
+        entries[5] = Entry.generate(struct {
+            fn handler(interrupt_stack_frame: *const InterruptStackFrame) void {
+                log.err("bound range exceeded\nframe: {any}", .{interrupt_stack_frame});
+                std.debug.panic("unhandled CPU exception", .{});
+            }
+        }).asInt();
         // invalid opcode
-        entries[6] = Entry.new(interrupt).asInt();
+        entries[6] = Entry.generate(struct {
+            fn handler(interrupt_stack_frame: *const InterruptStackFrame) void {
+                log.err("invalid opcode\nframe: {any}", .{interrupt_stack_frame});
+                std.debug.panic("unhandled CPU exception", .{});
+            }
+        }).asInt();
         // device not available
-        entries[7] = Entry.new(interrupt).asInt();
+        entries[7] = Entry.generate(struct {
+            fn handler(interrupt_stack_frame: *const InterruptStackFrame) void {
+                log.err("device not available\nframe: {any}", .{interrupt_stack_frame});
+                std.debug.panic("unhandled CPU exception", .{});
+            }
+        }).asInt();
         // double fault
-        entries[8] = Entry.newWithEc(interrupt_ec).asInt();
+        entries[8] = Entry.generateWithEc(struct {
+            fn handler(interrupt_stack_frame: *const InterruptStackFrame, ec: u64) void {
+                log.err("double fault (0x{x})\nframe: {any}", .{ ec, interrupt_stack_frame });
+                std.debug.panic("unhandled CPU exception", .{});
+            }
+        }).asInt();
         // coprocessor segment overrun (useless)
         // entries[9] = 0;
         // invalid tss
-        entries[10] = Entry.newWithEc(interrupt_ec).asInt();
+        entries[10] = Entry.generateWithEc(struct {
+            fn handler(interrupt_stack_frame: *const InterruptStackFrame, ec: u64) void {
+                log.err("invalid tss (0x{x})\nframe: {any}", .{ ec, interrupt_stack_frame });
+                std.debug.panic("unhandled CPU exception", .{});
+            }
+        }).asInt();
         // segment not present
-        entries[11] = Entry.newWithEc(interrupt_ec).asInt();
+        entries[11] = Entry.generateWithEc(struct {
+            fn handler(interrupt_stack_frame: *const InterruptStackFrame, ec: u64) void {
+                log.err("segment not present (0x{x})\nframe: {any}", .{ ec, interrupt_stack_frame });
+                std.debug.panic("unhandled CPU exception", .{});
+            }
+        }).asInt();
         // stack-segment fault
-        entries[12] = Entry.newWithEc(interrupt_ec).asInt();
+        entries[12] = Entry.generateWithEc(struct {
+            fn handler(interrupt_stack_frame: *const InterruptStackFrame, ec: u64) void {
+                log.err("stack-segment fault (0x{x})\nframe: {any}", .{ ec, interrupt_stack_frame });
+                std.debug.panic("unhandled CPU exception", .{});
+            }
+        }).asInt();
         // general protection fault
-        entries[13] = Entry.newWithEc(interrupt_ec).asInt();
+        entries[13] = Entry.generateWithEc(struct {
+            fn handler(interrupt_stack_frame: *const InterruptStackFrame, ec: u64) void {
+                log.err("general protection fault (0x{x})\nframe: {any}", .{ ec, interrupt_stack_frame });
+                std.debug.panic("unhandled CPU exception", .{});
+            }
+        }).asInt();
         // page fault
         entries[14] = Entry.generateWithEc(struct {
             fn handler(interrupt_stack_frame: *const InterruptStackFrame, ec: u64) void {
                 const pfec: PageFaultError = @bitCast(ec);
-                log.info("page fault ({any})\nframe: {any}", .{ pfec, interrupt_stack_frame });
+                log.err("page fault ({any})\nframe: {any}", .{ pfec, interrupt_stack_frame });
+                std.debug.panic("unhandled CPU exception", .{});
             }
         }).asInt();
         // reserved
         // entries[15] = 0;
         // x87 fp exception
-        entries[16] = Entry.new(interrupt).asInt();
+        entries[16] = Entry.generate(struct {
+            fn handler(interrupt_stack_frame: *const InterruptStackFrame) void {
+                log.err("x87 fp exception\nframe: {any}", .{interrupt_stack_frame});
+                std.debug.panic("unhandled CPU exception", .{});
+            }
+        }).asInt();
         // alignment check
-        entries[17] = Entry.newWithEc(interrupt_ec).asInt();
+        entries[17] = Entry.generateWithEc(struct {
+            fn handler(interrupt_stack_frame: *const InterruptStackFrame, ec: u64) void {
+                log.err("alignment check (0x{x})\nframe: {any}", .{ ec, interrupt_stack_frame });
+                std.debug.panic("unhandled CPU exception", .{});
+            }
+        }).asInt();
         // machine check
-        entries[18] = Entry.new(interrupt).asInt();
+        entries[18] = Entry.generate(struct {
+            fn handler(interrupt_stack_frame: *const InterruptStackFrame) void {
+                log.err("machine check\nframe: {any}", .{interrupt_stack_frame});
+                std.debug.panic("unhandled CPU exception", .{});
+            }
+        }).asInt();
         // simd fp exception
-        entries[19] = Entry.new(interrupt).asInt();
+        entries[19] = Entry.generate(struct {
+            fn handler(interrupt_stack_frame: *const InterruptStackFrame) void {
+                log.err("simd fp exception\nframe: {any}", .{interrupt_stack_frame});
+                std.debug.panic("unhandled CPU exception", .{});
+            }
+        }).asInt();
         // virtualization exception
-        entries[20] = Entry.new(interrupt).asInt();
+        entries[20] = Entry.generate(struct {
+            fn handler(interrupt_stack_frame: *const InterruptStackFrame) void {
+                log.err("virtualization exception\nframe: {any}", .{interrupt_stack_frame});
+                std.debug.panic("unhandled CPU exception", .{});
+            }
+        }).asInt();
         // control protection exception
-        entries[21] = Entry.newWithEc(interrupt_ec).asInt();
+        entries[21] = Entry.generateWithEc(struct {
+            fn handler(interrupt_stack_frame: *const InterruptStackFrame, ec: u64) void {
+                log.err("control protection exce (0x{x})\nframe: {any}", .{ ec, interrupt_stack_frame });
+                std.debug.panic("unhandled GPF", .{});
+            }
+        }).asInt();
         // reserved
         // entries[22..27] = 0;
         // hypervisor injection exception
-        entries[28] = Entry.new(interrupt).asInt();
+        entries[28] = Entry.generate(struct {
+            fn handler(interrupt_stack_frame: *const InterruptStackFrame) void {
+                log.err("hypervisor injection exception\nframe: {any}", .{interrupt_stack_frame});
+                std.debug.panic("unhandled CPU exception", .{});
+            }
+        }).asInt();
         // vmm communication exception
-        entries[29] = Entry.newWithEc(interrupt_ec).asInt();
+        entries[29] = Entry.generateWithEc(struct {
+            fn handler(interrupt_stack_frame: *const InterruptStackFrame, ec: u64) void {
+                log.err("vmm communication excep (0x{x})\nframe: {any}", .{ ec, interrupt_stack_frame });
+                std.debug.panic("unhandled GPF", .{});
+            }
+        }).asInt();
         // security exception
-        entries[30] = Entry.newWithEc(interrupt_ec).asInt();
+        entries[30] = Entry.generateWithEc(struct {
+            fn handler(interrupt_stack_frame: *const InterruptStackFrame, ec: u64) void {
+                log.err("security exception (0x{x})\nframe: {any}", .{ ec, interrupt_stack_frame });
+                std.debug.panic("unhandled GPF", .{});
+            }
+        }).asInt();
         // reserved
         // entries[31] = 0;
         // triple fault, non catchable
+
+        // spurious PIC interrupts
+        for (entries[32..41]) |*entry| {
+            entry.* = Entry.generate(struct {
+                fn handler(_: *const InterruptStackFrame) void {}
+            }).asInt();
+        }
+
+        entries[apic.IRQ_SPURIOUS] = Entry.generate(struct {
+            fn handler(interrupt_stack_frame: *const InterruptStackFrame) void {
+                apic.spurious(interrupt_stack_frame);
+            }
+        }).asInt();
+        entries[apic.IRQ_TIMER] = Entry.generate(struct {
+            fn handler(interrupt_stack_frame: *const InterruptStackFrame) void {
+                apic.timer(interrupt_stack_frame);
+            }
+        }).asInt();
 
         return Self{
             .ptr = undefined,
