@@ -128,9 +128,6 @@ pub fn init(madt: *const Madt) !void {
     // lapic.divide_configuration.val = APIC_TIMER_DIV; // buggy hardware fix
 
     log.info("APIC initialized", .{});
-    while (true) {
-        arch.x86_64.ints.wait();
-    }
 }
 
 pub fn spurious(_: *const anyopaque) void {
