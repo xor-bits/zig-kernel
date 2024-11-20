@@ -2,7 +2,7 @@ const std = @import("std");
 const limine = @import("limine");
 const font = @import("font");
 
-const main = @import("main.zig");
+const util = @import("util.zig");
 const lazy = @import("lazy.zig");
 const pmem = @import("pmem.zig");
 const uart = @import("uart.zig");
@@ -46,7 +46,7 @@ pub fn print(comptime fmt: []const u8, args: anytype) void {
 
 var cursor_x: u32 = 0;
 var cursor_y: u32 = 0;
-var fb: main.Image([*]volatile u8) = undefined;
+var fb: util.Image([*]volatile u8) = undefined;
 var terminal_buf: []u8 = undefined;
 var terminal_buf_prev: []u8 = undefined;
 var terminal_size: struct { w: u32, h: u32 } = undefined;
@@ -66,7 +66,7 @@ fn init_fb() void {
     }
 
     const fb_raw = framebuffer_response.framebuffers()[0];
-    fb = main.Image([*]volatile u8){
+    fb = util.Image([*]volatile u8){
         .width = @intCast(fb_raw.width),
         .height = @intCast(fb_raw.height),
         .pitch = @intCast(fb_raw.pitch),
