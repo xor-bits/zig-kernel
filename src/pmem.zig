@@ -146,7 +146,7 @@ pub const HhdmAddr = struct {
 //
 
 /// tells if the frame allocator can be used already
-var pfa_lazy_init = lazy.LazyInit.new();
+var pfa_lazy_init = lazy.Lazy(void).new();
 
 /// base physical address from where the refcount array starts from
 var base: PhysAddr = undefined;
@@ -258,7 +258,7 @@ fn deallocate(refcount: *std.atomic.Value(u8)) void {
 //
 
 fn tryInit() void {
-    pfa_lazy_init.waitOrInit(init);
+    _ = pfa_lazy_init.waitOrInit(lazy.fnPtrAsInit(void, init));
 }
 
 fn init() void {

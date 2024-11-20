@@ -11,8 +11,9 @@ const hcf = arch.hcf;
 
 //
 
+var uart_lazy_init = lazy.Lazy(void).new();
 pub fn print(comptime fmt: []const u8, args: anytype) void {
-    init();
+    _ = uart_lazy_init.waitOrInit(lazy.fnPtrAsInit(void, Uart.init));
 
     const UartWriter = struct {
         pub const Error = error{};
@@ -30,11 +31,6 @@ pub fn print(comptime fmt: []const u8, args: anytype) void {
     };
 
     std.fmt.format(UartWriter{}, fmt, args) catch {};
-}
-
-var uart_lazy_init = lazy.LazyInit.new();
-fn init() void {
-    uart_lazy_init.waitOrInit(Uart.init);
 }
 
 const Uart = struct {

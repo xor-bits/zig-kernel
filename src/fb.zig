@@ -19,9 +19,9 @@ const glyphs = font.glyphs;
 
 //
 
-var fb_lazy_init = lazy.LazyInit.new();
+var fb_lazy_init = lazy.Lazy(void).new();
 pub fn print(comptime fmt: []const u8, args: anytype) void {
-    fb_lazy_init.getOrInit(init_fb) catch {
+    _ = fb_lazy_init.getOrInit(lazy.fnPtrAsInit(void, init_fb)) orelse {
         return;
     };
 

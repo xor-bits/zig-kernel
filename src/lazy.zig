@@ -2,69 +2,85 @@ const std = @import("std");
 
 //
 
-pub const LazyInit = struct {
-    initialized: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
-    initializing: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+pub fn fnPtrAsInit(comptime T: type, comptime f: fn () T) type {
+    return struct {
+        fn init() void {
+            f();
+        }
+    };
+}
 
-    const Self = @This();
+pub fn Lazy(comptime T: type) type {
+    return struct {
+        val: T = undefined,
+        initialized: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+        initializing: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
 
-    pub fn new() Self {
-        return .{};
-    }
+        const Self = @This();
 
-    pub fn waitOrInit(self: *Self, init: *const fn () void) void {
-        if (!self.isInitialized()) {
-            // very low chance to not be initialized (only the first time)
-            @setCold(true);
+        pub fn new() Self {
+            return .{};
+        }
 
-            self.startInit() catch {
-                // super low chance to not be initialized and currently initializing
-                // (only when one thread accesses it for the first time and the current thread just a short time later)
+        pub fn initNow(self: *Self, val: T) void {
+            _ = self.getOrInit(struct {
+                val: T,
+
+                fn init(s: *const @This()) T {
+                    return s.val;
+                }
+            }{
+                .val = val,
+            });
+        }
+
+        pub fn waitOrInit(self: *Self, init: anytype) *T {
+            if (self.getOrInit(init)) |v| {
+                return v;
+            }
+
+            self.wait();
+            return &self.val;
+        }
+
+        pub fn getOrInit(self: *Self, init: anytype) ?*T {
+            if (!self.isInitialized()) {
+                // very low chance to not be initialized (only the first time)
                 @setCold(true);
-                self.wait();
-                return;
-            };
 
-            init();
+                self.startInit() catch {
+                    // super low chance to not be initialized and currently initializing
+                    // (only when one thread accesses it for the first time and the current thread just a short time later)
+                    @setCold(true);
+                    return null;
+                };
 
-            self.finishInit();
+                self.val = init.init();
+
+                self.finishInit();
+            }
+
+            return &self.val;
         }
-    }
 
-    /// does not wait but can fail
-    pub fn getOrInit(self: *Self, init: *const fn () void) !void {
-        if (!self.isInitialized()) {
-            // very low chance to not be initialized (only the first time)
-            @setCold(true);
-
-            self.startInit() catch {
-                @setCold(true);
-                return error.NotInitialized;
-            };
-
-            init();
-
-            self.finishInit();
+        pub fn isInitialized(self: *Self) bool {
+            return self.initialized.load(.acquire);
         }
-    }
 
-    pub fn isInitialized(self: *Self) bool {
-        return self.initialized.load(.acquire);
-    }
-
-    pub fn wait(self: *Self) void {
-        while (!self.isInitialized()) {
-            std.atomic.spinLoopHint();
+        pub fn wait(self: *Self) void {
+            while (!self.isInitialized()) {
+                std.atomic.spinLoopHint();
+            }
         }
-    }
 
-    pub fn startInit(self: *Self) !void {
-        if (self.initializing.swap(true, .acquire)) {
-            return error.AlreadyInitializing;
+        pub fn startInit(self: *Self) !void {
+            if (self.initializing.swap(true, .acquire)) {
+                return error.AlreadyInitializing;
+            }
         }
-    }
 
-    pub fn finishInit(self: *Self) void {
-        self.initialized.store(true, .release);
-    }
-};
+        pub fn finishInit(self: *Self) void {
+            self.initialized.store(true, .release);
+        }
+    };
+}
