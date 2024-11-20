@@ -53,6 +53,11 @@ fn acpiv1(rsdp: *const Rsdp) !void {
     for (rsdt.pointers()) |sdt_ptr| {
         const sdt: *const SdtHeader = pmem.PhysAddr.new(sdt_ptr).toHhdm().ptr(*const SdtHeader);
         log.info(" - {s}", .{sdt.signature});
+
+        switch (SdtType.fromSignature(sdt.signature)) {
+            .APIC => madt(sdt),
+            .other => {},
+        }
     }
 }
 
@@ -76,7 +81,50 @@ fn acpiv2(rsdp: *const Rsdp) !void {
     for (xsdt.pointers()) |sdt_ptr| {
         const sdt: *const SdtHeader = pmem.PhysAddr.new(sdt_ptr).toHhdm().ptr(*const SdtHeader);
         log.info(" - {s}", .{sdt.signature});
+
+        switch (SdtType.fromSignature(sdt.signature)) {
+            .APIC => madt(sdt),
+            .other => {},
+        }
     }
+}
+
+pub const SdtType = enum {
+    FACP, // = Advanced Configuration and Power Interface
+    APIC, // = MADT = Multiple (Advanced Programmable Interrupt Controller) Description Table (better PIC)
+    HPET, // = High Precision Event Timer (better PIT/RTC)
+    MCFG, // = PCIe configuration space
+    WAET, // = Windows ACPI Emulated Devices, useless
+    BGRT, // = Boot Graphics Record Table
+    unknown,
+
+    fn fromSignature(signature: [4]u8) @This() {
+        const this = @typeInfo(@This()).Enum;
+
+        inline for (this.fields) |f| {
+            if (strToU32(f.name) == signToU32(signature)) {
+                return @enumFromInt(f.value);
+            }
+        }
+
+        return .unknown;
+    }
+
+    fn signToU32(s: [4]u8) u32 {
+        return @bitCast(s);
+    }
+
+    fn strToU32(comptime s: []const u8) u32 {
+        if (s.len < 4) {
+            @compileError("SDT header string too short");
+        }
+        const b4: *const [4]u8 = @ptrCast(s.ptr);
+        return @bitCast(b4.*);
+    }
+};
+
+fn madt(sdt: *const SdtHeader) !void {
+    _ = sdt;
 }
 
 //
@@ -156,7 +204,7 @@ pub fn isChecksumValid(comptime T: type, val: *const T) bool {
     return checksum == 0;
 }
 
-// less effor than spamming align(1) on every field,
+// less effort than spamming align(1) on every field,
 // since zig packed structs are not like in every other language
 pub fn pack(comptime T: type) type {
     var s = comptime @typeInfo(T).Struct;
