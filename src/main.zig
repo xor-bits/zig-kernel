@@ -66,8 +66,6 @@ export fn _start() callconv(.C) noreturn {
     @fence(.seq_cst);
 
     main();
-
-    log.info("done", .{});
     arch.hcf();
 }
 
@@ -101,6 +99,8 @@ fn main() void {
     acpi.init() catch |err| {
         std.debug.panic("failed to initialize ACPI: {any}", .{err});
     };
+
+    log.info("done", .{});
 
     // NOTE: /path/to/something is a short form for fs:///path/to/something
     // TODO: kernel
