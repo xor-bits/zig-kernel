@@ -61,9 +61,6 @@ pub fn printInfo() void {
     log.info("bootloader (reclaimable) overhead: {any}B", .{
         NumberPrefix(usize, .binary).new(reclaimable),
     });
-    log.info("bootloader (reclaimable) overhead: {any}B", .{
-        NumberPrefix(usize, .binary).new(reclaimable),
-    });
     log.info("page allocator overhead: {any}B", .{
         NumberPrefix(usize, .binary).new(page_refcounts.len),
     });
