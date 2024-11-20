@@ -39,6 +39,7 @@ pub fn Lazy(comptime T: type) type {
                 return v;
             }
 
+            @setCold(true);
             self.wait();
             return &self.val;
         }
