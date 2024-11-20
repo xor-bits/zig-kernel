@@ -701,7 +701,7 @@ pub const CpuConfig = struct {
         ints.disable();
         self.gdt.load();
         self.idt.load(null);
-        ints.enable();
+        // ints.enable();
 
         log.info("cpu_id: {d} cpuconfig size: {d}", .{ this_cpu_id, @sizeOf(CpuConfig) });
 

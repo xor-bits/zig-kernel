@@ -5,6 +5,7 @@ const acpi = @import("acpi.zig");
 const arch = @import("arch.zig");
 const pmem = @import("pmem.zig");
 const lazy = @import("lazy.zig");
+const hpet = @import("hpet.zig");
 
 const log = std.log.scoped(.apic);
 
@@ -98,7 +99,10 @@ pub fn init(madt: *const Madt) !void {
     apic_base.initNow(lapic);
     @fence(.seq_cst); // init is release, not acquire
 
-    arch.x86_64.ints.disable();
+}
+
+pub fn enable() void {
+    const lapic = apic_base.get().?.*;
 
     // reset APIC to a well-known state
     lapic.destination_format.val = 0xFFFF_FFFF;
@@ -119,15 +123,38 @@ pub fn init(madt: *const Madt) !void {
     );
 
     // enable timer interrupts
-    // const period = 4_000;
-    // lapic.divide_configuration.val = APIC_TIMER_DIV;
-    // lapic.lvt_timer.val = IRQ_TIMER | APIC_TIMER_MODE_PERIODIC;
-    // lapic.initial_count.val = period;
-    // lapic.lvt_thermal_sensor.val = 0;
-    // lapic.lvt_error.val = 0;
-    // lapic.divide_configuration.val = APIC_TIMER_DIV; // buggy hardware fix
+    const period = measure_apic_timer_speed(lapic) * 500;
+    lapic.divide_configuration.val = APIC_TIMER_DIV;
+    lapic.lvt_timer.val = IRQ_TIMER | APIC_TIMER_MODE_PERIODIC;
+    lapic.initial_count.val = period;
+    lapic.lvt_thermal_sensor.val = 0;
+    lapic.lvt_error.val = 0;
+    lapic.divide_configuration.val = APIC_TIMER_DIV; // buggy hardware fix
 
     log.info("APIC initialized", .{});
+
+    while (true) {
+        arch.x86_64.ints.wait();
+    }
+}
+
+/// returns the apic period for 1ms
+fn measure_apic_timer_speed(lapic: *volatile LocalApicRegs) u32 {
+    lapic.divide_configuration.val = APIC_TIMER_DIV;
+
+    hpet.hpet_spin_wait(1_000, struct {
+        lapic: *volatile LocalApicRegs,
+        pub fn run(s: *const @This()) void {
+            s.lapic.initial_count.val = 0xFFFF_FFFF;
+        }
+    }{ .lapic = lapic });
+
+    lapic.lvt_timer.val = APIC_DISABLE;
+    const count = 0xFFFF_FFFF - lapic.current_count.val;
+
+    log.info("APIC timer calibrated", .{});
+
+    return count;
 }
 
 pub fn spurious(_: *const anyopaque) void {

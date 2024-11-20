@@ -3,6 +3,7 @@ const limine = @import("limine");
 
 const pmem = @import("pmem.zig");
 const apic = @import("apic.zig");
+const hpet = @import("hpet.zig");
 
 const log = std.log.scoped(.acpi);
 
@@ -100,9 +101,11 @@ fn walkTables(comptime T: type, pointers: []align(1) const T) !void {
     const hpet_table = maybe_hpet orelse {
         return error.HpetTableMissing;
     };
-    _ = hpet_table;
 
     try apic.init(@ptrCast(apic_table));
+    try hpet.init(@ptrCast(hpet_table));
+
+    apic.enable();
 }
 
 pub const SdtType = enum {
