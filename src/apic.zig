@@ -59,7 +59,7 @@ pub fn init(madt: *const Madt) !void {
             1 => {
                 const entry: *const IoApic = @ptrCast(entry_base);
                 // _ = entry;
-                log.info("I/O APIC at 0x{x}", .{entry.io_apic_addr});
+                log.info("found I/O APIC addr: 0x{x}", .{entry.io_apic_addr});
                 // TODO: this is going to be used later for I/O APIC
             },
             2 => {
@@ -93,7 +93,7 @@ pub fn init(madt: *const Madt) !void {
         }
     }
 
-    log.info("found local apic addr: 0x{x}", .{lapic_addr});
+    log.info("found Local APIC addr: 0x{x}", .{lapic_addr});
     const lapic: *volatile LocalApicRegs = pmem.PhysAddr.new(lapic_addr).toHhdm().ptr(*volatile LocalApicRegs);
 
     apic_base.initNow(lapic);
@@ -152,7 +152,7 @@ fn measure_apic_timer_speed(lapic: *volatile LocalApicRegs) u32 {
     lapic.lvt_timer.val = APIC_DISABLE;
     const count = 0xFFFF_FFFF - lapic.current_count.val;
 
-    log.info("APIC timer calibrated", .{});
+    log.info("APIC timer speed: 1ms = {d} ticks", .{count});
 
     return count;
 }
