@@ -210,19 +210,3 @@ pub fn isChecksumValid(comptime T: type, val: *const T) bool {
 
     return checksum == 0;
 }
-
-// less effort than spamming align(1) on every field,
-// since zig packed structs are not like in every other language
-pub fn pack(comptime T: type) type {
-    var s = comptime @typeInfo(T).Struct;
-    const n_fields = comptime s.fields.len;
-
-    var fields: [n_fields]std.builtin.Type.StructField = undefined;
-    inline for (0..n_fields) |i| {
-        fields[i] = s.fields[i];
-        fields[i].alignment = 1;
-    }
-    s.fields = fields[0..];
-
-    return @Type(std.builtin.Type{ .Struct = s });
-}
