@@ -235,6 +235,21 @@ pub fn cpuid(branch: u32, leaf: u32) Cpuid {
     };
 }
 
+pub fn wrcr3(sel: u64) void {
+    asm volatile (
+        \\ mov %[v], %cr3
+        :
+        : [v] "N{rdx}" (sel),
+    );
+}
+
+pub fn rdcr3() u64 {
+    return asm volatile (
+        \\ mov %cr3, %[v]
+        : [v] "={rdx}" (-> u64),
+    );
+}
+
 const cpu_id_mode_ty = enum(u8) {
     rdpid,
     rdtscp,
