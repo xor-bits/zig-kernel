@@ -103,6 +103,9 @@ pub const MapSource = union(enum) {
     /// map pages immediately, and the VMM **IS** allowed to free them
     owned: PhysPages,
 
+    /// allocate pages immediately, and write bytes into them
+    bytes: []const u8,
+
     /// allocate pages on page fault (overcommit) (lazy physical memory allocation)
     lazy: void,
 };
