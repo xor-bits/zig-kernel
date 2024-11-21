@@ -115,10 +115,6 @@ pub fn build(b: *std.Build) !void {
         "1g",
         // "-M",
         // "smm=off,accel=kvm",
-        "-d",
-        "guest_errors",
-        // "int,guest_errors",
-        // "int,guest_errors,cpu_reset",
         "-no-reboot",
         "-serial",
         "stdio",
@@ -137,6 +133,20 @@ pub fn build(b: *std.Build) !void {
     });
     qemu_step.addPrefixedFileArg("format=raw,file=", os_iso);
     qemu_step.step.dependOn(&limine_install_step.step);
+
+    const debug = b.option(u2, "debug", "QEMU debug level") orelse 1;
+    switch (debug) {
+        0 => {},
+        1 => {
+            qemu_step.addArgs(&.{ "-d", "guest_errors" });
+        },
+        2 => {
+            qemu_step.addArgs(&.{ "-d", "cpu_reset,guest_errors" });
+        },
+        3 => {
+            qemu_step.addArgs(&.{ "-d", "int,cpu_reset,guest_errors" });
+        },
+    }
 
     const use_ovmf = b.option(
         bool,
