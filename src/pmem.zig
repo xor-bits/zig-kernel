@@ -81,6 +81,35 @@ pub fn totalPages() usize {
     return usable.load(.monotonic);
 }
 
+pub const PhysPage = struct {
+    page_index: u32, // 2^32-1 of pages (4KiB) is already ~16TiB of physical memory
+
+    const Self = @This();
+
+    pub fn new(page: usize) Self {
+        // FIXME: broken with over 16TiB of ram no way
+        // anyone is ever going to this os with that much ram
+        return .{ .page_index = @truncate(page) };
+    }
+
+    pub fn fromPhys(phys: PhysAddr) Self {
+        return .{ .page_index = @truncate(phys.raw >> 12) };
+    }
+
+    pub fn toPhys(self: Self) PhysAddr {
+        return PhysAddr.new(@as(u64, self.page_index) << 12);
+    }
+
+    pub fn toRefcntIndex(self: Self) !usize {
+        if (self.page_index < base.page_index) {
+            @setCold(true);
+            return error.OutOfBounds;
+        }
+
+        return self.page_index - base.page_index;
+    }
+};
+
 pub const PhysAddr = struct {
     raw: usize,
 
@@ -100,6 +129,10 @@ pub const PhysAddr = struct {
 
     pub fn toHhdm(self: Self) HhdmAddr {
         return .{ .raw = self.raw + main.hhdm_offset.load(.monotonic) };
+    }
+
+    pub fn toPage(self: Self) PhysPage {
+        return PhysPage.new(self.raw >> 12);
     }
 };
 
@@ -148,8 +181,8 @@ pub const HhdmAddr = struct {
 /// tells if the frame allocator can be used already
 var pfa_lazy_init = lazy.Lazy(void).new();
 
-/// base physical address from where the refcount array starts from
-var base: PhysAddr = undefined;
+/// base physical page from where the refcount array starts from
+var base: PhysPage = undefined;
 
 /// each page has a ref counter, 0 = not allocated, N = N process(es) is using it
 var page_refcounts: []std.atomic.Value(u8) = undefined;
@@ -163,15 +196,6 @@ var used = std.atomic.Value(usize).init(0);
 
 /// how many pages are usable
 var usable = std.atomic.Value(usize).init(0);
-
-fn physToIndex(phys: PhysAddr) !usize {
-    if (phys.raw < base.raw) {
-        @setCold(true);
-        return error.OutOfBounds;
-    }
-
-    return (phys.raw - base.raw) >> 12;
-}
 
 fn allocateContiguous(n_pages: usize) ?[]Page {
     const hint = next.fetchAdd(n_pages, .monotonic) % page_refcounts.len;
@@ -219,7 +243,7 @@ fn allocateContiguousFrom(n_pages: usize, from: usize) ?[]Page {
             }
         } else {
             _ = used.fetchAdd(n_pages, .monotonic);
-            const pages = base.add(first_page * (1 << 12)).toHhdm().ptr([*]Page);
+            const pages = PhysPage.new(base.page_index + first_page).toPhys().toHhdm().ptr([*]Page);
             return pages[0..n_pages];
         }
     }
@@ -231,7 +255,7 @@ fn allocateContiguousFrom(n_pages: usize, from: usize) ?[]Page {
 
 fn deallocateContiguous(pages: []Page) void {
     for (pages) |*page| {
-        const page_i = physToIndex(HhdmAddr.new(page).toPhys()) catch unreachable;
+        const page_i = HhdmAddr.new(page).toPhys().toPage().toRefcntIndex() catch unreachable;
         deallocate(&page_refcounts[page_i]);
     }
 
@@ -240,7 +264,7 @@ fn deallocateContiguous(pages: []Page) void {
 
 fn deallocateContiguousZeroed(pages: []Page) void {
     for (pages) |*page| {
-        const page_i = physToIndex(HhdmAddr.new(page).toPhys()) catch unreachable;
+        const page_i = HhdmAddr.new(page).toPhys().toPage().toRefcntIndex() catch unreachable;
         deallocate(&page_refcounts[page_i]);
     }
 
@@ -309,7 +333,7 @@ fn init() void {
             break;
         }
     }
-    base = PhysAddr.new(memory_bottom);
+    base = PhysAddr.new(memory_bottom).toPage();
     page_refcounts = page_refcounts_null orelse {
         log.err("not enough contiguous memory", .{});
         arch.hcf();
@@ -322,7 +346,7 @@ fn init() void {
     // log.err("zeroed", .{});
     for (memory_response.entries()) |memory_map_entry| {
         if (memory_map_entry.kind == .usable) {
-            const first_page = physToIndex(PhysAddr.new(memory_map_entry.base)) catch unreachable;
+            const first_page = PhysAddr.new(memory_map_entry.base).toPage().toRefcntIndex() catch unreachable;
             const n_pages = memory_map_entry.length >> 12;
             for (first_page..first_page + n_pages) |page| {
                 page_refcounts[page].store(0, .seq_cst);
@@ -334,6 +358,17 @@ fn init() void {
 }
 
 //
+
+pub fn alloc() ?*Page {
+    tryInit();
+    const pages = allocateContiguous(1) orelse return null;
+    return @ptrCast(pages.ptr);
+}
+
+pub fn free(p: *Page) void {
+    const pages: [*]Page = @ptrCast(p);
+    deallocateContiguousZeroed(pages[0..1]);
+}
 
 fn _alloc(_: *anyopaque, len: usize, ptr_align: u8, ret_addr: usize) ?[*]u8 {
     _ = ret_addr;
