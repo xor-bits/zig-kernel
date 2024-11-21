@@ -99,10 +99,6 @@ fn main() void {
         std.debug.panic("failed to initialize ACPI: {any}", .{err});
     };
 
-    asm volatile (
-        \\ movq (0), %rax
-    );
-
     vmem.init();
 
     const new_vmm = vmem.AddressSpace.new();
