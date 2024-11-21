@@ -141,8 +141,28 @@ pub const VirtAddr = struct {
 
     const Self = @This();
 
+    /// sign extends the bit 47 to the last 16 bits,
+    /// making the virtual address canonical
+    pub fn new(addr: usize) Self {
+        const sign_extension: isize = @bitCast(addr << 16);
+        return .{ .raw = @bitCast(sign_extension >> 16) };
+    }
+
     pub fn ptr(comptime T: type, self: Self) *T {
         return @ptrFromInt(self.raw);
+    }
+
+    pub fn offset(self: Self) u12 {
+        return @truncate(self.raw);
+    }
+
+    pub fn levels(self: Self) [4]u9 {
+        return .{
+            @truncate(self.raw >> 12),
+            @truncate(self.raw >> 21),
+            @truncate(self.raw >> 30),
+            @truncate(self.raw >> 39),
+        };
     }
 };
 
