@@ -110,7 +110,7 @@ fn main() void {
     // NOTE: /path/to/something is a short form for fs:///path/to/something
     // TODO: kernel
     //  - virtual memory mapping
-    //  - ACPI, APIC, HPET
+    //  - HPET
     //  - scheduler
     //  - binary loader
     //  - message IPC, shared memory IPC

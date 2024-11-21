@@ -733,13 +733,25 @@ pub const CpuConfig = struct {
         // initialize GDT (, TSS) and IDT
         // extremely important to disable interrupts before modifying GDT
         ints.disable();
+        log.info("loading new GDT", .{});
         self.gdt.load();
+        log.info("loading new IDT", .{});
         self.idt.load(null);
         // ints.enable();
 
+        // enable/disable some features
+        var cr0 = Cr0.read();
+        cr0.emulate_coprocessor = 0;
+        cr0.monitor_coprocessor = 1;
+        cr0.write();
+        var cr4 = Cr4.read();
+        cr4.osfxsr = 1;
+        cr4.osxmmexcpt = 1;
+        cr4.write();
+
         // initialize CPU identification for scheduling purposes
         wrmsr(IA32_TCS_AUX, this_cpu_id);
-        log.info("PID: {d}", .{cpu_id()});
+        log.info("CPU ID set: {d}", .{cpu_id()});
 
         // initialize syscall and sysret instructions
         wrmsr(
@@ -757,6 +769,139 @@ pub const CpuConfig = struct {
 
         const efer_flags: u64 = @bitCast(EferFlags{ .system_call_extensions = 1 });
         wrmsr(EFER, rdmsr(EFER) | efer_flags);
+        log.info("syscalls initialized", .{});
+    }
+};
+
+pub const Cr0 = packed struct {
+    protected_mode_enable: u1,
+    monitor_coprocessor: u1,
+    emulate_coprocessor: u1,
+    task_switched: u1,
+    extension_type: u1,
+    numeric_error: u1,
+    reserved0: u10,
+    write_protect: u1,
+    reserved1: u1,
+    alignment_mask: u1,
+    reserved2: u10,
+    not_write_through: u1,
+    cache_disable: u1,
+    paging: u1,
+    reserved: u32,
+
+    const Self = @This();
+
+    pub fn write(val: Self) void {
+        const v: u64 = @bitCast(val);
+        asm volatile (
+            \\ mov %[v], %cr0
+            :
+            : [v] "r" (v),
+        );
+    }
+
+    pub fn read() Self {
+        return @bitCast(asm volatile (
+            \\mov %cr0, %[v]
+            : [v] "={rax}" (-> u64),
+        ));
+    }
+};
+
+pub const Cr2 = packed struct {
+    page_fault_addr: u64,
+
+    const Self = @This();
+
+    pub fn write(val: Self) void {
+        const v: u64 = @bitCast(val);
+        asm volatile (
+            \\ mov %[v], %cr2
+            :
+            : [v] "r" (v),
+        );
+    }
+
+    pub fn read() Self {
+        return @bitCast(asm volatile (
+            \\ mov %cr2, %[v]
+            : [v] "={rax}" (-> u64),
+        ));
+    }
+};
+
+pub const Cr3 = packed struct {
+    // reserved0: u3,
+    // page_Level_write_through: u1,
+    // page_level_cache_disable: u1,
+    // reserved1: u7,
+    pcid: u12,
+    pml4_phys_base: u52,
+
+    const Self = @This();
+
+    pub fn write(val: Self) void {
+        const v: u64 = @bitCast(val);
+        asm volatile (
+            \\ mov %[v], %cr3
+            :
+            : [v] "r" (v),
+        );
+    }
+
+    pub fn read() Self {
+        return @bitCast(asm volatile (
+            \\ mov %cr3, %[v]
+            : [v] "={rax}" (-> u64),
+        ));
+    }
+};
+
+pub const Cr4 = packed struct {
+    virtual_8086_mode_extensions: u1,
+    protected_mode_virtual_interrupts: u1,
+    tsc_in_kernel_only: u1,
+    debugging_extensions: u1,
+    page_size_extension: u1,
+    physical_address_extension: u1,
+    machine_check_exception: u1,
+    page_global_enable: u1,
+    performance_monitoring_counter_enable: u1,
+    osfxsr: u1,
+    osxmmexcpt: u1,
+    user_mode_instruction_prevention: u1,
+    reserved0: u1,
+    virtual_machine_extensions_enable: u1,
+    safer_mode_extensions_enable: u1,
+    reserved1: u1,
+    fsgsbase: u1,
+    pcid_enable: u1,
+    osxsave_enable: u1,
+    reserved2: u1,
+    supervisor_mode_executions_protection_enable: u1,
+    supervisor_mode_access_protection_enable: u1,
+    protection_key_enable: u1,
+    controlflow_enforcement_technology: u1,
+    protection_keys_for_supervisor: u1,
+    reserved3: u39,
+
+    const Self = @This();
+
+    pub fn write(val: Self) void {
+        const v: u64 = @bitCast(val);
+        asm volatile (
+            \\ mov %[v], %cr4
+            :
+            : [v] "r" (v),
+        );
+    }
+
+    pub fn read() Self {
+        return @bitCast(asm volatile (
+            \\ mov %cr4, %[v]
+            : [v] "={rax}" (-> u64),
+        ));
     }
 };
 
