@@ -148,6 +148,16 @@ pub const VirtAddr = struct {
         return .{ .raw = @bitCast(sign_extension >> 16) };
     }
 
+    pub fn fromParts(_offset: u12, _levels: [4]u9) Self {
+        return Self.new(
+            @as(usize, _offset) |
+                (@as(usize, _levels[0]) << 12) |
+                (@as(usize, _levels[1]) << 21) |
+                (@as(usize, _levels[2]) << 30) |
+                (@as(usize, _levels[3]) << 39),
+        );
+    }
+
     pub fn ptr(comptime T: type, self: Self) *T {
         return @ptrFromInt(self.raw);
     }
