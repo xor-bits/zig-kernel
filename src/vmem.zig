@@ -57,31 +57,44 @@ pub const AddressSpace = struct {
     }
 };
 
+    pub fn map(addr_space: *const Self, dst: pmem.VirtAddr, src: MapSource, flags: Entry) void {
+        _ = .{ addr_space, dst, src, flags };
+
+        log.info("0b{b}", .{dst.raw});
+
+        log.info("{any}", .{.{
+            dst.raw,
+            dst.offset(),
+            dst.levels(),
+        }});
+    }
+};
+
 pub const Entry = packed struct {
-    no_execute: u1 = 0,
-    protection_key: u4 = 0,
-
-    // custom bits
-    _free_to_use0: u7 = 0,
-
-    reserved: u8 = 0,
-    page_index: u32 = 0,
+    present: u1 = 0,
+    writeable: u1 = 0,
+    user_accessible: u1 = 0,
+    write_through: u1 = 0,
+    cache_disable: u1 = 0,
+    accessed: u1 = 0,
+    dirty: u1 = 0,
+    // page_attribute_table: u1 = 0,
+    huge_page: u1 = 0,
+    global: u1 = 0,
 
     // more custom bits
     copy_on_write: u1 = 0, // page fault == make a copy of the page and mark it writeable
     lazy_alloc: u1 = 0, //    page fault == allocate now (overcommit)
     no_free: u1 = 0, //       pages that should never be deallocated, like kernel pages
 
-    global: u1 = 0,
-    // page_attribute_table: u1 = 0,
-    huge_page: u1 = 0,
-    dirty: u1 = 0,
-    accessed: u1 = 0,
-    cache_disable: u1 = 0,
-    write_through: u1 = 0,
-    user_accessible: u1 = 0,
-    writeable: u1 = 0,
-    present: u1 = 0,
+    page_index: u32 = 0,
+    reserved: u8 = 0,
+
+    // custom bits
+    _free_to_use0: u7 = 0,
+
+    protection_key: u4 = 0,
+    no_execute: u1 = 0,
 };
 
 pub const PageTable = [512]Entry;
