@@ -2,6 +2,7 @@ const std = @import("std");
 
 const apic = @import("../apic.zig");
 const main = @import("../main.zig");
+const pmem = @import("../pmem.zig");
 
 const log = std.log.scoped(.arch);
 
@@ -13,6 +14,8 @@ pub const EFER = 0xC0000080;
 pub const STAR = 0xC0000081;
 pub const LSTAR = 0xC0000082;
 pub const SFMASK = 0xC0000084;
+pub const GS_BASE = 0xC0000101;
+pub const KERNELGS_BASE = 0xC0000102;
 
 //
 
@@ -93,11 +96,11 @@ pub fn lidt(v: u64) void {
     );
 }
 
-pub fn ltr(v: u64) void {
+pub fn ltr(v: u16) void {
     asm volatile (
         \\ ltr %[v]
         :
-        : [v] "N{dx}" (v),
+        : [v] "r" (v),
     );
 }
 
@@ -350,7 +353,20 @@ pub const GdtDescriptor = packed struct {
     pub const user_data_selector: u8 = (3 << 3) | 3;
     pub const user_code_selector: u8 = (4 << 3) | 3;
 
-    // pub fn tss() Self {}
+    pub const tss_selector: u8 = (5 << 3);
+
+    pub fn tss(_tss: *const Tss) [2]Self {
+        const tss_ptr: u64 = @intFromPtr(_tss);
+        const limit: u16 = @truncate(@sizeOf(Tss));
+        const base_0_23: u24 = @truncate(tss_ptr);
+        const base_24_32: u8 = @truncate(tss_ptr >> 24);
+        return .{
+            .{
+                .raw = present.raw | limit | (@as(u64, base_0_23) << 16) | (@as(u64, base_24_32) << 56) | (@as(u64, 0b1001) << 40),
+            },
+            .{ .raw = tss_ptr >> 32 },
+        };
+    }
 };
 
 pub const DescriptorTablePtr = extern struct {
@@ -362,11 +378,11 @@ pub const DescriptorTablePtr = extern struct {
 pub const Gdt = extern struct {
     ptr: DescriptorTablePtr,
     null_descriptor: GdtDescriptor,
-    descriptors: [4]GdtDescriptor,
+    descriptors: [6]GdtDescriptor,
 
     pub const Self = @This();
 
-    pub fn new() Self {
+    pub fn new(tss: *const Tss) Self {
         return Self{
             .ptr = undefined,
             .null_descriptor = .{ .raw = 0 },
@@ -375,14 +391,15 @@ pub const Gdt = extern struct {
                 GdtDescriptor.kernel_data,
                 GdtDescriptor.user_data,
                 GdtDescriptor.user_code,
-            },
+            } ++
+                GdtDescriptor.tss(tss),
         };
     }
 
     pub fn load(self: *Self) void {
         self.ptr = .{
             .base = @intFromPtr(&self.null_descriptor),
-            .limit = 5 * @sizeOf(u64) - 1,
+            .limit = 7 * @sizeOf(u64) - 1,
         };
         loadRaw(&self.ptr.limit);
     }
@@ -391,14 +408,44 @@ pub const Gdt = extern struct {
         lgdt(@intFromPtr(ptr));
         set_cs(GdtDescriptor.kernel_code_selector);
         set_ss(GdtDescriptor.kernel_data_selector);
-        set_ds(GdtDescriptor.kernel_data_selector);
-        set_es(GdtDescriptor.kernel_data_selector);
-        set_fs(GdtDescriptor.kernel_data_selector);
-        set_gs(GdtDescriptor.kernel_data_selector);
+        // set_ds(GdtDescriptor.kernel_data_selector);
+        // set_es(GdtDescriptor.kernel_data_selector);
+        // set_fs(GdtDescriptor.kernel_data_selector);
+        // set_gs(GdtDescriptor.kernel_data_selector);
+        ltr(GdtDescriptor.tss_selector);
     }
 };
 
-pub const Tss = packed struct {};
+pub const Tss = extern struct {
+    reserved0: u32 = 0,
+    privilege_stacks: [3]u64 align(4) = std.mem.zeroes([3]u64),
+    reserved1: u64 align(4) = 0,
+    interrupt_stacks: [7]u64 align(4) = std.mem.zeroes([7]u64),
+    reserved2: u64 align(4) = 0,
+    reserved3: u16 = 0,
+    iomap_base: u16 = @sizeOf(@This()), // no iomap base
+
+    fn new() @This() {
+        const Stack = [8 * 0x1000]u8;
+
+        var res = @This(){};
+
+        res.privilege_stacks[0] =
+            @intFromPtr(pmem.page_allocator.create(Stack) catch {
+            std.debug.panic("not enough memory for a privilege stack", .{});
+        });
+        res.interrupt_stacks[0] =
+            @intFromPtr(pmem.page_allocator.create(Stack) catch {
+            std.debug.panic("not enough memory for an interrupt stack", .{});
+        });
+        // res.interrupt_stacks[1] =
+        //     @intFromPtr(pmem.page_allocator.create(Stack) catch {
+        //     std.debug.panic("not enough memory for an interrupt stack", .{});
+        // });
+
+        return res;
+    }
+};
 
 pub const PageFaultError = packed struct {
     /// page protection violation instead of a missing page
@@ -473,6 +520,12 @@ pub const Entry = packed struct {
             .offset_16_31 = @truncate((isr >> 16) & 0xFFFF),
             .offset_32_63 = @truncate((isr >> 32) & 0xFFFFFFFF),
         };
+    }
+
+    pub fn withStack(self: Self, stack: u3) Self {
+        var s = self;
+        s.interrupt_stack = stack;
+        return s;
     }
 
     pub fn asInt(self: Self) u128 {
@@ -587,7 +640,7 @@ pub const Idt = extern struct {
                 log.err("page fault ({any})\nframe: {any}", .{ pfec, interrupt_stack_frame });
                 std.debug.panic("unhandled CPU exception", .{});
             }
-        }).asInt();
+        }).withStack(1).asInt();
         // reserved
         // entries[15] = 0;
         // x87 fp exception
@@ -722,13 +775,20 @@ fn interrupt(interrupt_stack_frame: *const InterruptStackFrame) callconv(.Interr
 }
 
 pub const CpuConfig = struct {
+    // KernelGS:0 here
+    rsp_kernel: u64 align(0x1000),
+    rsp_user: u64,
+
     gdt: Gdt,
-    // tss: Tss,
+    tss: Tss,
     idt: Idt,
 
     pub fn init(self: *@This(), this_cpu_id: usize) void {
-        self.gdt = Gdt.new();
+        self.tss = Tss.new();
+        self.gdt = Gdt.new(&self.tss);
         self.idt = Idt.new();
+
+        log.info("CpuConfig size: 0x{x}", .{@sizeOf(@This())});
 
         // initialize GDT (, TSS) and IDT
         // extremely important to disable interrupts before modifying GDT
@@ -752,6 +812,9 @@ pub const CpuConfig = struct {
         // initialize CPU identification for scheduling purposes
         wrmsr(IA32_TCS_AUX, this_cpu_id);
         log.info("CPU ID set: {d}", .{cpu_id()});
+
+        wrmsr(KERNELGS_BASE, @intFromPtr(self));
+        wrmsr(GS_BASE, 0);
 
         // initialize syscall and sysret instructions
         wrmsr(
@@ -935,8 +998,114 @@ pub const EferFlags = packed struct {
     reserved: u63 = 0,
 };
 
-fn syscall_handler_wrapper() callconv(.Naked) void {
-    // main.syscall();
+pub const SyscallRegs = extern struct {
+    _r15: u64 = 0,
+    _r14: u64 = 0,
+    _r13: u64 = 0,
+    _r12: u64 = 0,
+    rflags: u64 = @bitCast(Rflags{ .interrupt_enable = 1 }), // r11
+    _r10: u64 = 0,
+    arg4: u64 = 0, // r9
+    arg3: u64 = 0, // r8
+    _rbp: u64 = 0,
+    arg1: u64 = 0, // rsi
+    arg0: u64 = 0, // rdi
+    arg2: u64 = 0, // rdx
+    user_instr_ptr: u64 = 0, // rcx
+    _rbx: u64 = 0,
+    syscall_id: u64 = 0, // rax = 0, also the return register
+    user_stack_ptr: u64 = 0, // rsp
+};
+
+const syscall_enter = std.fmt.comptimePrint(
+// interrupts get cleared already
+// \\ cli
+// save the user stack temporarily into the kernel GS structure
+// then load the real kernel stack (because syscall keeps RSP from userland)
+// then push the user stack into SyscallRegs
+    \\ swapgs
+    \\ movq %rsp, %gs:{0d}
+    \\ movq %gs:{1d}, %rsp
+    \\ pushq %gs:{0d}
+    \\ swapgs
+
+    // save all (lol thats a lie) registers
+    \\ push %rax
+    \\ push %rbx
+    \\ push %rcx
+    \\ push %rdx
+    \\ push %rdi
+    \\ push %rsi
+    \\ push %rbp
+    \\ push %r8
+    \\ push %r9
+    \\ push %r10
+    \\ push %r11
+    \\ push %r12
+    \\ push %r13
+    \\ push %r14
+    \\ push %r15
+
+    // set up the *SyscallRegs argument
+    \\ movq %rsp, %rdi
+, .{ @offsetOf(CpuConfig, "rsp_user"), @offsetOf(CpuConfig, "rsp_kernel") });
+
+const sysret_instr = std.fmt.comptimePrint(
+    \\ popq %r15
+    \\ popq %r14
+    \\ popq %r13
+    \\ popq %r12
+    \\ popq %r11
+    \\ popq %r10
+    \\ popq %r9
+    \\ popq %r8
+    \\ popq %rbp
+    \\ popq %rsi
+    \\ popq %rdi
+    \\ popq %rdx
+    \\ popq %rcx
+    \\ popq %rbx
+    \\ popq %rax
+
+    // load the user stack by temporarily storing
+    // the user RSP in the kernel GS structure
+    \\ swapgs
+    \\ popq %gs:{0d}
+    \\ movq %gs:{0d}, %rsp
+    \\ swapgs
+
+    // and finally the actual sysret
+    // FIXME: NMI,MCE interrupt race condition
+    // (https://wiki.osdev.org/SYSENTER#Security_of_SYSRET)
+    \\ sysretq
+, .{@offsetOf(CpuConfig, "rsp_user")});
+
+pub fn sysret(args: *SyscallRegs) noreturn {
+    asm volatile (
+    // set stack to be args
+        \\ movq %[args], %rsp
+        \\
+        ++ sysret_instr
+        :
+        : [args] "r" (args),
+        : "memory"
+    );
+
+    unreachable;
+}
+
+fn syscall_handler_wrapper_wrapper() callconv(.Naked) noreturn {
+    asm volatile (syscall_enter ++
+            \\
+            \\ call syscall_handler_wrapper
+            \\
+        ++ sysret_instr ::: "memory");
+
+    unreachable;
+}
+
+fn syscall_handler_wrapper(args: *SyscallRegs) callconv(.SysV) void {
+    main.syscall(args);
 }
 
 test "structure sizes" {

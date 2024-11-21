@@ -30,3 +30,5 @@ pub inline fn reset() void {
         x86_64.reset();
     }
 }
+
+pub const SyscallRegs = if (builtin.cpu.arch == .x86_64) x86_64.SyscallRegs else @compileError("todo");

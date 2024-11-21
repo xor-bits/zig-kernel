@@ -99,11 +99,19 @@ fn main() void {
         std.debug.panic("failed to initialize ACPI: {any}", .{err});
     };
 
+    asm volatile (
+        \\ movq (0), %rax
+    );
+
     vmem.init();
 
     const new_vmm = vmem.AddressSpace.new();
     new_vmm.printMappings();
     new_vmm.switchTo();
+
+    var s = arch.SyscallRegs{};
+    log.info("sysret", .{});
+    arch.x86_64.sysret(&s);
 
     log.info("done", .{});
 
@@ -179,8 +187,7 @@ fn main() void {
     //  - start processing cmds
 }
 
-pub fn syscall() void {
+pub fn syscall(args: *arch.SyscallRegs) void {
     const log = std.log.scoped(.syscall);
-
-    log.info("got a syscall");
+    log.info("got a syscall: {any}", .{args});
 }
