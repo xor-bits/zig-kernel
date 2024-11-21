@@ -40,7 +40,7 @@ pub fn build(b: *std.Build) !void {
     // build the kernel ELF
     const kernel_elf_step = b.addExecutable(.{
         .name = "kernel.elf",
-        .root_source_file = b.path("src/main.zig"),
+        .root_source_file = b.path("src/kernel/main.zig"),
         .target = target,
         .optimize = optimize,
         .code_model = .kernel,
