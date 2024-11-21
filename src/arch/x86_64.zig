@@ -637,7 +637,24 @@ pub const Idt = extern struct {
         entries[14] = Entry.generateWithEc(struct {
             fn handler(interrupt_stack_frame: *const InterruptStackFrame, ec: u64) void {
                 const pfec: PageFaultError = @bitCast(ec);
-                log.err("page fault ({any})\nframe: {any}", .{ pfec, interrupt_stack_frame });
+                const target_addr = Cr2.read().page_fault_addr;
+
+                log.err(
+                    \\page fault 0x{x}
+                    \\ - user: {any}
+                    \\ - caused by write: {any}
+                    \\ - instruction fetch: {any}
+                    \\ - ip: 0x{x}
+                    \\ - sp: 0x{x}
+                , .{
+                    target_addr,
+                    pfec.user_mode,
+                    pfec.caused_by_write,
+                    pfec.instruction_fetch,
+                    interrupt_stack_frame.ip,
+                    interrupt_stack_frame.sp,
+                });
+
                 std.debug.panic("unhandled CPU exception", .{});
             }
         }).withStack(1).asInt();
