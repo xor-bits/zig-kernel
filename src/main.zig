@@ -178,3 +178,9 @@ fn main() void {
     //  - register a fat32 filesystem
     //  - start processing cmds
 }
+
+pub fn syscall() void {
+    const log = std.log.scoped(.syscall);
+
+    log.info("got a syscall");
+}

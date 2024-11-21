@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const apic = @import("../apic.zig");
+const main = @import("../main.zig");
 
 const log = std.log.scoped(.arch);
 
@@ -8,6 +9,10 @@ const log = std.log.scoped(.arch);
 
 pub const IA32_TCS_AUX = 0xC0000103;
 pub const IA32_APIC_BASE = 0x1B;
+pub const EFER = 0xC0000080;
+pub const STAR = 0xC0000081;
+pub const LSTAR = 0xC0000082;
+pub const SFMASK = 0xC0000084;
 
 //
 
@@ -340,10 +345,10 @@ pub const GdtDescriptor = packed struct {
     pub const user_data = new(kernel_data.raw | ring_3.raw);
     pub const user_code = new(kernel_code.raw | ring_3.raw);
 
-    pub const kernel_code_selector = (1 << 3);
-    pub const kernel_data_selector = (2 << 3);
-    pub const user_data_selector = (3 << 3) | 3;
-    pub const user_code_selector = (4 << 3) | 3;
+    pub const kernel_code_selector: u8 = (1 << 3);
+    pub const kernel_data_selector: u8 = (2 << 3);
+    pub const user_data_selector: u8 = (3 << 3) | 3;
+    pub const user_code_selector: u8 = (4 << 3) | 3;
 
     // pub fn tss() Self {}
 };
@@ -725,18 +730,69 @@ pub const CpuConfig = struct {
         self.gdt = Gdt.new();
         self.idt = Idt.new();
 
+        // initialize GDT (, TSS) and IDT
         // extremely important to disable interrupts before modifying GDT
         ints.disable();
         self.gdt.load();
         self.idt.load(null);
         // ints.enable();
 
-        log.info("cpu_id: {d} cpuconfig size: {d}", .{ this_cpu_id, @sizeOf(CpuConfig) });
-
+        // initialize CPU identification for scheduling purposes
         wrmsr(IA32_TCS_AUX, this_cpu_id);
         log.info("PID: {d}", .{cpu_id()});
+
+        // initialize syscall and sysret instructions
+        wrmsr(
+            STAR,
+            (@as(u64, GdtDescriptor.user_code_selector - 8) << 48) |
+                (@as(u64, GdtDescriptor.kernel_code_selector) << 32),
+        );
+
+        // RIP of the syscall jump destination
+        wrmsr(LSTAR, @intFromPtr(&syscall_handler_wrapper));
+
+        // bits that are 1 clear a bit from rflags when a syscall happens
+        // setting interrupt_enable here disables interrupts on syscall
+        wrmsr(SFMASK, @bitCast(Rflags{ .interrupt_enable = 1 }));
+
+        const efer_flags: u64 = @bitCast(EferFlags{ .system_call_extensions = 1 });
+        wrmsr(EFER, rdmsr(EFER) | efer_flags);
     }
 };
+
+pub const Rflags = packed struct {
+    carry_flag: u1 = 0,
+    reserved0: u1 = 0,
+    parity_flag: u1 = 0,
+    reserved1: u1 = 0,
+    auxliary_carry_flag: u1 = 0,
+    reserved2: u1 = 0,
+    zero_flag: u1 = 0,
+    sign_flag: u1 = 0,
+    trap_flag: u1 = 0,
+    interrupt_enable: u1 = 0,
+    direction_flag: u1 = 0,
+    overflow_flag: u1 = 0,
+    io_privilege_flag: u2 = 0,
+    nested_task: u1 = 0,
+    reserved3: u1 = 0,
+    resume_flag: u1 = 0,
+    virtual_8086_mode: u1 = 0,
+    alignment_check_or_access_control: u1 = 0,
+    virtual_interrupt_flag: u1 = 0,
+    virtual_interrupt_pending: u1 = 0,
+    id_flag: u1 = 0,
+    reserved4: u42 = 0,
+};
+
+pub const EferFlags = packed struct {
+    system_call_extensions: u1 = 0,
+    reserved: u63 = 0,
+};
+
+fn syscall_handler_wrapper() callconv(.Naked) void {
+    // main.syscall();
+}
 
 test "structure sizes" {
     std.testing.expectEqual(8, @sizeOf(GdtDescriptor));
