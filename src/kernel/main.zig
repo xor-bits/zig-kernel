@@ -78,6 +78,7 @@ fn main() void {
 
     log.info("kernel main", .{});
 
+    // initialize physical memory allocation
     pmem.printInfo();
     log.info("used memory: {any}B", .{
         NumberPrefix(usize, .binary).new(pmem.usedPages() << 12),
@@ -89,23 +90,58 @@ fn main() void {
         NumberPrefix(usize, .binary).new(pmem.totalPages() << 12),
     });
 
+    // set up arch specific things: GDT, TSS, IDT, syscalls, ...
     arch.init() catch |err| {
         std.debug.panic("failed to initialize CPU: {any}", .{err});
     };
-
     arch.x86_64.ints.int3();
 
+    // initialize ACPI specific things: APIC, HPET, ...
     acpi.init() catch |err| {
         std.debug.panic("failed to initialize ACPI: {any}", .{err});
     };
 
+    // create higher half global address space
     vmem.init();
 
-    const new_vmm = vmem.AddressSpace.new();
-    new_vmm.printMappings();
-    new_vmm.switchTo();
+    const vmm = vmem.AddressSpace.current();
 
-    var s = arch.SyscallRegs{};
+    // map bootstrap into the address space
+    const bootstrap = @embedFile("bootstrap");
+    log.info("bootstrap size: 0x{x}", .{bootstrap.len});
+    vmm.map(
+        pmem.VirtAddr.new(0x200_0000),
+        .{ .bytes = bootstrap },
+        .{ .writeable = 1, .user_accessible = 1 },
+    );
+
+    // map initfs.tar.gz into the address space
+    // vmm.map(
+    //     0x400_0000,
+    //     .{ .borrow = 0 },
+    //     .{ .user_accessible = 1 },
+    // );
+
+    // map a lazy heap to the address space
+    vmm.map(
+        pmem.VirtAddr.new(0x1000_0000),
+        .{ .lazy = 0x1000_0000 },
+        .{ .writeable = 1, .user_accessible = 1 },
+    );
+    // map a lazy stack to the address space
+    vmm.map(
+        pmem.VirtAddr.new(0x3000_0000),
+        .{ .lazy = 0x1000_0000 },
+        .{ .writeable = 1, .user_accessible = 1 },
+    );
+
+    // debug print the current address space
+    vmm.printMappings();
+
+    var s = arch.SyscallRegs{
+        .user_instr_ptr = 0x200_0000,
+        .user_stack_ptr = 0x4000_0000,
+    };
     log.info("sysret", .{});
     arch.x86_64.sysret(&s);
 
@@ -130,9 +166,9 @@ fn main() void {
     //    - syscalls for unix sockets
     //
     // TODO: bootstrap/initfsd process
-    //  - map flat binary to 0x200_000
-    //  - map initfs.tar.gz to 0x400_000
-    //  - map heap to 0x1_000_000
+    //  - map flat binary to 0x200_0000
+    //  - map initfs.tar.gz to 0x400_0000
+    //  - map heap to 0x1000_0000
     //  - enter bootstrap in ring3
     //  - inflate&initialize initfs in heap
     //  - create initfs:// vfs proto

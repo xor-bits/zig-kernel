@@ -37,6 +37,22 @@ pub fn build(b: *std.Build) !void {
     const font_tool_run = b.addRunArtifact(font_tool);
     const font_zig = font_tool_run.addOutputFileArg("font.zig");
 
+    // build the bootstrap.bin
+    const bootstrap_elf_step = b.addExecutable(.{
+        .name = "bootstrap.elf",
+        .root_source_file = b.path("./src/bootstrap/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    bootstrap_elf_step.setLinkerScript(b.path("./src/bootstrap/link.ld"));
+
+    const bootstrap_bin_step = b.addObjCopy(bootstrap_elf_step.getEmittedBin(), .{
+        .format = .bin,
+    });
+
+    const install_bootstrap_bin = b.addInstallFile(bootstrap_bin_step.getOutput(), "bootstrap.bin");
+    b.getInstallStep().dependOn(&install_bootstrap_bin.step);
+
     // build the kernel ELF
     const kernel_elf_step = b.addExecutable(.{
         .name = "kernel.elf",
@@ -48,7 +64,15 @@ pub fn build(b: *std.Build) !void {
     kernel_elf_step.setLinkerScript(b.path("linker/x86_64.ld"));
     kernel_elf_step.want_lto = false;
     kernel_elf_step.root_module.addImport("limine", b.dependency("limine", .{}).module("limine"));
-    kernel_elf_step.root_module.addAnonymousImport("font", .{ .root_source_file = font_zig });
+    kernel_elf_step.root_module.addAnonymousImport("font", .{
+        .root_source_file = font_zig,
+    });
+    kernel_elf_step.root_module.addAnonymousImport("bootstrap", .{
+        .root_source_file = bootstrap_bin_step.getOutput(),
+    });
+
+    kernel_elf_step.step.dependOn(&bootstrap_bin_step.step);
+    kernel_elf_step.step.dependOn(&font_tool_run.step);
 
     b.installArtifact(kernel_elf_step);
 

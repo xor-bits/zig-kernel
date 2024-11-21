@@ -106,8 +106,8 @@ pub const MapSource = union(enum) {
     /// allocate pages immediately, and write bytes into them
     bytes: []const u8,
 
-    /// allocate pages on page fault (overcommit) (lazy physical memory allocation)
-    lazy: void,
+    /// allocate (n divceil 0x1000) pages on page fault (overcommit) (lazy physical memory allocation)
+    lazy: usize,
 };
 
 pub const AddressSpace = struct {
