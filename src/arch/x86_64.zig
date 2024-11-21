@@ -250,6 +250,10 @@ pub fn rdcr3() u64 {
     );
 }
 
+pub fn flush_tlb() void {
+    wrcr3(rdcr3());
+}
+
 const cpu_id_mode_ty = enum(u8) {
     rdpid,
     rdtscp,
