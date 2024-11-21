@@ -254,6 +254,15 @@ pub fn flush_tlb() void {
     wrcr3(rdcr3());
 }
 
+pub fn flush_tlb_addr(addr: usize) void {
+    asm volatile (
+        \\ invlpg (%[v])
+        :
+        : [v] "r" (addr),
+        : "memory"
+    );
+}
+
 const cpu_id_mode_ty = enum(u8) {
     rdpid,
     rdtscp,
