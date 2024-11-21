@@ -118,7 +118,6 @@ fn main() void {
     //  - scheduler
     //  - binary loader
     //  - message IPC, shared memory IPC
-    //  - userland
     //  - figure out userland interrupts (ps2 keyboard, ..)
     //  - syscalls:
     //    - syscall for bootstrap to grow the heap
