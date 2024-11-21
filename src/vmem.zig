@@ -122,6 +122,8 @@ pub const AddressSpace = struct {
 
         // TODO: process id in CR3
 
+        // TODO: set bit 7 (global enable) in CR4
+
         const table = allocTable();
         const cr3 = pmem.HhdmAddr.new(table).toPhys().toPage();
         const res = Self{
@@ -129,7 +131,7 @@ pub const AddressSpace = struct {
         };
 
         // map global higher half
-        // res.mapGlobals();
+        res.mapGlobals();
 
         return res;
     }
@@ -141,13 +143,28 @@ pub const AddressSpace = struct {
         };
     }
 
+    pub fn switchTo(self: Self) void {
+        arch.x86_64.wrcr3(@as(u64, self.cr3.page_index) << 12);
+        log.info("cr3 is now 0x{x}", .{arch.x86_64.rdcr3()});
+    }
+
+    pub fn deinit(self: Self) void {
+        _ = self;
+        // TODO:
+    }
+
     pub fn map(addr_space: Self, dst: pmem.VirtAddr, src: MapSource, flags: Entry) void {
         _ = .{ addr_space, dst, src, flags };
     }
 
-    // pub fn mapGlobals(self: Self) void {
-    //     self.root();
-    // }
+    pub fn mapGlobals(self: Self) void {
+        const to_table = self.root();
+        const from_table = global_higher_half.get().?;
+
+        for (0..256) |i| {
+            to_table[i + 256] = from_table[i];
+        }
+    }
 
     fn root(self: Self) *PageTable {
         return physPageAsPageTable(self.cr3);
@@ -307,6 +324,7 @@ fn allocTable() *PageTable {
     const page = pmem.alloc() orelse {
         std.debug.panic("virtual memory page table OOM", .{});
     };
+    // log.info("new table 0x{x}", .{@as(u64, @intFromPtr(page))});
     return @ptrCast(page);
 }
 

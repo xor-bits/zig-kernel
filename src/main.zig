@@ -101,9 +101,9 @@ fn main() void {
 
     vmem.init();
 
-    vmem.AddressSpace.current().printMappings();
-
-    vmem.AddressSpace.new().printMappings();
+    const new_vmm = vmem.AddressSpace.new();
+    new_vmm.printMappings();
+    new_vmm.switchTo();
 
     log.info("done", .{});
 
