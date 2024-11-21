@@ -4,6 +4,7 @@ const limine = @import("limine");
 const uart = @import("uart.zig");
 const fb = @import("fb.zig");
 const pmem = @import("pmem.zig");
+const vmem = @import("vmem.zig");
 const arch = @import("arch.zig");
 const acpi = @import("acpi.zig");
 const NumberPrefix = @import("byte_fmt.zig").NumberPrefix;
@@ -97,6 +98,8 @@ fn main() void {
     acpi.init() catch |err| {
         std.debug.panic("failed to initialize ACPI: {any}", .{err});
     };
+
+    _ = vmem.AddressSpace.new();
 
     log.info("done", .{});
 
