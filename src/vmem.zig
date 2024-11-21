@@ -44,30 +44,172 @@ pub const AddressSpace = struct {
             .cr3 = cr3,
         };
 
-        log.info("cr3: 0x{x}", .{arch.x86_64.rdcr3()});
-
         // map global higher half
-        // res.map();
+        res.map(pmem.VirtAddr.new(0xFFFF_8000_0000_0000), .{ .lazy = {} }, .{});
 
         return res;
     }
 
-    pub fn map(dst: pmem.VirtAddr, src: MapSource, flags: Entry) void {
-        _ = .{ dst, src, flags };
+    pub fn current() Self {
+        const cr3 = arch.x86_64.rdcr3();
+        return Self{
+            .cr3 = pmem.PhysAddr.new(cr3).toPage(),
+        };
+    }
+
+    pub fn printMappings(self: Self) void {
+        // go through every single page in this address space,
+        // and print contiguous similar chunks.
+
+        // only present and lazy alloc pages are printed
+
+        const Current = struct {
+            base: pmem.VirtAddr,
+            target: pmem.PhysAddr,
+            write: bool,
+            exec: bool,
+            user: bool,
+
+            fn fromEntry(from: pmem.VirtAddr, e: Entry) @This() {
+                return .{
+                    .base = from,
+                    .target = pmem.PhysPage.new(e.page_index).toPhys(),
+                    .write = e.writeable != 0,
+                    .exec = e.no_execute == 0,
+                    .user = e.user_accessible != 0,
+                };
+            }
+
+            fn isContiguous(a: @This(), b: @This()) bool {
+                if (a.write != b.write or a.exec != b.exec or a.user != b.user) {
+                    return false;
+                }
+
+                const a_diff: i128 = @truncate(@as(i128, a.base.raw) - @as(i128, a.target.raw));
+                const b_diff: i128 = @truncate(@as(i128, a.base.raw) - @as(i128, a.target.raw));
+
+                return a_diff == b_diff;
+            }
+
+            fn printRange(from: @This(), to: pmem.VirtAddr) void {
+                if (from.base.raw > 0xffff_8000_3000_0000 and from.base.raw < 0xffff_ffff_8000_0000) {
+                    return;
+                }
+
+                log.info("{s}R{s}{s} [ 0x{x:0>16}..0x{x:0>16} ] => 0x{x:0>16}", .{
+                    if (from.user) "U" else "-",
+                    if (from.write) "W" else "-",
+                    if (from.exec) "X" else "-",
+                    from.base.raw,
+                    to.raw,
+                    from.target.raw,
+                });
+            }
+        };
+
+        self.walkPages(struct {
+            maybe_base: ?Current = null,
+
+            fn missing(s: *@This(), _: PageSize, vaddr: pmem.VirtAddr, _: Entry) void {
+                if (s.maybe_base) |base| {
+                    base.printRange(vaddr);
+                    s.maybe_base = null;
+                }
+            }
+
+            fn present(s: *@This(), _: PageSize, vaddr: pmem.VirtAddr, entry: Entry) void {
+                const cur = Current.fromEntry(vaddr, entry);
+                const base: Current = s.maybe_base orelse {
+                    s.maybe_base = cur;
+                    return;
+                };
+
+                if (!base.isContiguous(cur)) {
+                    base.printRange(vaddr);
+                    s.maybe_base = cur;
+                    return;
+                }
+            }
+        }{});
+    }
+
+    fn walkPages(self: @This(), _callback: anytype) void {
+        var callback = _callback;
+        const l4entries: *const PageTable = physPageAsPageTable(self.cr3);
+
+        for (0..512) |_l4| {
+            const l4: u9 = @truncate(_l4);
+            const l4vaddr = pmem.VirtAddr.fromParts(0, .{ 0, 0, 0, l4 });
+            const l4entry = l4entries[l4];
+
+            if (l4entry.present == 0) {
+                callback.missing(PageSize.size512gib, l4vaddr, l4entry);
+                continue;
+            }
+
+            const l3entries: *const PageTable = physPageAsPageTable(pmem.PhysPage.new(l4entry.page_index));
+
+            for (0..512) |_l3| {
+                const l3: u9 = @truncate(_l3);
+                const l3vaddr = pmem.VirtAddr.fromParts(0, .{ 0, 0, l3, l4 });
+                const l3entry = l3entries[l3];
+
+                if (l3entry.present == 0) {
+                    callback.missing(PageSize.size1gib, l3vaddr, l3entry);
+                    continue;
+                }
+
+                if (l3entry.huge_page != 0) {
+                    callback.present(PageSize.size1gib, l3vaddr, l3entry);
+                    continue;
+                }
+
+                const l2entries: *const PageTable = physPageAsPageTable(pmem.PhysPage.new(l3entry.page_index));
+
+                for (0..512) |_l2| {
+                    const l2: u9 = @truncate(_l2);
+                    const l2vaddr = pmem.VirtAddr.fromParts(0, .{ 0, l2, l3, l4 });
+                    const l2entry = l2entries[l2];
+
+                    if (l2entry.present == 0) {
+                        callback.missing(PageSize.size2mib, l2vaddr, l2entry);
+                        continue;
+                    }
+
+                    if (l2entry.huge_page != 0) {
+                        callback.present(PageSize.size2mib, l2vaddr, l2entry);
+                        continue;
+                    }
+
+                    const l1entries: *const PageTable = physPageAsPageTable(pmem.PhysPage.new(l2entry.page_index));
+
+                    for (0..512) |_l1| {
+                        const l1: u9 = @truncate(_l1);
+                        const l1vaddr = pmem.VirtAddr.fromParts(0, .{ l1, l2, l3, l4 });
+                        const l1entry = l1entries[l1];
+
+                        if (l1entry.present == 0) {
+                            callback.missing(PageSize.size4kib, l1vaddr, l1entry);
+                            continue;
+                        }
+
+                        callback.present(PageSize.size4kib, l1vaddr, l1entry);
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn map(addr_space: Self, dst: pmem.VirtAddr, src: MapSource, flags: Entry) void {
+        _ = .{ addr_space, dst, src, flags };
     }
 };
 
-    pub fn map(addr_space: *const Self, dst: pmem.VirtAddr, src: MapSource, flags: Entry) void {
-        _ = .{ addr_space, dst, src, flags };
-
-        log.info("0b{b}", .{dst.raw});
-
-        log.info("{any}", .{.{
-            dst.raw,
-            dst.offset(),
-            dst.levels(),
-        }});
-    }
+pub const PageSize = enum {
+    size512gib,
+    size1gib,
+    size2mib,
+    size4kib,
 };
 
 pub const Entry = packed struct {
@@ -101,13 +243,51 @@ pub const PageTable = [512]Entry;
 
 //
 
-pub fn allocTable() *PageTable {
+// lvl4 entries from [256..]
+var global_higher_half: [256]Entry = undefined;
+
+//
+
+/// create a deep copy of the bootloader given higher half (kernel + modules + HHDM + stack) page map
+/// then mark everything in higher half as global
+pub fn init() void {
+    const current = AddressSpace.current();
+    const from_table: *const PageTable = physPageAsPageTable(current.cr3);
+
+    for (0..256) |i| {
+        deepClone(&from_table[i + 256], &global_higher_half[i], 3);
+    }
+}
+
+/// create a deep copy of the mappings
+/// NOTE: does not copy any target pages
+fn deepClone(from: *const Entry, to: *Entry, level: usize) void {
+    var tmp = from.*;
+    tmp.page_index = 0;
+
+    if (level != 1 and from.present != 0) {
+        const to_table = allocTable();
+        const from_table: *const PageTable = physPageAsPageTable(pmem.PhysPage.new(from.page_index));
+
+        for (0..512) |i| {
+            deepClone(&from_table[i], &to_table[i], level - 1);
+        }
+    }
+
+    to.* = from.*;
+}
+
+fn physPageAsPageTable(p: pmem.PhysPage) *PageTable {
+    return p.toPhys().toHhdm().ptr(*PageTable);
+}
+
+fn allocTable() *PageTable {
     const page = pmem.alloc() orelse {
         std.debug.panic("virtual memory page table OOM", .{});
     };
     return @ptrCast(page);
 }
 
-pub fn freeTable(t: *PageTable) void {
+fn freeTable(t: *PageTable) void {
     pmem.free(@ptrCast(t));
 }

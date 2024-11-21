@@ -99,7 +99,11 @@ fn main() void {
         std.debug.panic("failed to initialize ACPI: {any}", .{err});
     };
 
-    _ = vmem.AddressSpace.new();
+    vmem.init();
+
+    vmem.AddressSpace.current().printMappings();
+
+    vmem.AddressSpace.new().printMappings();
 
     log.info("done", .{});
 
