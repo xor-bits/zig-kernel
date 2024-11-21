@@ -132,10 +132,6 @@ pub fn enable() void {
     lapic.divide_configuration.val = APIC_TIMER_DIV; // buggy hardware fix
 
     log.info("APIC initialized", .{});
-
-    while (true) {
-        arch.x86_64.ints.wait();
-    }
 }
 
 /// returns the apic period for 1ms
