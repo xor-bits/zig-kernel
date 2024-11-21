@@ -2,10 +2,94 @@ const std = @import("std");
 
 const pmem = @import("pmem.zig");
 const arch = @import("arch.zig");
+const lazy = @import("lazy.zig");
 
 const log = std.log.scoped(.vmem);
 
 //
+
+// lvl4 entries from [256..]
+var global_higher_half = lazy.Lazy([256]Entry).new();
+
+//
+
+/// create a deep copy of the bootloader given higher half (kernel + modules + HHDM + stack) page map
+/// then mark everything in higher half as global
+///
+/// the deep copy is needed, because the tree structure is stored
+/// in bootloader_reclaimable memory, which will be freed
+pub fn init() void {
+    _ = global_higher_half.getOrInit(struct {
+        pub fn init() [256]Entry {
+            const current = AddressSpace.current();
+            var to_table: [256]Entry = undefined;
+            const from_table: *const PageTable = physPageAsPageTable(current.cr3);
+
+            for (0..256) |i| {
+                deepClone(&from_table[i + 256], &to_table[i], 3);
+            }
+
+            return to_table;
+        }
+    });
+}
+
+/// create a deep copy of the higher half mappings
+/// NOTE: does not copy any target pages
+fn deepClone(from: *const Entry, to: *Entry, level: usize) void {
+    var tmp = from.*;
+    tmp.page_index = 0;
+    tmp.global = 1;
+
+    if (level != 1 and from.present != 0) {
+        const to_table = allocTable();
+        const from_table: *const PageTable = physPageAsPageTable(pmem.PhysPage.new(from.page_index));
+
+        for (0..512) |i| {
+            deepClone(&from_table[i], &to_table[i], level - 1);
+        }
+    }
+
+    to.* = from.*;
+}
+
+//
+
+pub const PageSize = enum {
+    size512gib,
+    size1gib,
+    size2mib,
+    size4kib,
+};
+
+pub const Entry = packed struct {
+    present: u1 = 0,
+    writeable: u1 = 0,
+    user_accessible: u1 = 0,
+    write_through: u1 = 0,
+    cache_disable: u1 = 0,
+    accessed: u1 = 0,
+    dirty: u1 = 0,
+    // page_attribute_table: u1 = 0,
+    huge_page: u1 = 0,
+    global: u1 = 0,
+
+    // more custom bits
+    copy_on_write: u1 = 0, // page fault == make a copy of the page and mark it writeable
+    lazy_alloc: u1 = 0, //    page fault == allocate now (overcommit)
+    no_free: u1 = 0, //       pages that should never be deallocated, like kernel pages
+
+    page_index: u32 = 0,
+    reserved: u8 = 0,
+
+    // custom bits
+    _free_to_use0: u7 = 0,
+
+    protection_key: u4 = 0,
+    no_execute: u1 = 0,
+};
+
+pub const PageTable = [512]Entry;
 
 pub const PhysPages = struct {
     first: pmem.PhysPage,
@@ -45,7 +129,7 @@ pub const AddressSpace = struct {
         };
 
         // map global higher half
-        res.map(pmem.VirtAddr.new(0xFFFF_8000_0000_0000), .{ .lazy = {} }, .{});
+        // res.mapGlobals();
 
         return res;
     }
@@ -55,6 +139,18 @@ pub const AddressSpace = struct {
         return Self{
             .cr3 = pmem.PhysAddr.new(cr3).toPage(),
         };
+    }
+
+    pub fn map(addr_space: Self, dst: pmem.VirtAddr, src: MapSource, flags: Entry) void {
+        _ = .{ addr_space, dst, src, flags };
+    }
+
+    // pub fn mapGlobals(self: Self) void {
+    //     self.root();
+    // }
+
+    fn root(self: Self) *PageTable {
+        return physPageAsPageTable(self.cr3);
     }
 
     pub fn printMappings(self: Self) void {
@@ -199,83 +295,9 @@ pub const AddressSpace = struct {
             }
         }
     }
-
-    pub fn map(addr_space: Self, dst: pmem.VirtAddr, src: MapSource, flags: Entry) void {
-        _ = .{ addr_space, dst, src, flags };
-    }
 };
-
-pub const PageSize = enum {
-    size512gib,
-    size1gib,
-    size2mib,
-    size4kib,
-};
-
-pub const Entry = packed struct {
-    present: u1 = 0,
-    writeable: u1 = 0,
-    user_accessible: u1 = 0,
-    write_through: u1 = 0,
-    cache_disable: u1 = 0,
-    accessed: u1 = 0,
-    dirty: u1 = 0,
-    // page_attribute_table: u1 = 0,
-    huge_page: u1 = 0,
-    global: u1 = 0,
-
-    // more custom bits
-    copy_on_write: u1 = 0, // page fault == make a copy of the page and mark it writeable
-    lazy_alloc: u1 = 0, //    page fault == allocate now (overcommit)
-    no_free: u1 = 0, //       pages that should never be deallocated, like kernel pages
-
-    page_index: u32 = 0,
-    reserved: u8 = 0,
-
-    // custom bits
-    _free_to_use0: u7 = 0,
-
-    protection_key: u4 = 0,
-    no_execute: u1 = 0,
-};
-
-pub const PageTable = [512]Entry;
 
 //
-
-// lvl4 entries from [256..]
-var global_higher_half: [256]Entry = undefined;
-
-//
-
-/// create a deep copy of the bootloader given higher half (kernel + modules + HHDM + stack) page map
-/// then mark everything in higher half as global
-pub fn init() void {
-    const current = AddressSpace.current();
-    const from_table: *const PageTable = physPageAsPageTable(current.cr3);
-
-    for (0..256) |i| {
-        deepClone(&from_table[i + 256], &global_higher_half[i], 3);
-    }
-}
-
-/// create a deep copy of the mappings
-/// NOTE: does not copy any target pages
-fn deepClone(from: *const Entry, to: *Entry, level: usize) void {
-    var tmp = from.*;
-    tmp.page_index = 0;
-
-    if (level != 1 and from.present != 0) {
-        const to_table = allocTable();
-        const from_table: *const PageTable = physPageAsPageTable(pmem.PhysPage.new(from.page_index));
-
-        for (0..512) |i| {
-            deepClone(&from_table[i], &to_table[i], level - 1);
-        }
-    }
-
-    to.* = from.*;
-}
 
 fn physPageAsPageTable(p: pmem.PhysPage) *PageTable {
     return p.toPhys().toHhdm().ptr(*PageTable);
