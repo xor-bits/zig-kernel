@@ -158,7 +158,7 @@ pub const VirtAddr = struct {
         );
     }
 
-    pub fn ptr(comptime T: type, self: Self) *T {
+    pub fn ptr(self: Self, comptime T: type) T {
         return @ptrFromInt(self.raw);
     }
 

@@ -137,6 +137,7 @@ fn main() void {
 
     // debug print the current address space
     vmm.printMappings();
+    vmm.switchTo();
 
     var s = arch.SyscallRegs{
         .user_instr_ptr = 0x200_0000,

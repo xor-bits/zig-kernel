@@ -127,7 +127,7 @@ pub const AddressSpace = struct {
 
         // TODO: set bit 7 (global enable) in CR4
 
-        const table = allocTable();
+        const table = allocZeroedTable();
         const cr3 = pmem.HhdmAddr.new(table).toPhys().toPage();
         const res = Self{
             .cr3 = cr3,
@@ -156,8 +156,148 @@ pub const AddressSpace = struct {
         // TODO:
     }
 
-    pub fn map(addr_space: Self, dst: pmem.VirtAddr, src: MapSource, flags: Entry) void {
-        _ = .{ addr_space, dst, src, flags };
+    pub fn map(self: Self, dst: pmem.VirtAddr, src: MapSource, _flags: Entry) void {
+        std.debug.assert(std.mem.isAligned(dst.raw, 0x1000));
+
+        // TODO: huge page support maybe
+        // it would require the pmem allocator to have huge page support aswell
+
+        var flags = Entry{
+            .writeable = _flags.writeable,
+            .user_accessible = _flags.user_accessible,
+        };
+
+        var n_pages: usize = 0;
+
+        switch (src) {
+            .borrow, .owned => std.debug.panic("TODO: borrow and owned mapping", .{}),
+            .bytes => |bytes| {
+                flags.present = 1;
+                n_pages = std.mem.alignForward(usize, bytes.len, 0x1000) >> 12;
+            },
+            .lazy => |bytes| {
+                flags.lazy_alloc = 1;
+                n_pages = std.mem.alignForward(usize, bytes, 0x1000) >> 12;
+            },
+        }
+
+        log.info("mapping {d} pages", .{n_pages});
+        for (0..n_pages) |i| {
+            const offs = i * 0x1000;
+
+            switch (src) {
+                .bytes => |bytes| {
+                    const new_table: *[0x1000]u8 = @ptrCast(allocZeroedTable());
+
+                    const len = @min(bytes.len - offs, 0x1000);
+                    std.mem.copyForwards(u8, new_table[0..], bytes[offs .. offs + len]);
+
+                    const allocated = pmem.HhdmAddr.new(new_table).toPhys().toPage();
+                    flags.page_index = allocated.page_index;
+                },
+                else => {},
+            }
+
+            const vaddr = pmem.VirtAddr.new(dst.raw + offs);
+            self.mapSingle(vaddr, flags);
+        }
+    }
+
+    fn mapSingle(self: Self, dst: pmem.VirtAddr, entry: Entry) void {
+        const levels = dst.levels();
+
+        const l4entries = self.root();
+        const l4entry = &l4entries[levels[3]];
+
+        if (l4entry.present == 0) {
+            const allocated = pmem.HhdmAddr.new(allocZeroedTable()).toPhys().toPage();
+            l4entry.page_index = allocated.page_index;
+            l4entry.present = 1;
+            l4entry.writeable = 1;
+            l4entry.user_accessible = 1;
+        }
+
+        const l3entries = physPageAsPageTable(pmem.PhysPage.new(l4entry.page_index));
+        const l3entry = &l3entries[levels[2]];
+
+        std.debug.assert(l3entry.huge_page == 0);
+        if (l3entry.present == 0) {
+            const allocated = pmem.HhdmAddr.new(allocZeroedTable()).toPhys().toPage();
+            l3entry.page_index = allocated.page_index;
+            l3entry.present = 1;
+            l3entry.writeable = 1;
+            l3entry.user_accessible = 1;
+        }
+
+        const l2entries = physPageAsPageTable(pmem.PhysPage.new(l3entry.page_index));
+        const l2entry = &l2entries[levels[1]];
+
+        std.debug.assert(l2entry.huge_page == 0);
+        if (l2entry.present == 0) {
+            const allocated = pmem.HhdmAddr.new(allocZeroedTable()).toPhys().toPage();
+            l2entry.page_index = allocated.page_index;
+            l2entry.present = 1;
+            l2entry.writeable = 1;
+            l2entry.user_accessible = 1;
+        }
+
+        const l1entries = physPageAsPageTable(pmem.PhysPage.new(l2entry.page_index));
+        const l1entry = &l1entries[levels[0]];
+
+        l1entry.* = entry;
+    }
+
+    pub fn pageFault(self: Self, vaddr: pmem.VirtAddr, user: bool, write: bool) error{Handled}!void {
+        const levels = vaddr.levels();
+
+        const l4entries = self.root();
+        const l4entry = &l4entries[levels[3]];
+
+        if (l4entry.present == 0 or
+            (user and l4entry.user_accessible == 0) or
+            (write and l4entry.writeable == 0))
+        {
+            return;
+        }
+
+        const l3entries = physPageAsPageTable(pmem.PhysPage.new(l4entry.page_index));
+        const l3entry = &l3entries[levels[2]];
+
+        std.debug.assert(l3entry.huge_page == 0);
+        if (l3entry.present == 0 or
+            (user and l3entry.user_accessible == 0) or
+            (write and l3entry.writeable == 0))
+        {
+            return;
+        }
+
+        const l2entries = physPageAsPageTable(pmem.PhysPage.new(l3entry.page_index));
+        const l2entry = &l2entries[levels[1]];
+
+        std.debug.assert(l2entry.huge_page == 0);
+        if (l2entry.present == 0 or
+            (user and l2entry.user_accessible == 0) or
+            (write and l2entry.writeable == 0))
+        {
+            return;
+        }
+
+        const l1entries = physPageAsPageTable(pmem.PhysPage.new(l2entry.page_index));
+        const l1entry = &l1entries[levels[0]];
+
+        if ((user and l1entry.user_accessible == 0) or
+            (write and l1entry.writeable == 0))
+        {
+            return;
+        }
+
+        if (l1entry.lazy_alloc != 0) {
+            const allocated = pmem.HhdmAddr.new(allocZeroedTable()).toPhys().toPage();
+            l1entry.page_index = allocated.page_index;
+            l1entry.lazy_alloc = 0;
+            l1entry.present = 1;
+            return error.Handled;
+        }
     }
 
     pub fn mapGlobals(self: Self) void {
@@ -329,6 +469,12 @@ fn allocTable() *PageTable {
     };
     // log.info("new table 0x{x}", .{@as(u64, @intFromPtr(page))});
     return @ptrCast(page);
+}
+
+fn allocZeroedTable() *PageTable {
+    const new_table = allocTable();
+    new_table.* = std.mem.zeroes(PageTable);
+    return new_table;
 }
 
 fn freeTable(t: *PageTable) void {

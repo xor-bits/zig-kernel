@@ -3,6 +3,7 @@ const std = @import("std");
 const apic = @import("../apic.zig");
 const main = @import("../main.zig");
 const pmem = @import("../pmem.zig");
+const vmem = @import("../vmem.zig");
 
 const log = std.log.scoped(.arch);
 
@@ -464,7 +465,8 @@ pub const Entry = packed struct {
     segment_selector: u16,
     interrupt_stack: u3,
     reserved2: u5 = 0,
-    gate_type: u4,
+    gate_type: u1,
+    _1: u3 = 0b111,
     _0: u1 = 0,
     dpl: u2,
     present: u1,
@@ -508,13 +510,26 @@ pub const Entry = packed struct {
         // log.info("interrupt at : {x}", .{isr});
         return Self{
             .offset_0_15 = @truncate(isr & 0xFFFF),
-            .segment_selector = 0x08,
+            .segment_selector = GdtDescriptor.kernel_code_selector,
             .interrupt_stack = 0,
-            .gate_type = 0xE, // E for interrupt gate, F for trap gate
+            .gate_type = 0, // 0 for interrupt gate, 1 for trap gate
             .dpl = 0,
             .present = 1,
             .offset_16_31 = @truncate((isr >> 16) & 0xFFFF),
             .offset_32_63 = @truncate((isr >> 32) & 0xFFFFFFFF),
+        };
+    }
+
+    fn missing() Self {
+        return Self{
+            .offset_0_15 = 0,
+            .segment_selector = 0,
+            .interrupt_stack = 0,
+            .gate_type = 0,
+            .dpl = 0,
+            .present = 0,
+            .offset_16_31 = 0,
+            .offset_32_63 = 0,
         };
     }
 
@@ -600,7 +615,7 @@ pub const Idt = extern struct {
             }
         }).asInt();
         // coprocessor segment overrun (useless)
-        // entries[9] = 0;
+        entries[9] = Entry.missing().asInt();
         // invalid tss
         entries[10] = Entry.generateWithEc(struct {
             fn handler(interrupt_stack_frame: *const InterruptStackFrame, ec: u64) void {
@@ -632,6 +647,8 @@ pub const Idt = extern struct {
         // page fault
         entries[14] = Entry.generateWithEc(struct {
             fn handler(interrupt_stack_frame: *const InterruptStackFrame, ec: u64) void {
+                log.info("page fault: {any}", .{interrupt_stack_frame});
+
                 const pfec: PageFaultError = @bitCast(ec);
                 const target_addr = Cr2.read().page_fault_addr;
 
@@ -651,11 +668,21 @@ pub const Idt = extern struct {
                     interrupt_stack_frame.sp,
                 });
 
+                vmem.AddressSpace.current().pageFault(
+                    pmem.VirtAddr.new(target_addr),
+                    pfec.user_mode,
+                    pfec.caused_by_write,
+                ) catch {
+                    log.info("page fault handled", .{});
+                    flush_tlb_addr(target_addr);
+                    return;
+                };
+
                 std.debug.panic("unhandled CPU exception", .{});
             }
         }).withStack(1).asInt();
         // reserved
-        // entries[15] = 0;
+        entries[15] = Entry.missing().asInt();
         // x87 fp exception
         entries[16] = Entry.generate(struct {
             fn handler(interrupt_stack_frame: *const InterruptStackFrame) void {
@@ -699,7 +726,9 @@ pub const Idt = extern struct {
             }
         }).asInt();
         // reserved
-        // entries[22..27] = 0;
+        for (entries[22..27]) |*e| {
+            e.* = Entry.missing().asInt();
+        }
         // hypervisor injection exception
         entries[28] = Entry.generate(struct {
             fn handler(interrupt_stack_frame: *const InterruptStackFrame) void {
@@ -722,7 +751,7 @@ pub const Idt = extern struct {
             }
         }).asInt();
         // reserved
-        // entries[31] = 0;
+        entries[31] = Entry.missing().asInt();
         // triple fault, non catchable
 
         // spurious PIC interrupts
@@ -752,7 +781,7 @@ pub const Idt = extern struct {
     pub fn load(self: *Self, size_override: ?u16) void {
         self.ptr = .{
             .base = @intFromPtr(&self.entries),
-            .limit = size_override orelse (256 * @sizeOf(Entry) - 1),
+            .limit = size_override orelse (self.entries.len * @sizeOf(Entry) - 1),
         };
         loadRaw(&self.ptr.limit);
     }
@@ -770,7 +799,7 @@ const InterruptStackFrame = extern struct {
     code_segment: u16,
 
     /// RFlags
-    cpu_flags: u64,
+    cpu_flags: Rflags,
 
     /// stack pointer before the interrupt
     sp: usize,
