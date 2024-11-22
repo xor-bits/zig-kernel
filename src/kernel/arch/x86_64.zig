@@ -855,6 +855,8 @@ pub const CpuConfig = struct {
         wrmsr(IA32_TCS_AUX, this_cpu_id);
         log.info("CPU ID set: {d}", .{cpu_id()});
 
+        self.rsp_kernel = self.tss.privilege_stacks[0];
+        self.rsp_user = 0;
         wrmsr(KERNELGS_BASE, @intFromPtr(self));
         wrmsr(GS_BASE, 0);
 
