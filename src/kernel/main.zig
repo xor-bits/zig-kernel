@@ -198,6 +198,9 @@ fn main() noreturn {
 pub fn syscall(trap: *arch.SyscallRegs) void {
     const log = std.log.scoped(.syscall);
 
+    // TODO: once every CPU has reached this, bootloader_reclaimable memory could be freed
+    // just some few things need to be copied, but the page map(s) and stack(s) are already copied
+
     const id = std.meta.intToEnum(abi.sys.Id, trap.syscall_id) catch {
         log.warn("invalid syscall: {x}", .{trap.syscall_id});
         return;
