@@ -163,7 +163,6 @@ fn main() void {
     //  - message IPC, shared memory IPC
     //  - figure out userland interrupts (ps2 keyboard, ..)
     //  - syscalls:
-    //    - syscall to print logs
     //    - syscall to exec a binary (based on a provided mem map)
     //    - syscall to create a vfs proto
     //    - syscall to accept a vfs proto cmd
@@ -172,10 +171,7 @@ fn main() void {
     //    - syscalls for unix sockets
     //
     // TODO: bootstrap/initfsd process
-    //  - map flat binary to 0x200_0000
     //  - map initfs.tar.gz to 0x400_0000
-    //  - map heap to 0x1000_0000
-    //  - enter bootstrap in ring3
     //  - inflate&initialize initfs in heap
     //  - create initfs:// vfs proto
     //  - exec flat binary initfs:///sbin/initd
