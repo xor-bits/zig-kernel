@@ -431,17 +431,13 @@ pub const Tss = extern struct {
         var res = @This(){};
 
         res.privilege_stacks[0] =
-            @intFromPtr(pmem.page_allocator.create(Stack) catch {
+            @sizeOf(Stack) + @intFromPtr(pmem.page_allocator.create(Stack) catch {
             std.debug.panic("not enough memory for a privilege stack", .{});
         });
         res.interrupt_stacks[0] =
-            @intFromPtr(pmem.page_allocator.create(Stack) catch {
+            @sizeOf(Stack) + @intFromPtr(pmem.page_allocator.create(Stack) catch {
             std.debug.panic("not enough memory for an interrupt stack", .{});
         });
-        // res.interrupt_stacks[1] =
-        //     @intFromPtr(pmem.page_allocator.create(Stack) catch {
-        //     std.debug.panic("not enough memory for an interrupt stack", .{});
-        // });
 
         return res;
     }
