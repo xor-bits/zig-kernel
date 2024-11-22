@@ -51,6 +51,13 @@ pub var hhdm_offset = std.atomic.Value(usize).init(undefined);
 export fn _start() callconv(.C) noreturn {
     const log = std.log.scoped(.critical);
 
+    // interrupts are always disabled in the kernel
+    // there is just one exception to this:
+    // waiting while the CPU is out of tasks
+    //
+    // initializing GDT also requires interrupts to be disabled
+    arch.x86_64.ints.disable();
+
     // crash if bootloader is unsupported
     if (!base_revision.is_supported()) {
         log.err("bootloader unsupported", .{});

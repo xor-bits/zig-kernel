@@ -830,8 +830,6 @@ pub const CpuConfig = struct {
         log.info("CpuConfig size: 0x{x}", .{@sizeOf(@This())});
 
         // initialize GDT (, TSS) and IDT
-        // extremely important to disable interrupts before modifying GDT
-        ints.disable();
         log.info("loading new GDT", .{});
         self.gdt.load();
         log.info("loading new IDT", .{});
