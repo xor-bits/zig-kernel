@@ -399,7 +399,7 @@ pub const Gdt = extern struct {
     pub fn load(self: *Self) void {
         self.ptr = .{
             .base = @intFromPtr(&self.null_descriptor),
-            .limit = 7 * @sizeOf(u64) - 1,
+            .limit = 7 * @sizeOf(GdtDescriptor) - 1,
         };
         loadRaw(&self.ptr.limit);
     }
