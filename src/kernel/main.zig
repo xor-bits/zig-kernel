@@ -150,14 +150,12 @@ fn main() void {
 
     // NOTE: /path/to/something is a short form for fs:///path/to/something
     // TODO: kernel
-    //  - virtual memory mapping
     //  - HPET
     //  - scheduler
     //  - binary loader
     //  - message IPC, shared memory IPC
     //  - figure out userland interrupts (ps2 keyboard, ..)
     //  - syscalls:
-    //    - syscall for bootstrap to grow the heap
     //    - syscall to print logs
     //    - syscall to exec a binary (based on a provided mem map)
     //    - syscall to create a vfs proto
