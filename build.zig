@@ -83,9 +83,26 @@ pub fn build(b: *std.Build) !void {
     });
     limine_step.addDirectoryArg(limine_bootloader_pkg.path("."));
 
+    // create virtual initfs.tar.gz root
+    const initfs = b.addNamedWriteFiles("create virtual initfs root");
+    // _ = initfs.addCopyFile(b.path(""), "");
+
+    const initfs_tar_gz = b.addSystemCommand(&.{
+        "tar",
+        "-czf",
+    });
+    const initfs_tar_gz_file = initfs_tar_gz.addOutputFileArg("initfs.tar.gz");
+    initfs_tar_gz.addArg(".");
+    initfs_tar_gz.setCwd(initfs.getDirectory());
+    initfs_tar_gz.step.dependOn(&initfs.step);
+
+    const install_initfs_tar_gz = b.addInstallFile(initfs_tar_gz_file, "initfs.tar.gz");
+    b.getInstallStep().dependOn(&install_initfs_tar_gz.step);
+
     // create virtual iso root
     const wf = b.addNamedWriteFiles("create virtual iso root");
     _ = wf.addCopyFile(kernel_elf_step.getEmittedBin(), "boot/kernel.elf");
+    _ = wf.addCopyFile(initfs_tar_gz_file, "boot/initfs.tar.gz");
     _ = wf.addCopyFile(b.path("limine.conf"), "boot/limine/limine.conf");
     _ = wf.addCopyFile(limine_bootloader_pkg.path("limine-bios.sys"), "boot/limine/limine-bios.sys");
     _ = wf.addCopyFile(limine_bootloader_pkg.path("limine-bios-cd.bin"), "boot/limine/limine-bios-cd.bin");

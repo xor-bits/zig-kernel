@@ -6,6 +6,7 @@ const vmem = @import("vmem.zig");
 const arch = @import("arch.zig");
 const acpi = @import("acpi.zig");
 const logs = @import("logs.zig");
+const args = @import("args.zig");
 const NumberPrefix = @import("byte_fmt.zig").NumberPrefix;
 
 //
@@ -59,6 +60,10 @@ fn main() void {
 
     log.info("kernel main", .{});
 
+    const kernel_args = args.parse() catch |err| {
+        std.debug.panic("invalid kernel cmdline: {any}", .{err});
+    };
+
     // initialize physical memory allocation
     pmem.printInfo();
     log.info("used memory: {any}B", .{
@@ -107,13 +112,22 @@ fn main() void {
     vmm.map(
         pmem.VirtAddr.new(0x1000_0000),
         .{ .lazy = 0x1000_0000 },
-        .{ .writeable = 1, .user_accessible = 1 },
+        .{ .writeable = 1, .user_accessible = 1, .no_execute = 1 },
     );
     // map a lazy stack to the address space
     vmm.map(
         pmem.VirtAddr.new(0x3000_0000),
         .{ .lazy = 0x1000_0000 },
-        .{ .writeable = 1, .user_accessible = 1 },
+        .{ .writeable = 1, .user_accessible = 1, .no_execute = 1 },
+    );
+    // map initfs.tar.gz to the address space
+    if (std.mem.isAligned(@intFromPtr(kernel_args.initfs.ptr), 0x1000) and std.mem.isAligned(kernel_args.initfs.len, 0x1000)) {
+        log.info("TODO: initfs is alredy page aligned, skipping copy", .{});
+    }
+    vmm.map(
+        pmem.VirtAddr.new(0x4000_0000),
+        .{ .bytes = kernel_args.initfs },
+        .{ .user_accessible = 1, .no_execute = 1 },
     );
 
     // debug print the current address space
@@ -194,18 +208,18 @@ fn main() void {
     //  - start processing cmds
 }
 
-pub fn syscall(args: *arch.SyscallRegs) void {
+pub fn syscall(trap: *arch.SyscallRegs) void {
     const log = std.log.scoped(.syscall);
 
-    switch (args.syscall_id) {
+    switch (trap.syscall_id) {
         1 => {
             // log syscall
-            if (args.arg1 >= 0x100) {
+            if (trap.arg1 >= 0x100) {
                 log.warn("log syscall too long", .{});
                 return;
             }
 
-            if (args.arg0 >= 0x8000_0000_0000 or args.arg0 + args.arg1 >= 0x8000_0000_0000) {
+            if (trap.arg0 >= 0x8000_0000_0000 or trap.arg0 + trap.arg1 >= 0x8000_0000_0000) {
                 log.warn("user space shouldn't touch higher half", .{});
                 return;
             }
@@ -214,13 +228,13 @@ pub fn syscall(args: *arch.SyscallRegs) void {
             // way faster and easier than testing for access
             // (no supervisor pages are ever mapped to lower half)
 
-            const str_base: [*]const u8 = @ptrFromInt(args.arg0);
-            const str: []const u8 = str_base[0..args.arg1];
+            const str_base: [*]const u8 = @ptrFromInt(trap.arg0);
+            const str: []const u8 = str_base[0..trap.arg1];
 
             log.info("{s}", .{str});
         },
         else => {
-            log.warn("invalid syscall: {x}", .{args.syscall_id});
+            log.warn("invalid syscall: {x}", .{trap.syscall_id});
         },
     }
 }
