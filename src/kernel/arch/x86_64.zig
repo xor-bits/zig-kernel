@@ -987,7 +987,7 @@ pub const Cr4 = packed struct {
 
 pub const Rflags = packed struct {
     carry_flag: u1 = 0,
-    reserved0: u1 = 0,
+    reserved0: u1 = 1,
     parity_flag: u1 = 0,
     reserved1: u1 = 0,
     auxliary_carry_flag: u1 = 0,
