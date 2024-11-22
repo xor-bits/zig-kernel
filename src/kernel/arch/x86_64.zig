@@ -868,7 +868,7 @@ pub const CpuConfig = struct {
         );
 
         // RIP of the syscall jump destination
-        wrmsr(LSTAR, @intFromPtr(&syscall_handler_wrapper));
+        wrmsr(LSTAR, @intFromPtr(&syscall_handler_wrapper_wrapper));
 
         // bits that are 1 clear a bit from rflags when a syscall happens
         // setting interrupt_enable here disables interrupts on syscall
@@ -1144,8 +1144,13 @@ fn syscall_handler_wrapper_wrapper() callconv(.Naked) noreturn {
             \\ call syscall_handler_wrapper
             \\
         ++ sysret_instr ::: "memory");
+}
 
-    unreachable;
+comptime {
+    @export(
+        syscall_handler_wrapper,
+        .{ .name = "syscall_handler_wrapper", .linkage = .strong },
+    );
 }
 
 fn syscall_handler_wrapper(args: *SyscallRegs) callconv(.SysV) void {
