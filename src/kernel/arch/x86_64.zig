@@ -357,14 +357,14 @@ pub const GdtDescriptor = packed struct {
 
     pub fn tss(_tss: *const Tss) [2]Self {
         const tss_ptr: u64 = @intFromPtr(_tss);
-        const limit: u16 = @truncate(@sizeOf(Tss));
+        const limit: u16 = @truncate(@sizeOf(Tss) - 1);
         const base_0_23: u24 = @truncate(tss_ptr);
         const base_24_32: u8 = @truncate(tss_ptr >> 24);
+        const low = present.raw | limit | (@as(u64, base_0_23) << 16) | (@as(u64, base_24_32) << 56) | (@as(u64, 0b1001) << 40);
+        const high = tss_ptr >> 32;
         return .{
-            .{
-                .raw = present.raw | limit | (@as(u64, base_0_23) << 16) | (@as(u64, base_24_32) << 56) | (@as(u64, 0b1001) << 40),
-            },
-            .{ .raw = tss_ptr >> 32 },
+            .{ .raw = low },
+            .{ .raw = high },
         };
     }
 };
