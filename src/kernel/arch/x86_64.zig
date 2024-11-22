@@ -647,10 +647,17 @@ pub const Idt = extern struct {
         // page fault
         entries[14] = Entry.generateWithEc(struct {
             fn handler(interrupt_stack_frame: *const InterruptStackFrame, ec: u64) void {
-                log.info("page fault: {any}", .{interrupt_stack_frame});
-
                 const pfec: PageFaultError = @bitCast(ec);
                 const target_addr = Cr2.read().page_fault_addr;
+
+                vmem.AddressSpace.current().pageFault(
+                    pmem.VirtAddr.new(target_addr),
+                    pfec.user_mode,
+                    pfec.caused_by_write,
+                ) catch {
+                    flush_tlb_addr(target_addr);
+                    return;
+                };
 
                 log.err(
                     \\page fault 0x{x}
@@ -667,16 +674,6 @@ pub const Idt = extern struct {
                     interrupt_stack_frame.ip,
                     interrupt_stack_frame.sp,
                 });
-
-                vmem.AddressSpace.current().pageFault(
-                    pmem.VirtAddr.new(target_addr),
-                    pfec.user_mode,
-                    pfec.caused_by_write,
-                ) catch {
-                    log.info("page fault handled", .{});
-                    flush_tlb_addr(target_addr);
-                    return;
-                };
 
                 std.debug.panic("unhandled CPU exception", .{});
             }
