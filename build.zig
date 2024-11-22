@@ -182,6 +182,11 @@ pub fn build(b: *std.Build) !void {
         qemu_step.addArgs(&.{ "-bios", ovmf_fd });
     }
 
+    const gdb = b.option(bool, "gdb", "use GDB") orelse false;
+    if (gdb) {
+        qemu_step.addArgs(&.{ "-s", "-S" });
+    }
+
     const install_iso = b.addInstallFile(os_iso, "os.iso");
     b.getInstallStep().dependOn(&install_iso.step);
 
