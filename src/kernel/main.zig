@@ -112,7 +112,7 @@ fn main() noreturn {
         log.info("TODO: initfs is alredy page aligned, skipping copy", .{});
     }
     vmm.map(
-        pmem.VirtAddr.new(abi.BOOTSTRAP_INITFS),
+        pmem.VirtAddr.new(0x5000_0000),
         .{ .bytes = kernel_args.initfs },
         .{ .user_accessible = 1, .no_execute = 1 },
     );
@@ -124,6 +124,8 @@ fn main() noreturn {
     var s = arch.SyscallRegs{
         .user_instr_ptr = 0x200_0000,
         .user_stack_ptr = 0x4000_0000,
+        .arg0 = abi.BOOTSTRAP_INITFS,
+        .arg1 = kernel_args.initfs.len,
     };
     log.info("sysret", .{});
     arch.x86_64.sysret(&s);
@@ -203,7 +205,7 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
     switch (id) {
         abi.sys.Id.log => {
             // log syscall
-            if (trap.arg1 >= 0x100) {
+            if (trap.arg1 > 0x1000) {
                 log.warn("log syscall too long", .{});
                 return;
             }
