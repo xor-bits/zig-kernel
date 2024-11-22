@@ -408,10 +408,10 @@ pub const Gdt = extern struct {
         lgdt(@intFromPtr(ptr));
         set_cs(GdtDescriptor.kernel_code_selector);
         set_ss(GdtDescriptor.kernel_data_selector);
-        // set_ds(GdtDescriptor.kernel_data_selector);
-        // set_es(GdtDescriptor.kernel_data_selector);
-        // set_fs(GdtDescriptor.kernel_data_selector);
-        // set_gs(GdtDescriptor.kernel_data_selector);
+        set_ds(GdtDescriptor.kernel_data_selector);
+        set_es(GdtDescriptor.kernel_data_selector);
+        set_fs(GdtDescriptor.kernel_data_selector);
+        set_gs(GdtDescriptor.kernel_data_selector);
         ltr(GdtDescriptor.tss_selector);
     }
 };
