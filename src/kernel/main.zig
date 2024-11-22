@@ -47,15 +47,9 @@ export fn _start() callconv(.C) noreturn {
     @fence(.seq_cst);
 
     main();
-    arch.hcf();
 }
 
-// pub fn blackBox(comptime T: type, value: anytype) T {
-//     asm volatile ("" ::: "memory");
-//     return value;
-// }
-
-fn main() void {
+fn main() noreturn {
     const log = std.log.scoped(.main);
 
     log.info("kernel main", .{});
@@ -100,14 +94,6 @@ fn main() void {
         .{ .bytes = bootstrap },
         .{ .writeable = 1, .user_accessible = 1 },
     );
-
-    // map initfs.tar.gz into the address space
-    // vmm.map(
-    //     0x400_0000,
-    //     .{ .borrow = 0 },
-    //     .{ .user_accessible = 1 },
-    // );
-
     // map a lazy heap to the address space
     vmm.map(
         pmem.VirtAddr.new(0x1000_0000),
@@ -140,8 +126,6 @@ fn main() void {
     };
     log.info("sysret", .{});
     arch.x86_64.sysret(&s);
-
-    log.info("done", .{});
 
     // NOTE: /path/to/something is a short form for fs:///path/to/something
     // TODO: kernel
