@@ -836,7 +836,7 @@ pub const CpuConfig = struct {
         // initialize syscall and sysret instructions
         wrmsr(
             STAR,
-            (@as(u64, GdtDescriptor.user_code_selector - 8) << 48) |
+            (@as(u64, GdtDescriptor.user_data_selector - 8) << 48) |
                 (@as(u64, GdtDescriptor.kernel_code_selector) << 32),
         );
 
