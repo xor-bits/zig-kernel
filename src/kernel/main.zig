@@ -1,4 +1,5 @@
 const std = @import("std");
+const abi = @import("abi");
 const limine = @import("limine");
 
 const pmem = @import("pmem.zig");
@@ -90,20 +91,20 @@ fn main() noreturn {
     const bootstrap = @embedFile("bootstrap");
     log.info("bootstrap size: 0x{x}", .{bootstrap.len});
     vmm.map(
-        pmem.VirtAddr.new(0x200_0000),
+        pmem.VirtAddr.new(abi.BOOTSTRAP_EXE),
         .{ .bytes = bootstrap },
         .{ .writeable = 1, .user_accessible = 1 },
     );
     // map a lazy heap to the address space
     vmm.map(
-        pmem.VirtAddr.new(0x1000_0000),
-        .{ .lazy = 0x1000_0000 },
+        pmem.VirtAddr.new(abi.BOOTSTRAP_HEAP),
+        .{ .lazy = abi.BOOTSTRAP_HEAP_SIZE },
         .{ .writeable = 1, .user_accessible = 1, .no_execute = 1 },
     );
     // map a lazy stack to the address space
     vmm.map(
-        pmem.VirtAddr.new(0x3000_0000),
-        .{ .lazy = 0x1000_0000 },
+        pmem.VirtAddr.new(abi.BOOTSTRAP_STACK),
+        .{ .lazy = abi.BOOTSTRAP_STACK_SIZE },
         .{ .writeable = 1, .user_accessible = 1, .no_execute = 1 },
     );
     // map initfs.tar.gz to the address space
@@ -111,7 +112,7 @@ fn main() noreturn {
         log.info("TODO: initfs is alredy page aligned, skipping copy", .{});
     }
     vmm.map(
-        pmem.VirtAddr.new(0x4000_0000),
+        pmem.VirtAddr.new(abi.BOOTSTRAP_INITFS),
         .{ .bytes = kernel_args.initfs },
         .{ .user_accessible = 1, .no_execute = 1 },
     );
@@ -195,8 +196,12 @@ fn main() noreturn {
 pub fn syscall(trap: *arch.SyscallRegs) void {
     const log = std.log.scoped(.syscall);
 
-    switch (trap.syscall_id) {
-        1 => {
+    const id = std.meta.intToEnum(abi.sys.Id, trap.syscall_id) catch {
+        log.warn("invalid syscall: {x}", .{trap.syscall_id});
+        return;
+    };
+    switch (id) {
+        abi.sys.Id.log => {
             // log syscall
             if (trap.arg1 >= 0x100) {
                 log.warn("log syscall too long", .{});
@@ -216,9 +221,6 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
             const str: []const u8 = str_base[0..trap.arg1];
 
             log.info("{s}", .{str});
-        },
-        else => {
-            log.warn("invalid syscall: {x}", .{trap.syscall_id});
         },
     }
 }

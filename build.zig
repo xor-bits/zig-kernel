@@ -37,6 +37,12 @@ pub fn build(b: *std.Build) !void {
     const font_tool_run = b.addRunArtifact(font_tool);
     const font_zig = font_tool_run.addOutputFileArg("font.zig");
 
+    const abi = b.createModule(.{
+        .root_source_file = b.path("./src/abi/lib.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
     // build the bootstrap.bin
     const bootstrap_elf_step = b.addExecutable(.{
         .name = "bootstrap.elf",
@@ -44,6 +50,7 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
     });
+    bootstrap_elf_step.root_module.addImport("abi", abi);
     bootstrap_elf_step.setLinkerScript(b.path("./src/bootstrap/link.ld"));
 
     const bootstrap_bin_step = b.addObjCopy(bootstrap_elf_step.getEmittedBin(), .{
@@ -64,6 +71,7 @@ pub fn build(b: *std.Build) !void {
     kernel_elf_step.setLinkerScript(b.path("linker/x86_64.ld"));
     kernel_elf_step.want_lto = false;
     kernel_elf_step.root_module.addImport("limine", b.dependency("limine", .{}).module("limine"));
+    kernel_elf_step.root_module.addImport("abi", abi);
     kernel_elf_step.root_module.addAnonymousImport("font", .{
         .root_source_file = font_zig,
     });
