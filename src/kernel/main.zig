@@ -221,5 +221,5 @@ fn main() void {
 
 pub fn syscall(args: *arch.SyscallRegs) void {
     const log = std.log.scoped(.syscall);
-    log.info("got a syscall: {any}", .{args});
+    log.info("got a syscall: {any}", .{args.syscall_id});
 }
