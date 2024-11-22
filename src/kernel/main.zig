@@ -230,7 +230,6 @@ pub fn syscall(args: *arch.SyscallRegs) void {
     switch (args.syscall_id) {
         1 => {
             // log syscall
-
             if (args.arg1 >= 0x100) {
                 log.warn("log syscall too long", .{});
                 return;
@@ -240,6 +239,10 @@ pub fn syscall(args: *arch.SyscallRegs) void {
                 log.warn("user space shouldn't touch higher half", .{});
                 return;
             }
+
+            // pagefaults from the kernel touching lower half should just kill the process
+            // way faster and easier than testing for access
+            // (no supervisor pages are ever mapped to lower half)
 
             const str_base: [*]const u8 = @ptrFromInt(args.arg0);
             const str: []const u8 = str_base[0..args.arg1];
