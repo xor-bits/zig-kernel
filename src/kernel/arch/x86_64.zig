@@ -1141,14 +1141,7 @@ fn syscall_handler_wrapper_wrapper() callconv(.Naked) noreturn {
         ++ sysret_instr ::: "memory");
 }
 
-comptime {
-    @export(
-        syscall_handler_wrapper,
-        .{ .name = "syscall_handler_wrapper", .linkage = .strong },
-    );
-}
-
-fn syscall_handler_wrapper(args: *SyscallRegs) callconv(.SysV) void {
+export fn syscall_handler_wrapper(args: *SyscallRegs) callconv(.SysV) void {
     main.syscall(args);
 }
 
