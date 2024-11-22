@@ -8,7 +8,7 @@ const arch = @import("arch.zig");
 const acpi = @import("acpi.zig");
 const logs = @import("logs.zig");
 const args = @import("args.zig");
-const NumberPrefix = @import("byte_fmt.zig").NumberPrefix;
+const util = @import("util.zig");
 
 //
 
@@ -62,13 +62,13 @@ fn main() noreturn {
     // initialize physical memory allocation
     pmem.printInfo();
     log.info("used memory: {any}B", .{
-        NumberPrefix(usize, .binary).new(pmem.usedPages() << 12),
+        util.NumberPrefix(usize, .binary).new(pmem.usedPages() << 12),
     });
     log.info("free memory: {any}B", .{
-        NumberPrefix(usize, .binary).new(pmem.freePages() << 12),
+        util.NumberPrefix(usize, .binary).new(pmem.freePages() << 12),
     });
     log.info("total memory: {any}B", .{
-        NumberPrefix(usize, .binary).new(pmem.totalPages() << 12),
+        util.NumberPrefix(usize, .binary).new(pmem.totalPages() << 12),
     });
 
     // set up arch specific things: GDT, TSS, IDT, syscalls, ...

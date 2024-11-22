@@ -4,7 +4,7 @@ const limine = @import("limine");
 const main = @import("main.zig");
 const arch = @import("arch.zig");
 const lazy = @import("lazy.zig");
-const NumberPrefix = @import("byte_fmt.zig").NumberPrefix;
+const util = @import("util.zig");
 
 const log = std.log.scoped(.pmem);
 
@@ -56,16 +56,16 @@ pub fn printInfo() void {
     }
 
     log.info("usable memory: {0any}B ({0any:.1024}B)", .{
-        NumberPrefix(usize, .binary).new(usable_memory),
+        util.NumberPrefix(usize, .binary).new(usable_memory),
     });
     log.info("bootloader (reclaimable) overhead: {any}B", .{
-        NumberPrefix(usize, .binary).new(reclaimable),
+        util.NumberPrefix(usize, .binary).new(reclaimable),
     });
     log.info("page allocator overhead: {any}B", .{
-        NumberPrefix(usize, .binary).new(page_refcounts.len),
+        util.NumberPrefix(usize, .binary).new(page_refcounts.len),
     });
     log.info("kernel code overhead: {any}B", .{
-        NumberPrefix(usize, .binary).new(kernel_usage),
+        util.NumberPrefix(usize, .binary).new(kernel_usage),
     });
 }
 
