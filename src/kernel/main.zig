@@ -146,8 +146,6 @@ fn main() noreturn {
     //    - syscalls for unix sockets
     //
     // TODO: bootstrap/initfsd process
-    //  - map initfs.tar.gz to 0x400_0000
-    //  - inflate&initialize initfs in heap
     //  - create initfs:// vfs proto
     //  - exec flat binary initfs:///sbin/initd
     //  - rename to initfsd
