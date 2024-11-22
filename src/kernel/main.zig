@@ -75,7 +75,7 @@ fn main() void {
     arch.init() catch |err| {
         std.debug.panic("failed to initialize CPU: {any}", .{err});
     };
-    arch.x86_64.ints.int3();
+    // arch.x86_64.ints.int3();
 
     // initialize ACPI specific things: APIC, HPET, ...
     acpi.init() catch |err| {
