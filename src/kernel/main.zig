@@ -219,5 +219,28 @@ fn main() void {
 
 pub fn syscall(args: *arch.SyscallRegs) void {
     const log = std.log.scoped(.syscall);
-    log.info("got a syscall: {any}", .{args.syscall_id});
+
+    switch (args.syscall_id) {
+        1 => {
+            // log syscall
+
+            if (args.arg1 >= 0x100) {
+                log.warn("log syscall too long", .{});
+                return;
+            }
+
+            if (args.arg0 >= 0x8000_0000_0000 or args.arg0 + args.arg1 >= 0x8000_0000_0000) {
+                log.warn("user space shouldn't touch higher half", .{});
+                return;
+            }
+
+            const str_base: [*]const u8 = @ptrFromInt(args.arg0);
+            const str: []const u8 = str_base[0..args.arg1];
+
+            log.info("{s}", .{str});
+        },
+        else => {
+            log.warn("invalid syscall: {x}", .{args.syscall_id});
+        },
+    }
 }
