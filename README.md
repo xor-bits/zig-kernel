@@ -4,6 +4,8 @@
 
 zig-kernel is the [hyperion](https://github.com/hyperion-os/hyperion) kernel rewritten as a microkernel in pure Zig
 
+the name is very temporary
+
 </div>
 
 ## Running in QEMU
