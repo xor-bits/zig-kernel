@@ -129,68 +129,6 @@ fn main() noreturn {
     };
     log.info("sysret", .{});
     arch.x86_64.sysret(&s);
-
-    // NOTE: /path/to/something is a short form for fs:///path/to/something
-    // TODO: kernel
-    //  - HPET
-    //  - scheduler
-    //  - binary loader
-    //  - message IPC, shared memory IPC
-    //  - figure out userland interrupts (ps2 keyboard, ..)
-    //  - syscalls:
-    //    - syscall to exec a binary (based on a provided mem map)
-    //    - syscall to create a vfs proto
-    //    - syscall to accept a vfs proto cmd
-    //    - syscall to return a vfs proto cmd result
-    //    - syscall to read the root kernel cli arg
-    //    - syscalls for unix sockets
-    //
-    // TODO: bootstrap/initfsd process
-    //  - create initfs:// vfs proto
-    //  - exec flat binary initfs:///sbin/initd
-    //  - rename to initfsd
-    //  - start processing vfs proto cmds
-    //
-    // TODO: initfs:///sbin/initd process
-    //  - launch initfs:///sbin/rngd
-    //  - launch initfs:///sbin/vfsd
-    //  - launch services from initfs://
-    //  // - launch /bin/wm
-    //
-    // TODO: initfs:///sbin/rngd process
-    //  - create rng:// vfs proto
-    //  - start processing vfs proto cmds
-    //
-    // TODO: /sbin/inputd process
-    //
-    // TODO: /sbin/outputd process
-    //
-    // TODO: /sbin/kbd process
-    //
-    // TODO: /sbin/moused process
-    //
-    // TODO: /sbin/timed process
-    //
-    // TODO: /sbin/fbd process
-    //
-    // TODO: /sbin/pcid process
-    //
-    // TODO: /sbin/usbd process
-    //
-    // TODO: initfs:///sbin/vfsd process
-    //  - create fs:// vfs proto
-    //  - get the root device with syscall (either device or fstab for initfs:///etc/fstab)
-    //  - exec required root filesystem drivers
-    //  - mount root (root= kernel cli arg) to /
-    //  - remount root using /etc/fstab
-    //  - exec other filesystem drivers lazily
-    //  - mount everything according to /etc/fstab
-    //  - start processing vfs proto cmds
-    //
-    // TODO: initfs:///sbin/fsd.fat32
-    //  - connect to the /sbin/vfsd process using a unix socket
-    //  - register a fat32 filesystem
-    //  - start processing cmds
 }
 
 pub fn syscall(trap: *arch.SyscallRegs) void {
