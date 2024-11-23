@@ -18,6 +18,14 @@ zig build run # thats it
 zig build # generates the os.iso in zig-out/os.iso
 ```
 
+## Stuff included here
+
+Despite the name, this repo holds more than just the kernel
+
+ - kernel: [src/kernel](/src/kernel)
+ - bootstrap process: [src/bootstrap](src/bootstrap)
+ - kernel/user interface: [src/abi](src/abi)
+
 ## TODOs and roadmap
 
 ### NOTE: /path/to/something is a short form for fs:///path/to/something
