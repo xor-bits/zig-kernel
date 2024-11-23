@@ -2,7 +2,7 @@
 
 # zig-kernel
 
-zig-kernel is the [hyperion](https://github.com/hyperion-os/hyperion) kernel rewritten as a microkernel in Zig
+zig-kernel is the [hyperion](https://github.com/hyperion-os/hyperion) kernel rewritten as a microkernel in pure Zig
 
 </div>
 
