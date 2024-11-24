@@ -16,26 +16,13 @@ var initfs_tar = std.ArrayList(u8).init(heap.allocator());
 //
 
 fn main(initfs: []const u8) !void {
-    log.info("hello world", .{});
-    log.info("initfs len: {d}", .{initfs.len});
-
-    // t("./a", "test");
-    // t("./test", "test");
-    // t("/test", "/test");
-    // t("/test", "./test");
-    // t("/test", "././././././test");
-    // t("test", "././././.././test");
-    // t("....test", "test");
-    // t("..../test", "test");
-
-    _ = openFile("/test");
-
     var initfs_tar_gz = std.io.fixedBufferStream(initfs);
-    // initfs_tar = std.ArrayList(u8).init(heap.allocator());
-
     try std.compress.flate.inflate.decompress(.gzip, initfs_tar_gz.reader(), initfs_tar.writer());
-
     std.debug.assert(std.mem.eql(u8, initfs_tar.items[257..][0..8], "ustar\x20\x20\x00"));
+
+    const init = openFile("/sbin/init").?;
+    log.info("{any}", .{init.len});
+    // _ = init;
 }
 
 fn t(a: []const u8, b: []const u8) void {
@@ -43,14 +30,29 @@ fn t(a: []const u8, b: []const u8) void {
 }
 
 fn openFile(path: []const u8) ?[]const u8 {
-    var block_iter = std.mem.window(u8, initfs_tar.items, 512, 512);
-    while (block_iter.next()) |header_bytes| {
-        if (header_bytes.len != 512) {
-            @setCold(true);
-            break;
+    const Block = [512]u8;
+    const len = initfs_tar.items.len / 512;
+    const blocks_ptr: [*]const Block = @ptrCast(initfs_tar.items.ptr);
+    const blocks = blocks_ptr[0..len];
+
+    var i: usize = 0;
+    while (i < len) {
+        const header: *const TarEntryHeader = @ptrCast(&blocks[i]);
+        const size = std.fmt.parseInt(usize, std.mem.sliceTo(header.size[0..12], 0), 8) catch 0;
+        const size_blocks = if (size % 512 == 0) size / 512 else size / 512 + 1;
+
+        i += 1; // skip the header
+        if (i + size_blocks > len) {
+            log.err("invalid tar file: unexpected EOF", .{});
+            // broken tar file
+            return null;
         }
 
-        const header: *const TarEntryHeader = @ptrCast(header_bytes.ptr);
+        const bytes_blocks = blocks[i .. i + size_blocks];
+        const first_byte: [*]const u8 = @ptrCast(bytes_blocks);
+        const bytes = first_byte[0..size];
+        i += size_blocks; // skip the file data
+
         if (header.ty != 0 and header.ty != '0') {
             // skip non files
             continue;
@@ -65,12 +67,10 @@ fn openFile(path: []const u8) ?[]const u8 {
         //     continue;
         // }
 
-        if (!pathEql(path, header.name[0..100])) {
+        if (!pathEql(path, std.mem.sliceTo(header.name[0..100], 0))) {
             continue;
         }
 
-        const size = std.fmt.parseInt(usize, header.size[0..12], 8) catch 0;
-        const bytes = block_iter.buffer[block_iter.index orelse return null ..][0..size]; // FIXME: catch broken file
         return bytes;
 
         // const blocks = if (size % 512 == 0) size / 512 else size / 512 + 1;
