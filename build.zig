@@ -36,7 +36,7 @@ pub fn build(b: *std.Build) !void {
     // build the kernel ELF
     const kernel_elf = createKernelElf(b, target, optimize, abi, bootstrap_bin);
 
-    const initfs_tar_gz = createInitfsTarGz(b);
+    const initfs_tar_gz = createInitfsTarGz(target, optimize, abi, b);
 
     const os_iso = createIso(b, native_target, optimize, kernel_elf, initfs_tar_gz);
 
@@ -117,25 +117,22 @@ fn createIso(
 ) std.Build.LazyPath {
     _ = native_optimize; // autofix
     _ = native_target; // autofix
+
     // clone & configure limine (WARNING: this runs a Makefile from a dependency at compile time)
     const limine_bootloader_pkg = b.dependency("limine_bootloader", .{});
-    // const limine_step = b.addExecutable(.{
-    //     .name = "limine",
-    //     .target = native_target,
-    //     .optimize = native_optimize,
-    //     .root_source_file = b.addTranslateC(.{
-    //         .target = native_target,
-    //         .optimize = native_optimize,
-    //         .root_source_file = limine_bootloader_pkg.path("limine.c"),
-    //     }).getOutput(),
-    // });
-    // b.installArtifact(limine_step);
     const limine_step = b.addSystemCommand(&.{
         "make", "-C",
     });
     limine_step.addDirectoryArg(limine_bootloader_pkg.path("."));
-    // limine_step.dep_output_file;
+    // limine_step.addPrefixedFileArg("_IGNORED=", limine_bootloader_pkg.path(".").path(b, "limine.c"));
     limine_step.has_side_effects = false;
+
+    // tool that generates the ISO file with everything
+    const wrapper = b.addExecutable(.{
+        .name = "xorriso_limine_wrapper",
+        .root_source_file = b.path("./tools/xorriso_limine_wrapper.zig"),
+        .target = b.graph.host,
+    });
 
     // create virtual iso root
     const wf = b.addNamedWriteFiles("create virtual iso root");
@@ -148,51 +145,35 @@ fn createIso(
     _ = wf.addCopyFile(limine_bootloader_pkg.path("BOOTX64.EFI"), "EFI/BOOT/BOOTX64.EFI");
     _ = wf.addCopyFile(limine_bootloader_pkg.path("BOOTIA32.EFI"), "EFI/BOOT/BOOTIA32.EFI");
 
-    // create the ISO file
-    const xorriso_step = b.addSystemCommand(&.{
-        "xorriso",
-        "-as",
-        "mkisofs",
-        "-b",
-        "boot/limine/limine-bios-cd.bin",
-        "-no-emul-boot",
-        "-boot-load-size",
-        "4",
-        "-boot-info-table",
-        "--efi-boot",
-        "boot/limine/limine-uefi-cd.bin",
-        "-efi-boot-part",
-        "--efi-boot-image",
-        "--protective-msdos-label",
-    });
-    xorriso_step.addDirectoryArg(wf.getDirectory());
-    xorriso_step.addArg("-o");
-    const os_iso = xorriso_step.addOutputFileArg("os.iso");
-    xorriso_step.step.dependOn(&wf.step);
+    // create the ISO file (WARNING: this runs a binary from a dependency (limine_bootloader) at compile time)
+    const wrapper_run = b.addRunArtifact(wrapper);
+    wrapper_run.addFileArg(limine_bootloader_pkg.path("limine"));
+    wrapper_run.addDirectoryArg(wf.getDirectory());
+    const os_iso = wrapper_run.addOutputFileArg("os.iso");
+    wrapper_run.step.dependOn(&limine_step.step);
 
-    // install limine bootloader BIOS on that ISO file (WARNING: this runs a binary from a dependency at compile time)
-    const limine_install_step = b.addSystemCommand(&.{
-        limine_bootloader_pkg.path("limine").getPath(b),
-        "bios-install",
-    });
-    limine_install_step.addFileArg(os_iso);
-    limine_install_step.step.dependOn(&xorriso_step.step);
-    // const limine_install_step = b.addRunArtifact(limine_step);
-    // limine_install_step.addArg("bios-install");
-    // limine_install_step.addFileArg(os_iso);
-
-    const wf2 = b.addWriteFiles();
-    const os_iso_final = wf2.addCopyFile(os_iso, "os.iso");
-    wf2.step.dependOn(&limine_install_step.step);
-    // os_iso.addStepDependencies(&limine_install_step.step);
-
-    return os_iso_final;
+    return os_iso;
 }
 
-fn createInitfsTarGz(b: *std.Build) std.Build.LazyPath {
+fn createInitfsTarGz(
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    abi: *std.Build.Module,
+    b: *std.Build,
+) std.Build.LazyPath {
+    // create initfs:///sbin/init
+    const init = b.addExecutable(.{
+        .name = "init",
+        .root_source_file = b.path("./src/init/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    init.root_module.addImport("abi", abi);
+
     // create virtual initfs.tar.gz root
     const initfs = b.addNamedWriteFiles("create virtual initfs root");
-    // _ = initfs.addCopyFile(b.path(""), "");
+    _ = initfs.addCopyFile(init.getEmittedBin(), "sbin/init");
+    initfs.step.dependOn(&init.step);
 
     const initfs_tar_gz = b.addSystemCommand(&.{
         "tar",
@@ -275,13 +256,15 @@ fn createAbi(b: *std.Build) *std.Build.Module {
 // convert the font.bmp into a more usable format
 fn createFont(b: *std.Build) *std.Build.Module {
     const font_tool = b.addExecutable(.{
-        .name = "generate kernel font",
+        .name = "generate_font",
         .root_source_file = b.path("tools/generate_font.zig"),
-        .target = b.host,
+        .target = b.graph.host,
     });
 
     const font_tool_run = b.addRunArtifact(font_tool);
+    font_tool_run.addFileArg(b.path("./tools/font.bmp"));
     const font_zig = font_tool_run.addOutputFileArg("font.zig");
+    font_tool_run.has_side_effects = false;
 
     return b.createModule(.{
         .root_source_file = font_zig,

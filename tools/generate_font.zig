@@ -3,16 +3,17 @@ const std = @import("std");
 //
 
 pub fn main() !void {
-    const glyphs = try generateGlyphs();
-
     var arena_state = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
 
     const args = try std.process.argsAlloc(arena);
-    if (args.len != 2) return error.@"missing output file argument";
+    if (args.len != 3) return error.@"missing output file argument";
 
-    var output_file = try std.fs.cwd().createFile(args[1], .{});
+    const input_file = try std.fs.cwd().readFileAlloc(arena, args[1], 1_000_000);
+    const glyphs = try generateGlyphs(input_file);
+
+    var output_file = try std.fs.cwd().createFile(args[2], .{});
     defer output_file.close();
 
     // std.fmt.format(, , )
@@ -63,8 +64,10 @@ const Glyph = struct {
     wide: bool,
 };
 
-fn generateGlyphs() ![256]Glyph {
-    const font_raw = try parse_bmp(@embedFile("./font.bmp"));
+fn generateGlyphs(bmp: []const u8) ![256]Glyph {
+    const font_raw = try parse_bmp(bmp);
+    // const font_raw = try parse_bmp(@embedFile("./font.bmp"));
+
     var font = std.mem.zeroes([256]Glyph);
 
     for (0..16) |y| {
