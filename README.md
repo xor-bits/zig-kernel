@@ -34,15 +34,20 @@ Despite the name, this repo holds more than just the kernel
 
 The plan is to have the kernel be just a scheduler, IPC relay, vfs protocol "loadbalancer" and a virtual memory manager.
 
-Every path is an URI, where the protocol part (proto://) tells the kernel, which service handles that path. This is kind of like how Redox os does things.
+Every path is a URI, where the protocol part (proto://) tells the kernel, which service handles that path. This is kind of like how Redox os does things.
 
-- [ ] kernel
+- [x] kernel
+  - [x] PMM
+  - [x] VMM
+  - [x] GDT, TSS, IDT
+  - [x] ACPI, APIC
+  - [x] user space
   - [ ] HPET
   - [ ] scheduler
   - [ ] binary loader
   - [ ] message IPC, shared memory IPC
   - [ ] figure out userland interrupts (ps2 keyboard, ..)
-  - [ ] syscalls:
+  - [x] syscalls:
     - [ ] syscall to exec a binary (based on a provided mem map)
     - [ ] syscall to create a vfs proto
     - [ ] syscall to accept a vfs proto cmd
@@ -50,7 +55,8 @@ Every path is an URI, where the protocol part (proto://) tells the kernel, which
     - [ ] syscall to read the root kernel cli arg
     - [ ] syscalls for unix sockets
 
-- [ ] bootstrap/initfsd process
+- [x] bootstrap/initfsd process
+  - [x] decompress initfs.tar.gz
   - [ ] create initfs:// vfs proto
   - [ ] exec flat binary initfs:///sbin/initd
   - [ ] rename to initfsd
