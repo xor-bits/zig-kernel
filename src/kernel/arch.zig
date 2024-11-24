@@ -15,15 +15,21 @@ pub inline fn hcf() noreturn {
 }
 
 pub inline fn init() error{OutOfMemory}!void {
-    const cpu_id = cpu_id_next.fetchAdd(1, .monotonic);
+    const _cpu_id = cpu_id_next.fetchAdd(1, .monotonic);
 
     if (builtin.cpu.arch == .x86_64) {
         const cpu = try pmem.page_allocator.create(x86_64.CpuConfig);
-        cpu.init(cpu_id);
+        cpu.init(_cpu_id);
         // leak the cpu config, because GDT and IDT are permanent
     }
 }
-var cpu_id_next = std.atomic.Value(usize).init(0);
+var cpu_id_next = std.atomic.Value(u32).init(0);
+
+pub inline fn cpu_id() u32 {
+    if (builtin.cpu.arch == .x86_64) {
+        return x86_64.cpu_id();
+    }
+}
 
 pub inline fn reset() void {
     if (builtin.cpu.arch == .x86_64) {

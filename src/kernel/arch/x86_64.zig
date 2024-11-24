@@ -822,7 +822,7 @@ pub const CpuConfig = struct {
     tss: Tss,
     idt: Idt,
 
-    pub fn init(self: *@This(), this_cpu_id: usize) void {
+    pub fn init(self: *@This(), this_cpu_id: u32) void {
         self.tss = Tss.new();
         self.gdt = Gdt.new(&self.tss);
         self.idt = Idt.new();

@@ -59,13 +59,19 @@ pub const MapSource = extern struct {
 
         return self.data.lazy;
     }
+
+    pub fn length(self: Self) usize {
+        switch (self.tag) {
+            .bytes => return self.data.bytes.len,
+            .lazy => return self.data.lazy,
+        }
+    }
 };
 
 pub const MapFlags = packed struct {
-    user: bool,
     write: bool,
     execute: bool,
-    _p: u5 = 0,
+    _p: u6 = 0,
 };
 
 //

@@ -9,6 +9,8 @@ const acpi = @import("acpi.zig");
 const logs = @import("logs.zig");
 const args = @import("args.zig");
 const util = @import("util.zig");
+const spin = @import("spin.zig");
+const lazy = @import("lazy.zig");
 
 //
 
@@ -85,7 +87,7 @@ fn main() noreturn {
     // create higher half global address space
     vmem.init();
 
-    const vmm = vmem.AddressSpace.current();
+    const vmm = vmem.AddressSpace.new();
 
     // map bootstrap into the address space
     const bootstrap = @embedFile("bootstrap");
@@ -121,26 +123,65 @@ fn main() noreturn {
     vmm.printMappings();
     vmm.switchTo();
 
-    var s = arch.SyscallRegs{
+    const proc = &proc_table[0];
+    proc.lock.lock();
+    cpu_table[arch.cpu_id()].current_pid = 0;
+
+    proc.addr_space = vmm;
+    proc.is_system = true;
+    proc.trap = arch.SyscallRegs{
         .user_instr_ptr = 0x200_0000,
         .user_stack_ptr = 0x4000_0000,
         .arg0 = abi.BOOTSTRAP_INITFS,
         .arg1 = kernel_args.initfs.len,
     };
+    proc.status = .running;
+
     log.info("sysret", .{});
-    arch.x86_64.sysret(&s);
+    arch.x86_64.sysret(&proc_table[0].trap);
 }
+
+pub const Context = struct {
+    lock: spin.Mutex = spin.Mutex.new(),
+    status: enum {
+        empty,
+        running,
+        ready,
+        sleeping,
+    } = .empty,
+    addr_space: ?vmem.AddressSpace = null,
+    trap: arch.SyscallRegs = .{},
+    is_system: bool = false,
+};
+
+pub const Cpu = struct {
+    current_pid: ?usize,
+};
+
+// TODO: lazy page allocation for a table that can grow
+var proc_table: [256]Context = blk: {
+    var arr: [256]Context = undefined;
+    for (&arr) |*c| {
+        c.* = Context{};
+    }
+    break :blk arr;
+};
+
+// TODO: same lazy page allocation for a page that can grow
+var cpu_table: [32]Cpu = undefined;
 
 pub fn syscall(trap: *arch.SyscallRegs) void {
     const log = std.log.scoped(.syscall);
 
+    const proc = &proc_table[cpu_table[arch.cpu_id()].current_pid.?];
+
     // TODO: once every CPU has reached this, bootloader_reclaimable memory could be freed
     // just some few things need to be copied, but the page map(s) and stack(s) are already copied
 
-    // if (trap.syscall_id >= 0x8000_0000 and !proc.is_system) {
-    //     // only system processes should use system syscalls
-    //     return;
-    // }
+    if (trap.syscall_id >= 0x8000_0000 and !proc.is_system) {
+        // only system processes should use system syscalls
+        return;
+    }
 
     const id = std.meta.intToEnum(abi.sys.Id, trap.syscall_id) catch {
         log.warn("invalid syscall: {x}", .{trap.syscall_id});
@@ -162,14 +203,41 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
             log.info("{s}", .{msg});
         },
         abi.sys.Id.system_map => {
-            // const pid = trap.arg0;
+            const pid = trap.arg0;
             const maps = untrustedSlice(abi.sys.Map, trap.arg1, trap.arg2) catch |err| {
                 log.warn("user space sent a bad syscall: {}", .{err});
                 return;
             };
 
+            const _proc = &proc_table[pid];
+            if (_proc.addr_space == null) {
+                _proc.addr_space = vmem.AddressSpace.new();
+            }
+            const vmm = &_proc.addr_space.?;
+
             for (maps) |map| {
-                log.info("map: {any}", .{map});
+                isInLowerHalf(u8, map.dst, map.src.length()) catch |err| {
+                    log.warn("user space sent a bad syscall: {}", .{err});
+                    return;
+                };
+
+                var src: vmem.MapSource = undefined;
+                if (map.src.asBytes()) |bytes| {
+                    src = .{ .bytes = bytes };
+                } else if (map.src.asLazy()) |bytes| {
+                    src = .{ .lazy = bytes };
+                } else {
+                    log.warn("user space sent a bad syscall: invalid map source", .{});
+                    return;
+                }
+
+                log.info("mapping", .{});
+                vmm.map(pmem.VirtAddr.new(map.dst), src, .{
+                    .user_accessible = 1,
+                    .writeable = @intFromBool(map.flags.write),
+                    .no_execute = @intFromBool(!map.flags.execute),
+                });
+                log.info("mapped", .{});
             }
         },
         abi.sys.Id.system_exec => {
@@ -179,15 +247,24 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
     }
 }
 
-fn untrustedSlice(comptime T: type, bottom: usize, length: usize) ![]T {
-    const top = @addWithOverflow(bottom, length);
+fn isInLowerHalf(comptime T: type, bottom: usize, length: usize) error{ Overflow, IsHigherHalf }!void {
+    const byte_len = @mulWithOverflow(@sizeOf(T), length);
+    if (byte_len[1] != 0) {
+        return error.Overflow;
+    }
+
+    const top = @addWithOverflow(bottom, byte_len[0]);
     if (top[1] != 0) {
-        return error.@"user space slice overflows";
+        return error.Overflow;
     }
 
     if (top[0] >= 0x8000_0000_0000) {
-        return error.@"user space shouldn't touch higher half";
+        return error.IsHigherHalf;
     }
+}
+
+fn untrustedSlice(comptime T: type, bottom: usize, length: usize) error{ Overflow, IsHigherHalf }![]T {
+    try isInLowerHalf(T, bottom, length);
 
     // pagefaults from the kernel touching lower half should just kill the process,
     // way faster and easier than testing for access

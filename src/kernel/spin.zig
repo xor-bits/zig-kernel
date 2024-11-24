@@ -2,13 +2,17 @@ const std = @import("std");
 
 //
 
-pub const SpinMutex = struct {
+pub const Mutex = struct {
     lock_state: std.atomic.Value(u8),
 
     const Self = @This();
 
     pub fn new() Self {
         return .{ .lock_state = std.atomic.Value(u8).init(0) };
+    }
+
+    pub fn newLocked() Self {
+        return .{ .lock_state = std.atomic.Value(u8).init(1) };
     }
 
     pub fn lock(self: *Self) void {

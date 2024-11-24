@@ -32,7 +32,6 @@ fn main(initfs: []const u8) !void {
         .dst = 0x7FFF_FFF0_0000,
         .src = abi.sys.MapSource.newLazy(64 * 0x1000),
         .flags = .{
-            .user = true,
             .write = true,
             .execute = false,
         },
@@ -50,7 +49,6 @@ fn main(initfs: []const u8) !void {
         const bytes: []const u8 = init.buffer[program_header.p_offset..][0..program_header.p_filesz];
 
         const flags = abi.sys.MapFlags{
-            .user = true,
             .write = program_header.p_flags & std.elf.PF_W != 0,
             .execute = program_header.p_flags & std.elf.PF_X != 0,
         };
