@@ -20,9 +20,77 @@ fn main(initfs: []const u8) !void {
     try std.compress.flate.inflate.decompress(.gzip, initfs_tar_gz.reader(), initfs_tar.writer());
     std.debug.assert(std.mem.eql(u8, initfs_tar.items[257..][0..8], "ustar\x20\x20\x00"));
 
-    const init = openFile("/sbin/init").?;
-    log.info("{any}", .{init.len});
-    // _ = init;
+    var init = std.io.fixedBufferStream(openFile("/sbin/init").?);
+    log.info("{any}", .{init.buffer.len});
+
+    var maps = std.ArrayList(abi.sys.Map).init(heap.allocator());
+
+    const header = try std.elf.Header.read(&init);
+    var program_headers = header.program_header_iterator(&init);
+
+    try maps.append(abi.sys.Map{
+        .dst = 0x7FFF_FFF0_0000,
+        .src = abi.sys.MapSource.newLazy(64 * 0x1000),
+        .flags = .{
+            .user = true,
+            .write = true,
+            .execute = false,
+        },
+    });
+
+    while (try program_headers.next()) |program_header| {
+        if (program_header.p_type != std.elf.PT_LOAD) {
+            continue;
+        }
+
+        if (program_header.p_memsz == 0) {
+            continue;
+        }
+
+        const bytes: []const u8 = init.buffer[program_header.p_offset..][0..program_header.p_filesz];
+
+        const flags = abi.sys.MapFlags{
+            .user = true,
+            .write = program_header.p_flags & std.elf.PF_W != 0,
+            .execute = program_header.p_flags & std.elf.PF_X != 0,
+        };
+
+        const segment_vaddr_bottom = std.mem.alignBackward(usize, program_header.p_vaddr, 0x1000);
+        const segment_vaddr_top = std.mem.alignForward(usize, program_header.p_vaddr + program_header.p_memsz, 0x1000);
+        const data_vaddr_bottom = program_header.p_vaddr;
+        const data_vaddr_top = data_vaddr_bottom + program_header.p_filesz;
+        const zero_vaddr_bottom = std.mem.alignForward(usize, data_vaddr_top, 0x1000);
+        const zero_vaddr_top = segment_vaddr_top;
+
+        try maps.append(abi.sys.Map{
+            .dst = data_vaddr_bottom,
+            .src = abi.sys.MapSource.newBytes(bytes),
+            .flags = flags,
+        });
+
+        if (zero_vaddr_bottom != zero_vaddr_top) {
+            try maps.append(abi.sys.Map{
+                .dst = data_vaddr_bottom,
+                .src = abi.sys.MapSource.newLazy(zero_vaddr_top - segment_vaddr_bottom),
+                .flags = flags,
+            });
+        }
+
+        // log.info("flags: {any}, vaddrs: {any}", .{
+        //     flags,
+        //     .{
+        //         segment_vaddr_bottom,
+        //         segment_vaddr_top,
+        //         data_vaddr_bottom,
+        //         data_vaddr_top,
+        //         zero_vaddr_bottom,
+        //         zero_vaddr_top,
+        //     },
+        // });
+    }
+
+    abi.sys.system_map(1, maps.items);
+    abi.sys.system_exec(1, header.entry, 0x7FFF_FFF4_0000);
 }
 
 fn t(a: []const u8, b: []const u8) void {

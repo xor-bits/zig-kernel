@@ -137,6 +137,11 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
     // TODO: once every CPU has reached this, bootloader_reclaimable memory could be freed
     // just some few things need to be copied, but the page map(s) and stack(s) are already copied
 
+    // if (trap.syscall_id >= 0x8000_0000 and !proc.is_system) {
+    //     // only system processes should use system syscalls
+    //     return;
+    // }
+
     const id = std.meta.intToEnum(abi.sys.Id, trap.syscall_id) catch {
         log.warn("invalid syscall: {x}", .{trap.syscall_id});
         return;
@@ -149,19 +154,45 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
                 return;
             }
 
-            if (trap.arg0 >= 0x8000_0000_0000 or trap.arg0 + trap.arg1 >= 0x8000_0000_0000) {
-                log.warn("user space shouldn't touch higher half", .{});
+            const msg = untrustedSlice(u8, trap.arg0, trap.arg1) catch |err| {
+                log.warn("user space sent a bad syscall: {}", .{err});
                 return;
-            }
+            };
 
-            // pagefaults from the kernel touching lower half should just kill the process
-            // way faster and easier than testing for access
-            // (no supervisor pages are ever mapped to lower half)
-
-            const str_base: [*]const u8 = @ptrFromInt(trap.arg0);
-            const str: []const u8 = str_base[0..trap.arg1];
-
-            log.info("{s}", .{str});
+            log.info("{s}", .{msg});
         },
+        abi.sys.Id.system_map => {
+            // const pid = trap.arg0;
+            const maps = untrustedSlice(abi.sys.Map, trap.arg1, trap.arg2) catch |err| {
+                log.warn("user space sent a bad syscall: {}", .{err});
+                return;
+            };
+
+            for (maps) |map| {
+                log.info("map: {any}", .{map});
+            }
+        },
+        abi.sys.Id.system_exec => {
+            log.info("exec pid: {} ip: {} sp: {}", .{ trap.arg0, trap.arg1, trap.arg2 });
+        },
+        // else => std.debug.panic("TODO", .{}),
     }
+}
+
+fn untrustedSlice(comptime T: type, bottom: usize, length: usize) ![]T {
+    const top = @addWithOverflow(bottom, length);
+    if (top[1] != 0) {
+        return error.@"user space slice overflows";
+    }
+
+    if (top[0] >= 0x8000_0000_0000) {
+        return error.@"user space shouldn't touch higher half";
+    }
+
+    // pagefaults from the kernel touching lower half should just kill the process,
+    // way faster and easier than testing for access
+    // (no supervisor pages are ever mapped to lower half)
+
+    const first: [*]T = @ptrFromInt(bottom);
+    return first[0..length];
 }
