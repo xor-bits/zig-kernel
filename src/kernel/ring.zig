@@ -23,6 +23,17 @@ pub const Slot = struct {
     pub fn min(self: Self, n: usize) Self {
         return Self{ .first = self.first, .len = @min(n, self.len) };
     }
+
+    pub fn slices(self: Self, comptime T: type, storage: []T) [2][]T {
+        std.debug.assert(self.len <= storage.len);
+
+        if (self.first + self.len <= storage.len) {
+            return .{ storage[self.first .. self.first + self.len], &.{} };
+        } else {
+            const first = storage[self.first..];
+            return .{ first, storage[0 .. self.len - first.len] };
+        }
+    }
 };
 
 pub const Marker = struct {
@@ -135,6 +146,26 @@ pub fn AtomicRing(comptime T: type, comptime size: usize) type {
             self.storage[slot.first] = undefined; // debug
             self.marker.release(slot);
             return val;
+        }
+
+        pub fn write(self: *Self, v: []const T) error{Full}!void {
+            const slot = self.marker.acquire(v.len) orelse return error.Full;
+            const slices = slot.slices(T, self.storage[0..]);
+
+            std.mem.copyForwards(T, slices[0], v[0..slices[0].len]);
+            std.mem.copyForwards(T, slices[1], v[slices[0].len..]);
+
+            self.marker.produce(slot);
+        }
+
+        pub fn read(self: *Self, buf: []T) ?[]T {
+            const slot = self.marker.consume(buf.len) orelse return null;
+            const slices = slot.slices(T, self.storage[0..]);
+
+            std.mem.copyForwards(T, buf[0..slices[0].len], slices[0]);
+            std.mem.copyForwards(T, buf[slices[0].len..], slices[1]);
+
+            return buf;
         }
     };
 }

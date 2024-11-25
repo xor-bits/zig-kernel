@@ -121,10 +121,11 @@ fn main() noreturn {
     );
 
     var r = ring.AtomicRing(usize, 32).init();
-    r.push(5) catch |err| {
+    r.write(&.{ 5, 6, 7 }) catch |err| {
         std.debug.panic("{}", .{err});
     };
-    log.info("{any}", .{r.pop()});
+    var buf: [3]usize = undefined;
+    log.info("{any}", .{r.read(buf[0..])});
 
     // debug print the current address space
     vmm.printMappings();
