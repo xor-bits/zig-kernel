@@ -152,6 +152,8 @@ pub const Context = struct {
     addr_space: ?vmem.AddressSpace = null,
     trap: arch.SyscallRegs = .{},
     is_system: bool = false,
+
+    // protos: [1],
 };
 
 pub const Cpu = struct {
@@ -209,6 +211,14 @@ pub fn nextPid(now_pid: usize) ?usize {
     return next_pid;
 }
 
+pub const Protocol = struct {
+    name: [16:0]u8,
+    owner: usize,
+    handle: usize,
+};
+
+var protos = std.AutoHashMap([16:0]u8, Protocol);
+
 pub fn syscall(trap: *arch.SyscallRegs) void {
     const log = std.log.scoped(.syscall);
 
@@ -260,6 +270,13 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
             // next_proc.addr_space.?.printMappings();
             next_proc.addr_space.?.switchTo();
             trap.* = next_proc.trap;
+        },
+        abi.sys.Id.vfs_proto_create => {
+            const name = untrustedSlice(u8, trap.arg0, trap.arg1) catch |err| {
+                log.warn("user space sent a bad syscall: {}", .{err});
+                return;
+            };
+            _ = name; // autofix
         },
         abi.sys.Id.system_map => {
             const target_pid = trap.arg0;

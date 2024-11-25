@@ -90,6 +90,9 @@ fn main(initfs: []const u8) !void {
     abi.sys.system_map(1, maps.items);
     abi.sys.system_exec(1, header.entry, 0x7FFF_FFF4_0000);
 
+    const proto = abi.sys.vfs_proto_create("initfs");
+    _ = proto;
+
     while (true) {
         log.info("yield from bootstrap", .{});
         abi.sys.yield();
