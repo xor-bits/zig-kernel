@@ -11,6 +11,7 @@ const args = @import("args.zig");
 const util = @import("util.zig");
 const spin = @import("spin.zig");
 const lazy = @import("lazy.zig");
+const ring = @import("ring.zig");
 
 //
 
@@ -118,6 +119,12 @@ fn main() noreturn {
         .{ .bytes = kernel_args.initfs },
         .{ .user_accessible = 1, .no_execute = 1 },
     );
+
+    var r = ring.AtomicRing(usize, 32).init();
+    r.push(5) catch |err| {
+        std.debug.panic("{}", .{err});
+    };
+    log.info("{any}", .{r.pop()});
 
     // debug print the current address space
     vmm.printMappings();
