@@ -169,6 +169,7 @@ fn createInitfsTarGz(
         .optimize = optimize,
     });
     init.root_module.addImport("abi", abi);
+    b.installArtifact(init);
 
     // create virtual initfs.tar.gz root
     const initfs = b.addNamedWriteFiles("create virtual initfs root");
