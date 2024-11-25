@@ -188,7 +188,8 @@ pub const AddressSpace = struct {
             const zeroes_beg = 0x1000 - beg;
 
             const new_table: *[0x1000]u8 = @ptrCast(allocZeroedTable());
-            std.mem.copyForwards(u8, new_table[zeroes_beg..], src[0..@min(src.len, beg)]);
+            const src_len = @min(src.len, beg);
+            std.mem.copyForwards(u8, new_table[zeroes_beg..], src[0..src_len]);
             const allocated = pmem.HhdmAddr.new(new_table).toPhys().toPage();
             flags.page_index = allocated.page_index;
 
@@ -196,7 +197,7 @@ pub const AddressSpace = struct {
             self.mapSingle(vaddr, flags);
 
             dst = pmem.VirtAddr.new(aligned);
-            src = if (zeroes_beg < src.len) src[zeroes_beg..] else src[0..0];
+            src = src[src_len..];
         }
 
         const n_pages = std.mem.alignForward(usize, src.len, 0x1000) >> 12;
