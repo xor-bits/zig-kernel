@@ -249,6 +249,7 @@ pub fn wrcr3(sel: u64) void {
         \\ mov %[v], %cr3
         :
         : [v] "N{rdx}" (sel),
+        : "memory"
     );
 }
 
