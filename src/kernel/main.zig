@@ -132,7 +132,7 @@ fn main() noreturn {
     proc.is_system = true;
     proc.trap = arch.SyscallRegs{
         .user_instr_ptr = 0x200_0000,
-        .user_stack_ptr = 0x4000_0000,
+        .user_stack_ptr = abi.BOOTSTRAP_STACK + abi.BOOTSTRAP_STACK_SIZE,
         .arg0 = abi.BOOTSTRAP_INITFS,
         .arg1 = kernel_args.initfs.len,
     };
