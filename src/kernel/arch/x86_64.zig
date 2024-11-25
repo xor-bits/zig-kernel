@@ -1120,7 +1120,6 @@ const sysret_instr = std.fmt.comptimePrint(
 , .{@offsetOf(CpuConfig, "rsp_user")});
 
 pub fn sysret(args: *SyscallRegs) noreturn {
-    std.log.scoped(.syscall).info("sysret with rsp: 0x{x:0>16}", .{args.user_stack_ptr});
     asm volatile (
     // set stack to be args
         \\ movq %[args], %rsp
@@ -1144,7 +1143,6 @@ fn syscall_handler_wrapper_wrapper() callconv(.Naked) noreturn {
 
 export fn syscall_handler_wrapper(args: *SyscallRegs) callconv(.SysV) void {
     main.syscall(args);
-    std.log.scoped(.syscall).info("sysret with rsp: 0x{x:0>16}", .{args.user_stack_ptr});
 }
 
 test "structure sizes" {
