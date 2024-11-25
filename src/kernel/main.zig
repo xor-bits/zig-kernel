@@ -120,13 +120,6 @@ fn main() noreturn {
         .{ .user_accessible = 1, .no_execute = 1 },
     );
 
-    var r = ring.AtomicRing(usize, 32).init();
-    r.write(&.{ 5, 6, 7 }) catch |err| {
-        std.debug.panic("{}", .{err});
-    };
-    var buf: [3]usize = undefined;
-    log.info("{any}", .{r.read(buf[0..])});
-
     // debug print the current address space
     vmm.printMappings();
     vmm.switchTo();
@@ -183,11 +176,6 @@ var cpu_table: [32]Cpu = undefined;
 var ready_r_lock: spin.Mutex = .{};
 var ready_w_lock: spin.Mutex = .{};
 var ready: ring.AtomicRing(usize, 256) = .{};
-
-// fn lessThan(context: void, a: usize, b: usize) std.math.Order {
-//     _ = context;
-//     return std.math.order(a, b);
-// }
 
 pub fn pushReady(pid: usize) void {
     ready_w_lock.lock();
@@ -252,7 +240,7 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
                 return;
             };
 
-            log.info("{s}", .{msg});
+            log.info("{s}", .{std.mem.trimRight(u8, msg, "\n")});
         },
         abi.sys.Id.yield => {
             const next_pid = nextPid(pid) orelse return;
@@ -309,14 +297,14 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
                     return;
                 }
 
-                log.info("mapping", .{});
                 vmm.map(pmem.VirtAddr.new(map.dst), src, .{
                     .user_accessible = 1,
                     .writeable = @intFromBool(map.flags.write),
                     .no_execute = @intFromBool(!map.flags.execute),
                 });
-                log.info("mapped", .{});
             }
+
+            vmm.printMappings();
         },
         abi.sys.Id.system_exec => {
             log.info("exec pid: {} ip: {} sp: {}", .{ trap.arg0, trap.arg1, trap.arg2 });
