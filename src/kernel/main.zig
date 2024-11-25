@@ -181,6 +181,34 @@ var ready_alloc = std.heap.MemoryPool(ready_ty.Node).init(pmem.page_allocator);
 //     return std.math.order(a, b);
 // }
 
+pub fn pushReady(pid: usize) void {
+    const node: *ready_ty.Node = ready_alloc.create() catch unreachable;
+    node.* = ready_ty.Node{ .data = pid };
+    ready.append(node);
+}
+
+pub fn popReady() ?usize {
+    const next_pid_node = ready.popFirst() orelse {
+        return null;
+    };
+    const next_pid: usize = next_pid_node.data;
+    ready_alloc.destroy(next_pid_node);
+    return next_pid;
+}
+
+pub fn nextPid(now_pid: usize) ?usize {
+    ready_lock.lock();
+    defer ready_lock.unlock();
+
+    const next_pid = popReady() orelse {
+        return null;
+    };
+    pushReady(now_pid);
+
+    cpu_table[arch.cpu_id()].current_pid = next_pid;
+    return next_pid;
+}
+
 pub fn syscall(trap: *arch.SyscallRegs) void {
     const log = std.log.scoped(.syscall);
 
@@ -215,31 +243,23 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
             log.info("{s}", .{msg});
         },
         abi.sys.Id.yield => {
-            ready_lock.lock();
-            const next_pid_node = ready.popFirst() orelse {
-                return;
-            };
-            const next_pid: usize = next_pid_node.data;
+            const next_pid = nextPid(pid) orelse return;
 
-            ready_alloc.destroy(next_pid_node);
-            const node: *ready_ty.Node = ready_alloc.create() catch unreachable;
-            node.* = ready_ty.Node{ .data = pid };
-            ready.append(node);
-
-            ready_lock.unlock();
-
+            // save the previous process
             proc.status = .ready;
             proc.trap = trap.*;
             proc.lock.unlock();
 
+            // FIXME: page fault now could lead to a race condition
+
             const next_proc = &proc_table[next_pid];
             next_proc.lock.lock();
 
-            trap.* = next_proc.trap;
-
+            // context switch + return to the next process
             next_proc.status = .running;
-            next_proc.addr_space.?.printMappings();
+            // next_proc.addr_space.?.printMappings();
             next_proc.addr_space.?.switchTo();
+            trap.* = next_proc.trap;
         },
         abi.sys.Id.system_map => {
             const target_pid = trap.arg0;
@@ -286,21 +306,19 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
             const ip = trap.arg1;
             const sp = trap.arg2;
 
-            proc.status = .ready;
-            proc.trap = trap.*;
-            proc.lock.unlock();
-
             const target_proc = &proc_table[target_pid];
-            target_proc.lock.lock();
 
-            trap.* = arch.SyscallRegs{
+            target_proc.lock.lock();
+            target_proc.trap = arch.SyscallRegs{
                 .user_instr_ptr = ip,
                 .user_stack_ptr = sp,
             };
+            target_proc.status = .ready;
+            target_proc.lock.unlock();
 
-            target_proc.status = .running;
-            target_proc.addr_space.?.printMappings();
-            target_proc.addr_space.?.switchTo();
+            ready_lock.lock();
+            pushReady(target_pid);
+            ready_lock.unlock();
         },
         // else => std.debug.panic("TODO", .{}),
     }

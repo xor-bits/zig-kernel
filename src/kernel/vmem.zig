@@ -148,7 +148,7 @@ pub const AddressSpace = struct {
 
     pub fn switchTo(self: Self) void {
         arch.x86_64.wrcr3(@as(u64, self.cr3.page_index) << 12);
-        log.info("cr3 is now 0x{x}", .{arch.x86_64.rdcr3()});
+        // log.info("cr3 is now 0x{x}", .{arch.x86_64.rdcr3()});
     }
 
     pub fn deinit(self: Self) void {
