@@ -8,6 +8,7 @@ const fb = @import("fb.zig");
 
 pub const std_options: std.Options = .{
     .logFn = logFn,
+    .log_level = .debug,
 };
 
 fn logFn(comptime message_level: std.log.Level, comptime scope: @TypeOf(.enum_literal), comptime format: []const u8, args: anytype) void {
