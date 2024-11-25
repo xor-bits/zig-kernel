@@ -242,6 +242,26 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
         },
         abi.sys.Id.system_exec => {
             log.info("exec pid: {} ip: {} sp: {}", .{ trap.arg0, trap.arg1, trap.arg2 });
+
+            const pid = trap.arg0;
+            const ip = trap.arg1;
+            const sp = trap.arg2;
+
+            proc.status = .ready;
+            proc.trap = trap.*;
+            proc.lock.unlock();
+
+            const _proc = &proc_table[pid];
+            _proc.lock.lock();
+
+            trap.* = arch.SyscallRegs{
+                .user_instr_ptr = ip,
+                .user_stack_ptr = sp,
+            };
+
+            _proc.status = .running;
+            _proc.addr_space.?.printMappings();
+            _proc.addr_space.?.switchTo();
         },
         // else => std.debug.panic("TODO", .{}),
     }
