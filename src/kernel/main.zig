@@ -180,11 +180,9 @@ var proc_table: [256]Context = blk: {
 // TODO: same lazy page allocation for a page that can grow
 var cpu_table: [32]Cpu = undefined;
 
-var ready_lock: spin.Mutex = .{};
-// var ready = std.PriorityQueue(usize, void{}, lessThan).init(pmem.page_allocator, void{});
-const ready_ty = std.DoublyLinkedList(usize);
-var ready = ready_ty{};
-var ready_alloc = std.heap.MemoryPool(ready_ty.Node).init(pmem.page_allocator);
+var ready_r_lock: spin.Mutex = .{};
+var ready_w_lock: spin.Mutex = .{};
+var ready: ring.AtomicRing(usize, 256) = .{};
 
 // fn lessThan(context: void, a: usize, b: usize) std.math.Order {
 //     _ = context;
@@ -192,24 +190,20 @@ var ready_alloc = std.heap.MemoryPool(ready_ty.Node).init(pmem.page_allocator);
 // }
 
 pub fn pushReady(pid: usize) void {
-    const node: *ready_ty.Node = ready_alloc.create() catch unreachable;
-    node.* = ready_ty.Node{ .data = pid };
-    ready.append(node);
+    ready_w_lock.lock();
+    defer ready_w_lock.unlock();
+
+    ready.push(pid) catch unreachable;
 }
 
 pub fn popReady() ?usize {
-    const next_pid_node = ready.popFirst() orelse {
-        return null;
-    };
-    const next_pid: usize = next_pid_node.data;
-    ready_alloc.destroy(next_pid_node);
-    return next_pid;
+    ready_r_lock.lock();
+    defer ready_r_lock.unlock();
+
+    return ready.pop();
 }
 
 pub fn nextPid(now_pid: usize) ?usize {
-    ready_lock.lock();
-    defer ready_lock.unlock();
-
     const next_pid = popReady() orelse {
         return null;
     };
@@ -341,9 +335,7 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
             target_proc.status = .ready;
             target_proc.lock.unlock();
 
-            ready_lock.lock();
             pushReady(target_pid);
-            ready_lock.unlock();
         },
         // else => std.debug.panic("TODO", .{}),
     }
