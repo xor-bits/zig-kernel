@@ -43,26 +43,25 @@ Every path is a URI, where the protocol part (proto://) tells the kernel, which 
   - [x] ACPI, APIC
   - [x] user space
   - [ ] HPET
-  - [ ] scheduler
-  - [ ] binary loader
+  - [x] scheduler
+  - [x] binary loader
   - [ ] message IPC, shared memory IPC
   - [ ] figure out userland interrupts (ps2 keyboard, ..)
   - [x] syscalls:
-    - [ ] syscall to exec a binary (based on a provided mem map)
+    - [x] syscall to exec a binary (based on a provided mem map)
     - [ ] syscall to create a vfs proto
     - [ ] syscall to accept a vfs proto cmd
     - [ ] syscall to return a vfs proto cmd result
-    - [ ] syscall to read the root kernel cli arg
     - [ ] syscalls for unix sockets
 
 - [x] bootstrap/initfsd process
   - [x] decompress initfs.tar.gz
   - [ ] create initfs:// vfs proto
-  - [ ] exec flat binary initfs:///sbin/initd
+  - [x] exec initfs:///sbin/initd
   - [ ] rename to initfsd
   - [ ] start processing vfs proto cmds
 
-- [ ] initfs:///sbin/initd process
+- [x] initfs:///sbin/initd process
   - [ ] launch initfs:///sbin/rngd
   - [ ] launch initfs:///sbin/vfsd
   - [ ] launch services from initfs://
