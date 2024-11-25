@@ -170,10 +170,22 @@ var proc_table: [256]Context = blk: {
 // TODO: same lazy page allocation for a page that can grow
 var cpu_table: [32]Cpu = undefined;
 
+var ready_lock: spin.Mutex = .{};
+// var ready = std.PriorityQueue(usize, void{}, lessThan).init(pmem.page_allocator, void{});
+const ready_ty = std.DoublyLinkedList(usize);
+var ready = ready_ty{};
+var ready_alloc = std.heap.MemoryPool(ready_ty.Node).init(pmem.page_allocator);
+
+// fn lessThan(context: void, a: usize, b: usize) std.math.Order {
+//     _ = context;
+//     return std.math.order(a, b);
+// }
+
 pub fn syscall(trap: *arch.SyscallRegs) void {
     const log = std.log.scoped(.syscall);
 
-    const proc = &proc_table[cpu_table[arch.cpu_id()].current_pid.?];
+    const pid = cpu_table[arch.cpu_id()].current_pid.?;
+    const proc = &proc_table[pid];
 
     // TODO: once every CPU has reached this, bootloader_reclaimable memory could be freed
     // just some few things need to be copied, but the page map(s) and stack(s) are already copied
@@ -202,18 +214,45 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
 
             log.info("{s}", .{msg});
         },
+        abi.sys.Id.yield => {
+            ready_lock.lock();
+            const next_pid_node = ready.popFirst() orelse {
+                return;
+            };
+            const next_pid: usize = next_pid_node.data;
+
+            ready_alloc.destroy(next_pid_node);
+            const node: *ready_ty.Node = ready_alloc.create() catch unreachable;
+            node.* = ready_ty.Node{ .data = pid };
+            ready.append(node);
+
+            ready_lock.unlock();
+
+            proc.status = .ready;
+            proc.trap = trap.*;
+            proc.lock.unlock();
+
+            const next_proc = &proc_table[next_pid];
+            next_proc.lock.lock();
+
+            trap.* = next_proc.trap;
+
+            next_proc.status = .running;
+            next_proc.addr_space.?.printMappings();
+            next_proc.addr_space.?.switchTo();
+        },
         abi.sys.Id.system_map => {
-            const pid = trap.arg0;
+            const target_pid = trap.arg0;
             const maps = untrustedSlice(abi.sys.Map, trap.arg1, trap.arg2) catch |err| {
                 log.warn("user space sent a bad syscall: {}", .{err});
                 return;
             };
 
-            const _proc = &proc_table[pid];
-            if (_proc.addr_space == null) {
-                _proc.addr_space = vmem.AddressSpace.new();
+            const target_proc = &proc_table[target_pid];
+            if (target_proc.addr_space == null) {
+                target_proc.addr_space = vmem.AddressSpace.new();
             }
-            const vmm = &_proc.addr_space.?;
+            const vmm = &target_proc.addr_space.?;
 
             for (maps) |map| {
                 isInLowerHalf(u8, map.dst, map.src.length()) catch |err| {
@@ -243,7 +282,7 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
         abi.sys.Id.system_exec => {
             log.info("exec pid: {} ip: {} sp: {}", .{ trap.arg0, trap.arg1, trap.arg2 });
 
-            const pid = trap.arg0;
+            const target_pid = trap.arg0;
             const ip = trap.arg1;
             const sp = trap.arg2;
 
@@ -251,17 +290,17 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
             proc.trap = trap.*;
             proc.lock.unlock();
 
-            const _proc = &proc_table[pid];
-            _proc.lock.lock();
+            const target_proc = &proc_table[target_pid];
+            target_proc.lock.lock();
 
             trap.* = arch.SyscallRegs{
                 .user_instr_ptr = ip,
                 .user_stack_ptr = sp,
             };
 
-            _proc.status = .running;
-            _proc.addr_space.?.printMappings();
-            _proc.addr_space.?.switchTo();
+            target_proc.status = .running;
+            target_proc.addr_space.?.printMappings();
+            target_proc.addr_space.?.switchTo();
         },
         // else => std.debug.panic("TODO", .{}),
     }

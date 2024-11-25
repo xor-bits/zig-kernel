@@ -1,5 +1,6 @@
 pub const Id = enum(usize) {
     log = 0x1,
+    yield = 0x2,
     // system_fork = 0x8000_0001,
     system_map = 0x8000_0002,
     system_exec = 0x8000_0003,
@@ -80,6 +81,10 @@ pub fn log(s: []const u8) void {
     _ = call2(@intFromEnum(Id.log), @intFromPtr(s.ptr), s.len);
 }
 
+pub fn yield() void {
+    _ = call0(@intFromEnum(Id.yield));
+}
+
 // // system processes only
 // pub fn system_fork(from_pid: usize, to_pid: usize) void {
 //     _ = call2(@intFromEnum(Id.system_fork), from_pid, to_pid);
@@ -96,6 +101,14 @@ pub fn system_exec(pid: usize, ip: usize, sp: usize) void {
 }
 
 //
+
+pub fn call0(id: usize) usize {
+    return asm volatile ("syscall"
+        : [ret] "={rax}" (-> usize),
+        : [id] "{rax}" (id),
+        : "rcx", "r11" // rcx becomes rip and r11 becomes rflags
+    );
+}
 
 pub fn call2(id: usize, arg1: usize, arg2: usize) usize {
     return asm volatile ("syscall"

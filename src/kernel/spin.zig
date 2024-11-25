@@ -3,7 +3,7 @@ const std = @import("std");
 //
 
 pub const Mutex = struct {
-    lock_state: std.atomic.Value(u8),
+    lock_state: std.atomic.Value(u8) = std.atomic.Value(u8).init(0),
 
     const Self = @This();
 

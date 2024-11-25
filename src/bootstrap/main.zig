@@ -89,6 +89,11 @@ fn main(initfs: []const u8) !void {
 
     abi.sys.system_map(1, maps.items);
     abi.sys.system_exec(1, header.entry, 0x7FFF_FFF4_0000);
+
+    while (true) {
+        log.info("yield from bootstrap", .{});
+        abi.sys.yield();
+    }
 }
 
 fn t(a: []const u8, b: []const u8) void {

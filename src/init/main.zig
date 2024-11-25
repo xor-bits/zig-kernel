@@ -11,5 +11,8 @@ pub const panic = abi.panic;
 
 export fn _start() linksection(".text._start") callconv(.C) noreturn {
     log.info("hello from init", .{});
-    while (true) {}
+    while (true) {
+        log.info("yield from init", .{});
+        abi.sys.yield();
+    }
 }
