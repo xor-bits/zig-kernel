@@ -157,48 +157,80 @@ pub const AddressSpace = struct {
     }
 
     pub fn map(self: Self, dst: pmem.VirtAddr, src: MapSource, _flags: Entry) void {
-        std.debug.assert(std.mem.isAligned(dst.raw, 0x1000));
-
         // TODO: huge page support maybe
         // it would require the pmem allocator to have huge page support aswell
-
-        var flags = Entry{
-            .writeable = _flags.writeable,
-            .user_accessible = _flags.user_accessible,
-        };
-
-        var n_pages: usize = 0;
 
         switch (src) {
             .borrow, .owned => std.debug.panic("TODO: borrow and owned mapping", .{}),
             .bytes => |bytes| {
-                flags.present = 1;
-                n_pages = std.mem.alignForward(usize, bytes.len, 0x1000) >> 12;
+                self.mapBytes(dst, bytes, _flags);
             },
             .lazy => |bytes| {
-                flags.lazy_alloc = 1;
-                n_pages = std.mem.alignForward(usize, bytes, 0x1000) >> 12;
+                self.mapLazy(dst, bytes, _flags);
             },
         }
+    }
+
+    fn mapBytes(self: Self, _dst: pmem.VirtAddr, _src: []const u8, _flags: Entry) void {
+        var dst = _dst;
+        var src = _src;
+
+        var flags = Entry{
+            .present = 1,
+            .writeable = _flags.writeable,
+            .user_accessible = _flags.user_accessible,
+        };
+
+        const aligned = std.mem.alignForward(usize, dst.raw, 0x1000);
+        if (aligned != dst.raw) {
+            // map the first partial page
+            const beg = aligned - dst.raw;
+            const zeroes_beg = 0x1000 - beg;
+
+            const new_table: *[0x1000]u8 = @ptrCast(allocZeroedTable());
+            std.mem.copyForwards(u8, new_table[zeroes_beg..], src[0..@min(src.len, beg)]);
+            const allocated = pmem.HhdmAddr.new(new_table).toPhys().toPage();
+            flags.page_index = allocated.page_index;
+
+            const vaddr = pmem.VirtAddr.new(aligned - 0x1000);
+            self.mapSingle(vaddr, flags);
+
+            dst = pmem.VirtAddr.new(aligned);
+            src = if (zeroes_beg < src.len) src[zeroes_beg..] else src[0..0];
+        }
+
+        const n_pages = std.mem.alignForward(usize, src.len, 0x1000) >> 12;
 
         log.info("mapping {d} pages", .{n_pages});
         for (0..n_pages) |i| {
             const offs = i * 0x1000;
-
-            switch (src) {
-                .bytes => |bytes| {
-                    const new_table: *[0x1000]u8 = @ptrCast(allocZeroedTable());
-
-                    const len = @min(bytes.len - offs, 0x1000);
-                    std.mem.copyForwards(u8, new_table[0..], bytes[offs .. offs + len]);
-
-                    const allocated = pmem.HhdmAddr.new(new_table).toPhys().toPage();
-                    flags.page_index = allocated.page_index;
-                },
-                else => {},
-            }
-
             const vaddr = pmem.VirtAddr.new(dst.raw + offs);
+            const new_table: *[0x1000]u8 = @ptrCast(allocZeroedTable());
+
+            const len = @min(src.len - offs, 0x1000);
+            std.mem.copyForwards(u8, new_table[0..], src[offs .. offs + len]);
+            const allocated = pmem.HhdmAddr.new(new_table).toPhys().toPage();
+            flags.page_index = allocated.page_index;
+
+            self.mapSingle(vaddr, flags);
+        }
+    }
+
+    fn mapLazy(self: Self, dst: pmem.VirtAddr, bytes: usize, _flags: Entry) void {
+        const flags = Entry{
+            .lazy_alloc = 1,
+            .writeable = _flags.writeable,
+            .user_accessible = _flags.user_accessible,
+        };
+
+        const first_page = std.mem.alignBackward(usize, dst.raw, 0x1000);
+        const zeroes_beg = dst.raw - first_page;
+        const n_pages = std.mem.alignForward(usize, zeroes_beg + bytes, 0x1000) >> 12;
+
+        log.info("mapping {d} pages", .{n_pages});
+        for (0..n_pages) |i| {
+            const offs = i * 0x1000;
+            const vaddr = pmem.VirtAddr.new(first_page + offs);
             self.mapSingle(vaddr, flags);
         }
     }
