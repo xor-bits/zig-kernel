@@ -92,7 +92,7 @@ fn main(initfs: []const u8) !void {
     abi.sys.system_exec(1, header.entry, 0x7FFF_FFF4_0000);
 
     const proto = abi.sys.vfs_proto_create("initfs");
-    log.info("vfs proto handle: {}", .{proto});
+    log.info("vfs proto handle: {!}", .{proto});
 
     while (true) {
         abi.sys.yield();

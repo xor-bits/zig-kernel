@@ -13,18 +13,44 @@ pub const Id = enum(usize) {
     system_exec = 0x8000_0003,
 };
 
+pub const Error = error{
+    UnknownError,
+
+    // pub fn decode() Self!usize {}
+};
+
+pub fn encode(result: Error!usize) usize {
+    const val = result catch |err| {
+        return @bitCast(-@as(isize, switch (err) {
+            .UnknownError => std.debug.panic("unknown error shouldn't be encoded", .{}),
+        }));
+    };
+
+    return val;
+}
+
+pub fn decode(v: usize) Error!usize {
+    const v_isize: isize = @bitCast(v);
+    const err = -v_isize;
+
+    return switch (err) {
+        std.math.minInt(isize)...0 => v,
+        else => return error.UnknownError,
+    };
+}
+
 //
 
 pub fn log(s: []const u8) void {
-    _ = call(Id.log, .{ @intFromPtr(s.ptr), s.len });
+    _ = call(Id.log, .{ @intFromPtr(s.ptr), s.len }) catch unreachable;
 }
 
 pub fn yield() void {
-    _ = call(Id.yield, .{});
+    _ = call(Id.yield, .{}) catch unreachable;
 }
 
-pub fn vfs_proto_create(name: []const u8) usize {
-    return call(Id.vfs_proto_create, .{ @intFromPtr(name.ptr), name.len });
+pub fn vfs_proto_create(name: []const u8) Error!usize {
+    return try call(Id.vfs_proto_create, .{ @intFromPtr(name.ptr), name.len });
 }
 
 // // system processes only
@@ -34,12 +60,12 @@ pub fn vfs_proto_create(name: []const u8) usize {
 
 // system processes only
 pub fn system_map(pid: usize, new_maps: []const Map) void {
-    _ = call(Id.system_map, .{ pid, @intFromPtr(new_maps.ptr), new_maps.len });
+    _ = call(Id.system_map, .{ pid, @intFromPtr(new_maps.ptr), new_maps.len }) catch unreachable;
 }
 
 // system processes only
 pub fn system_exec(pid: usize, ip: usize, sp: usize) void {
-    _ = call(Id.system_exec, .{ pid, ip, sp });
+    _ = call(Id.system_exec, .{ pid, ip, sp }) catch unreachable;
 }
 
 //
@@ -115,7 +141,7 @@ pub const MapFlags = packed struct {
 
 //
 
-pub fn call(id: Id, args: anytype) usize {
+pub fn call(id: Id, args: anytype) Error!usize {
     const ArgsType = @TypeOf(args);
     const args_type_info = @typeInfo(ArgsType);
     if (args_type_info != .Struct or !args_type_info.Struct.is_tuple) {
@@ -125,7 +151,7 @@ pub fn call(id: Id, args: anytype) usize {
     const fields = args_type_info.Struct.fields;
 
     const syscall_id = @intFromEnum(id);
-    return switch (fields.len) {
+    const result: usize = switch (fields.len) {
         0 => call0(
             syscall_id,
         ),
@@ -161,6 +187,8 @@ pub fn call(id: Id, args: anytype) usize {
         ),
         else => @compileError("expected 5 or less syscall arguments, found " ++ fields.len),
     };
+
+    return try decode(result);
 }
 
 // TODO: move intFromEnum to here
