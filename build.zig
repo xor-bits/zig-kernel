@@ -181,8 +181,10 @@ fn createInitfsTarGz(
         "-czf",
     });
     const initfs_tar_gz_file = initfs_tar_gz.addOutputFileArg("initfs.tar.gz");
+    initfs_tar_gz.addArg("-C");
+    initfs_tar_gz.addDirectoryArg(initfs.getDirectory());
     initfs_tar_gz.addArg(".");
-    initfs_tar_gz.setCwd(initfs.getDirectory());
+    initfs_tar_gz.step.dependOn(&init.step);
     initfs_tar_gz.step.dependOn(&initfs.step);
 
     const install_initfs_tar_gz = b.addInstallFile(initfs_tar_gz_file, "initfs.tar.gz");
