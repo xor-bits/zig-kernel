@@ -91,8 +91,38 @@ fn main(initfs: []const u8) !void {
     abi.sys.system_map(1, maps.items);
     abi.sys.system_exec(1, header.entry, 0x7FFF_FFF4_0000);
 
-    const proto = abi.sys.vfs_proto_create("initfs");
+    initfsd();
+}
+
+fn initfsd() noreturn {
+    const proto = abi.sys.vfs_proto_create("initfs") catch |err| {
+        std.debug.panic("failed to create VFS proto: {}", .{err});
+    };
     log.info("vfs proto handle: {!}", .{proto});
+
+    var request: abi.sys.ProtocolRequest = undefined;
+    var path_buf: [4096]u8 = undefined;
+    abi.sys.vfs_proto_next(proto, &request, &path_buf) catch |err| {
+        std.debug.panic("failed to use VFS proto: {}", .{err});
+    };
+    log.info("request id: {}", .{request.id});
+
+    switch (request.ty) {
+        .open => {
+            log.info("request open: {s}, {}, {}", .{
+                path_buf[0..request.data.open.path_len],
+                request.data.open.flags,
+                request.data.open.mode,
+            });
+        },
+        .close => {
+            log.info("request open: {s}, {}, {}", .{
+                path_buf[0..request.data.open.path_len],
+                request.data.open.flags,
+                request.data.open.mode,
+            });
+        },
+    }
 
     while (true) {
         abi.sys.yield();

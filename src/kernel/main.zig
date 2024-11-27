@@ -175,8 +175,10 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
         log.warn("invalid syscall: {x}", .{trap.syscall_id});
         return;
     };
+    // log.debug("syscall: {s}", .{@tagName(id)});
+    // defer log.debug("syscall done", .{});
     switch (id) {
-        abi.sys.Id.log => {
+        .log => {
             // log syscall
             if (trap.arg1 > 0x1000) {
                 log.warn("log syscall too long", .{});
@@ -190,7 +192,7 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
 
             log.info("{s}", .{std.mem.trimRight(u8, msg, "\n")});
         },
-        abi.sys.Id.yield => {
+        .yield => {
             const next_pid = proc.nextPid(current_pid) orelse return;
 
             // save the previous process
@@ -201,7 +203,7 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
             // switch to the next process
             proc.lockAndSwitchTo(next_pid, trap);
         },
-        abi.sys.Id.vfs_proto_create => {
+        .vfs_proto_create => {
             if (trap.arg1 >= 16) {
                 log.warn("vfs proto name too long", .{});
 
@@ -242,7 +244,33 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
                 return;
             }
         },
-        abi.sys.Id.system_map => {
+        .vfs_proto_next => {
+            // proto_handle: usize,
+            // request: *ProtocolRequest,
+            // path_buf: *[4096]u8,
+
+            const handle: usize = trap.arg0;
+            const request: *abi.sys.ProtocolRequest = untrustedPtr(abi.sys.ProtocolRequest, trap.arg1) catch |err| {
+                log.warn("user space sent a bad syscall: {}", .{err});
+                return;
+            };
+            const path_buf: *[4096]u8 = untrustedPtr([4096]u8, trap.arg2) catch |err| {
+                log.warn("user space sent a bad syscall: {}", .{err});
+                return;
+            };
+            if (handle == 0 or handle - 1 >= current_proc.protos.len) {
+                trap.syscall_id = abi.sys.encodeError(error.BadFileDescriptor);
+                return;
+            }
+
+            const proto: *Protocol = current_proc.protos[handle - 1] orelse {
+                trap.syscall_id = abi.sys.encodeError(error.BadFileDescriptor);
+                return;
+            };
+
+            _ = .{ request, path_buf, proto };
+        },
+        .system_map => {
             const target_pid = trap.arg0;
             const maps = untrustedSlice(abi.sys.Map, trap.arg1, trap.arg2) catch |err| {
                 log.warn("user space sent a bad syscall: {}", .{err});
@@ -280,7 +308,7 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
 
             vmm.printMappings();
         },
-        abi.sys.Id.system_exec => {
+        .system_exec => {
             log.info("exec pid: {} ip: {} sp: {}", .{ trap.arg0, trap.arg1, trap.arg2 });
 
             const target_pid = trap.arg0;
@@ -331,4 +359,9 @@ fn untrustedSlice(comptime T: type, bottom: usize, length: usize) error{ Overflo
 
     const first: [*]T = @ptrFromInt(bottom);
     return first[0..length];
+}
+
+fn untrustedPtr(comptime T: type, ptr: usize) error{ Overflow, IsHigherHalf }!*T {
+    const slice = try untrustedSlice(T, ptr, 1);
+    return &slice[0];
 }

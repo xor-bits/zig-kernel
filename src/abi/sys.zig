@@ -7,6 +7,7 @@ pub const Id = enum(usize) {
     yield = 0x2,
 
     vfs_proto_create = 0x1001,
+    vfs_proto_next = 0x1002,
 
     // system_fork = 0x8000_0001,
     system_map = 0x8000_0002,
@@ -15,18 +16,24 @@ pub const Id = enum(usize) {
 
 pub const Error = error{
     UnknownError,
+    BadFileDescriptor,
 
     // pub fn decode() Self!usize {}
 };
 
 pub fn encode(result: Error!usize) usize {
     const val = result catch |err| {
-        return @bitCast(-@as(isize, switch (err) {
-            .UnknownError => std.debug.panic("unknown error shouldn't be encoded", .{}),
-        }));
+        return encodeError(err);
     };
 
     return val;
+}
+
+pub fn encodeError(err: Error) usize {
+    return @bitCast(-@as(isize, switch (err) {
+        error.BadFileDescriptor => 16,
+        error.UnknownError => std.debug.panic("unknown error shouldn't be encoded", .{}),
+    }));
 }
 
 pub fn decode(v: usize) Error!usize {
@@ -35,6 +42,7 @@ pub fn decode(v: usize) Error!usize {
 
     return switch (err) {
         std.math.minInt(isize)...0 => v,
+        16 => error.BadFileDescriptor,
         else => return error.UnknownError,
     };
 }
@@ -42,15 +50,24 @@ pub fn decode(v: usize) Error!usize {
 //
 
 pub fn log(s: []const u8) void {
-    _ = call(Id.log, .{ @intFromPtr(s.ptr), s.len }) catch unreachable;
+    _ = call(.log, .{ @intFromPtr(s.ptr), s.len }) catch unreachable;
 }
 
 pub fn yield() void {
-    _ = call(Id.yield, .{}) catch unreachable;
+    _ = call(.yield, .{}) catch unreachable;
 }
 
 pub fn vfs_proto_create(name: []const u8) Error!usize {
-    return try call(Id.vfs_proto_create, .{ @intFromPtr(name.ptr), name.len });
+    return try call(.vfs_proto_create, .{ @intFromPtr(name.ptr), name.len });
+}
+
+pub fn vfs_proto_next(
+    proto_handle: usize,
+    request: *ProtocolRequest,
+    path_buf: *[4096]u8,
+) Error!void {
+    _ = try call(.vfs_proto_next, .{ proto_handle, @intFromPtr(request), @intFromPtr(path_buf) });
+    // return try
 }
 
 // // system processes only
@@ -60,15 +77,85 @@ pub fn vfs_proto_create(name: []const u8) Error!usize {
 
 // system processes only
 pub fn system_map(pid: usize, new_maps: []const Map) void {
-    _ = call(Id.system_map, .{ pid, @intFromPtr(new_maps.ptr), new_maps.len }) catch unreachable;
+    _ = call(.system_map, .{ pid, @intFromPtr(new_maps.ptr), new_maps.len }) catch unreachable;
 }
 
 // system processes only
 pub fn system_exec(pid: usize, ip: usize, sp: usize) void {
-    _ = call(Id.system_exec, .{ pid, ip, sp }) catch unreachable;
+    _ = call(.system_exec, .{ pid, ip, sp }) catch unreachable;
 }
 
 //
+
+// /// zig doesn't support `extern union(enum)` yet
+// pub fn externify(comptime U: type) type {
+//     var info = @typeInfo(U);
+//     switch (info) {
+//         .Union => |*info_union| {
+//             const Tag = comptime info_union.tag_type.?;
+//             info_union.tag_type = null;
+//             info_union.layout = .@"extern";
+//             const Data = comptime @Type(info);
+//             return extern struct {
+//                 tag: Tag,
+//                 data: Data,
+//             };
+//         },
+//         else => @compileError("tagged unions only"),
+//     }
+// }
+
+pub const ProtocolRequest = extern struct {
+    /// TODO: this is for concurrency later
+    id: usize,
+
+    data: Data,
+    ty: Tag,
+
+    pub const Tag = enum(u8) {
+        open,
+        close,
+    };
+
+    pub const Data = extern union {
+        open: Open,
+        close: Close,
+    };
+
+    pub const Open = extern struct {
+        path_len: usize, // path is stored in a 4096 buffer provided separately
+        flags: usize,
+        mode: usize,
+    };
+
+    pub const Close = extern struct {
+        /// the client fd is not known to a vfs proto handler
+        local_fd: usize,
+    };
+};
+
+pub const ProtocolResponse = extern struct {
+    id: usize,
+
+    data: Data,
+    ty: Tag,
+
+    pub const Tag = enum(u8) {
+        open,
+        close,
+    };
+
+    pub const Data = extern union {
+        open: Open,
+        close: Close,
+    };
+
+    pub const Open = extern struct {
+        result: usize,
+    };
+
+    pub const Close = extern struct {};
+};
 
 pub const Map = extern struct {
     dst: usize,
