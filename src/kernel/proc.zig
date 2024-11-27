@@ -2,6 +2,7 @@ pub const arch = @import("arch.zig");
 pub const spin = @import("spin.zig");
 pub const vmem = @import("vmem.zig");
 pub const ring = @import("ring.zig");
+pub const main = @import("main.zig");
 
 //
 
@@ -17,7 +18,7 @@ pub const Context = struct {
     trap: arch.SyscallRegs = .{},
     is_system: bool = false,
 
-    // protos: [1],
+    protos: [1]?*main.Protocol = .{null},
 };
 
 pub const Cpu = struct {

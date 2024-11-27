@@ -147,11 +147,15 @@ fn main() noreturn {
 
 pub const Protocol = struct {
     name: [16:0]u8,
-    owner: usize,
-    handle: usize,
+    sleepers: ring.AtomicRing(usize, 16) = .{},
 };
 
-var protos = std.AutoHashMap([16:0]u8, Protocol);
+var known_protos: struct {
+    initfs_lock: spin.Mutex = .{},
+    initfs: ?Protocol = null,
+    fs_lock: spin.Mutex = .{},
+    fs: ?Protocol = null,
+} = .{};
 
 pub fn syscall(trap: *arch.SyscallRegs) void {
     const log = std.log.scoped(.syscall);
@@ -198,11 +202,45 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
             proc.lockAndSwitchTo(next_pid, trap);
         },
         abi.sys.Id.vfs_proto_create => {
+            if (trap.arg1 >= 16) {
+                log.warn("vfs proto name too long", .{});
+
+                return;
+            }
+
             const name = untrustedSlice(u8, trap.arg0, trap.arg1) catch |err| {
                 log.warn("user space sent a bad syscall: {}", .{err});
                 return;
             };
-            _ = name; // autofix
+
+            if (std.mem.eql(u8, name, "initfs")) {
+                known_protos.initfs_lock.lock();
+                if (known_protos.initfs != null) {
+                    log.warn("vfs proto already registered", .{});
+                    return;
+                }
+                known_protos.initfs = .{
+                    .name = "initfs".* ++ std.mem.zeroes([10]u8),
+                };
+                known_protos.initfs_lock.unlock();
+                current_proc.protos[0] = &known_protos.initfs.?;
+                trap.syscall_id = 1;
+            } else if (std.mem.eql(u8, name, "fs")) {
+                known_protos.fs_lock.lock();
+                if (known_protos.fs != null) {
+                    log.warn("vfs proto already registered", .{});
+                    return;
+                }
+                known_protos.fs = .{
+                    .name = "fs".* ++ std.mem.zeroes([14]u8),
+                };
+                known_protos.fs_lock.unlock();
+                current_proc.protos[0] = &known_protos.fs.?;
+                trap.syscall_id = 1;
+            } else {
+                log.warn("FIXME: other vfs proto name", .{});
+                return;
+            }
         },
         abi.sys.Id.system_map => {
             const target_pid = trap.arg0;

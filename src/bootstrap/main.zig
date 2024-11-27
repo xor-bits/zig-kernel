@@ -16,12 +16,13 @@ var initfs_tar = std.ArrayList(u8).init(heap.allocator());
 //
 
 fn main(initfs: []const u8) !void {
+    log.info("hello from bootstrap", .{});
+
     var initfs_tar_gz = std.io.fixedBufferStream(initfs);
     try std.compress.flate.inflate.decompress(.gzip, initfs_tar_gz.reader(), initfs_tar.writer());
     std.debug.assert(std.mem.eql(u8, initfs_tar.items[257..][0..8], "ustar\x20\x20\x00"));
 
     var init = std.io.fixedBufferStream(openFile("/sbin/init").?);
-    log.info("{any}", .{init.buffer.len});
 
     var maps = std.ArrayList(abi.sys.Map).init(heap.allocator());
 
@@ -91,10 +92,9 @@ fn main(initfs: []const u8) !void {
     abi.sys.system_exec(1, header.entry, 0x7FFF_FFF4_0000);
 
     const proto = abi.sys.vfs_proto_create("initfs");
-    _ = proto;
+    log.info("vfs proto handle: {}", .{proto});
 
     while (true) {
-        log.info("yield from bootstrap", .{});
         abi.sys.yield();
     }
 }
