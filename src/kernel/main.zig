@@ -2,16 +2,17 @@ const std = @import("std");
 const abi = @import("abi");
 const limine = @import("limine");
 
-const pmem = @import("pmem.zig");
-const vmem = @import("vmem.zig");
-const arch = @import("arch.zig");
 const acpi = @import("acpi.zig");
-const logs = @import("logs.zig");
+const arch = @import("arch.zig");
 const args = @import("args.zig");
-const util = @import("util.zig");
-const spin = @import("spin.zig");
 const lazy = @import("lazy.zig");
+const logs = @import("logs.zig");
+const pmem = @import("pmem.zig");
+const proc = @import("proc.zig");
 const ring = @import("ring.zig");
+const spin = @import("spin.zig");
+const util = @import("util.zig");
+const vmem = @import("vmem.zig");
 
 //
 
@@ -124,81 +125,24 @@ fn main() noreturn {
     vmm.printMappings();
     vmm.switchTo();
 
-    const proc = &proc_table[0];
-    proc.lock.lock();
-    cpu_table[arch.cpu_id()].current_pid = 0;
-
-    proc.addr_space = vmm;
-    proc.is_system = true;
-    proc.trap = arch.SyscallRegs{
+    // initialize the bootstrap process
+    const current = proc.find(0);
+    current.lock.lock();
+    current.addr_space = vmm;
+    current.is_system = true;
+    current.trap = arch.SyscallRegs{
         .user_instr_ptr = 0x200_0000,
         .user_stack_ptr = abi.BOOTSTRAP_STACK + abi.BOOTSTRAP_STACK_SIZE,
         .arg0 = abi.BOOTSTRAP_INITFS,
         .arg1 = kernel_args.initfs.len,
     };
-    proc.status = .running;
+    current.lock.unlock();
 
-    log.info("sysret", .{});
-    arch.x86_64.sysret(&proc_table[0].trap);
-}
+    var junk = arch.SyscallRegs{};
+    proc.lockAndSwitchTo(0, &junk);
 
-pub const Context = struct {
-    lock: spin.Mutex = spin.Mutex.new(),
-    status: enum {
-        empty,
-        running,
-        ready,
-        sleeping,
-    } = .empty,
-    addr_space: ?vmem.AddressSpace = null,
-    trap: arch.SyscallRegs = .{},
-    is_system: bool = false,
-
-    // protos: [1],
-};
-
-pub const Cpu = struct {
-    current_pid: ?usize,
-};
-
-// TODO: lazy page allocation for a table that can grow
-var proc_table: [256]Context = blk: {
-    var arr: [256]Context = undefined;
-    for (&arr) |*c| {
-        c.* = Context{};
-    }
-    break :blk arr;
-};
-
-// TODO: same lazy page allocation for a page that can grow
-var cpu_table: [32]Cpu = undefined;
-
-var ready_r_lock: spin.Mutex = .{};
-var ready_w_lock: spin.Mutex = .{};
-var ready: ring.AtomicRing(usize, 256) = .{};
-
-pub fn pushReady(pid: usize) void {
-    ready_w_lock.lock();
-    defer ready_w_lock.unlock();
-
-    ready.push(pid) catch unreachable;
-}
-
-pub fn popReady() ?usize {
-    ready_r_lock.lock();
-    defer ready_r_lock.unlock();
-
-    return ready.pop();
-}
-
-pub fn nextPid(now_pid: usize) ?usize {
-    const next_pid = popReady() orelse {
-        return null;
-    };
-    pushReady(now_pid);
-
-    cpu_table[arch.cpu_id()].current_pid = next_pid;
-    return next_pid;
+    log.info("kernel init done", .{});
+    proc.returnEarly(0);
 }
 
 pub const Protocol = struct {
@@ -212,13 +156,13 @@ var protos = std.AutoHashMap([16:0]u8, Protocol);
 pub fn syscall(trap: *arch.SyscallRegs) void {
     const log = std.log.scoped(.syscall);
 
-    const pid = cpu_table[arch.cpu_id()].current_pid.?;
-    const proc = &proc_table[pid];
+    const current_pid = proc.currentPid().?;
+    const current_proc = proc.find(current_pid);
 
     // TODO: once every CPU has reached this, bootloader_reclaimable memory could be freed
     // just some few things need to be copied, but the page map(s) and stack(s) are already copied
 
-    if (trap.syscall_id >= 0x8000_0000 and !proc.is_system) {
+    if (trap.syscall_id >= 0x8000_0000 and !current_proc.is_system) {
         // only system processes should use system syscalls
         return;
     }
@@ -243,23 +187,15 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
             log.info("{s}", .{std.mem.trimRight(u8, msg, "\n")});
         },
         abi.sys.Id.yield => {
-            const next_pid = nextPid(pid) orelse return;
+            const next_pid = proc.nextPid(current_pid) orelse return;
 
             // save the previous process
-            proc.status = .ready;
-            proc.trap = trap.*;
-            proc.lock.unlock();
+            proc.unlockAndYield(trap);
 
             // FIXME: page fault now could lead to a race condition
 
-            const next_proc = &proc_table[next_pid];
-            next_proc.lock.lock();
-
-            // context switch + return to the next process
-            next_proc.status = .running;
-            // next_proc.addr_space.?.printMappings();
-            next_proc.addr_space.?.switchTo();
-            trap.* = next_proc.trap;
+            // switch to the next process
+            proc.lockAndSwitchTo(next_pid, trap);
         },
         abi.sys.Id.vfs_proto_create => {
             const name = untrustedSlice(u8, trap.arg0, trap.arg1) catch |err| {
@@ -275,7 +211,7 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
                 return;
             };
 
-            const target_proc = &proc_table[target_pid];
+            const target_proc = proc.find(target_pid);
             if (target_proc.addr_space == null) {
                 target_proc.addr_space = vmem.AddressSpace.new();
             }
@@ -313,9 +249,12 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
             const ip = trap.arg1;
             const sp = trap.arg2;
 
-            const target_proc = &proc_table[target_pid];
+            const target_proc = proc.find(target_pid);
 
             target_proc.lock.lock();
+            if (target_proc.addr_space == null) {
+                std.debug.panic("addr_space null after system_exec", .{});
+            }
             target_proc.trap = arch.SyscallRegs{
                 .user_instr_ptr = ip,
                 .user_stack_ptr = sp,
@@ -323,7 +262,7 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
             target_proc.status = .ready;
             target_proc.lock.unlock();
 
-            pushReady(target_pid);
+            proc.pushReady(target_pid);
         },
         // else => std.debug.panic("TODO", .{}),
     }
