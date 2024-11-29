@@ -36,7 +36,7 @@ pub const Slot = struct {
     }
 };
 
-pub const Marker = struct {
+pub const Marker = extern struct {
     read_end: CachePadded(std.atomic.Value(usize)) = .{ .val = .{ .raw = 0 } },
     write_end: CachePadded(std.atomic.Value(usize)) = .{ .val = .{ .raw = 0 } },
     capacity: usize,
@@ -124,7 +124,7 @@ pub const Marker = struct {
 ///
 /// reading and writing at the same time is allowed
 pub fn AtomicRing(comptime T: type, comptime size: usize) type {
-    return struct {
+    return extern struct {
         storage: [size]T = undefined,
         marker: Marker = .{ .capacity = size },
 
