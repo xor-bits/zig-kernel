@@ -6,6 +6,8 @@ pub const Id = enum(usize) {
     log = 0x1,
     yield = 0x2,
 
+    ring_setup = 0x801,
+
     vfs_proto_create = 0x1001,
     vfs_proto_next = 0x1002,
 
@@ -57,6 +59,12 @@ pub fn yield() void {
     _ = call(.yield, .{}) catch unreachable;
 }
 
+pub fn ringSetup() Error!void {
+    // var params: RingParams = undefined;
+    // try call(.ring_setup, .{ entries, @intFromPtr(&params) });
+    // return params;
+}
+
 pub fn vfs_proto_create(name: []const u8) Error!usize {
     return try call(.vfs_proto_create, .{ @intFromPtr(name.ptr), name.len });
 }
@@ -104,6 +112,14 @@ pub fn system_exec(pid: usize, ip: usize, sp: usize) void {
 //         else => @compileError("tagged unions only"),
 //     }
 // }
+
+pub const RingParams = struct {
+    submission_queue: usize,
+    completion_queue: usize,
+    submission_queue_size: u32,
+    completion_queue_size: u32,
+    flags: u32,
+};
 
 pub const ProtocolRequest = extern struct {
     /// TODO: this is for concurrency later

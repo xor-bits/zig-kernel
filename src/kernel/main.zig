@@ -9,7 +9,7 @@ const lazy = @import("lazy.zig");
 const logs = @import("logs.zig");
 const pmem = @import("pmem.zig");
 const proc = @import("proc.zig");
-const ring = @import("ring.zig");
+const ring = abi.ring;
 const spin = @import("spin.zig");
 const util = @import("util.zig");
 const vmem = @import("vmem.zig");
@@ -147,7 +147,7 @@ fn main() noreturn {
 
 pub const Protocol = struct {
     name: [16:0]u8,
-    sleepers: ring.AtomicRing(usize, 16) = .{},
+    sleepers: proc.Pipe(void, 16) = .{},
 };
 
 var known_protos: struct {
@@ -193,16 +193,9 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
             log.info("{s}", .{std.mem.trimRight(u8, msg, "\n")});
         },
         .yield => {
-            const next_pid = proc.nextPid(current_pid) orelse return;
-
-            // save the previous process
-            proc.unlockAndYield(trap);
-
-            // FIXME: page fault now could lead to a race condition
-
-            // switch to the next process
-            proc.lockAndSwitchTo(next_pid, trap);
+            proc.yield(current_pid, trap);
         },
+        .ring_setup => {},
         .vfs_proto_create => {
             if (trap.arg1 >= 16) {
                 log.warn("vfs proto name too long", .{});
