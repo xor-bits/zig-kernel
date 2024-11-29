@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const ring = @import("ring.zig");
+
 //
 
 pub const Id = enum(usize) {
@@ -59,7 +61,12 @@ pub fn yield() void {
     _ = call(.yield, .{}) catch unreachable;
 }
 
-pub fn ringSetup() Error!void {
+pub fn ringSetup(
+    submission_queue: *ring.AtomicRing(SubmissionEntry, [*]SubmissionEntry),
+    completion_queue: *ring.AtomicRing(CompletionEntry, [*]CompletionEntry),
+) Error!void {
+    _ = completion_queue; // autofix
+    _ = submission_queue; // autofix
     // var params: RingParams = undefined;
     // try call(.ring_setup, .{ entries, @intFromPtr(&params) });
     // return params;
@@ -113,11 +120,21 @@ pub fn system_exec(pid: usize, ip: usize, sp: usize) void {
 //     }
 // }
 
-pub const RingParams = struct {
-    submission_queue: usize,
-    completion_queue: usize,
-    submission_queue_size: u32,
-    completion_queue_size: u32,
+/// io operation
+pub const SubmissionEntry = extern struct {
+    user_data: u64,
+    offset: u64,
+    buffer: [*]u8,
+    buffer_len: u32,
+    fd: i16,
+    opcode: u8,
+    flags: u8,
+};
+
+/// io operation result
+pub const CompletionEntry = extern struct {
+    user_data: u64,
+    result: i32,
     flags: u32,
 };
 

@@ -64,7 +64,7 @@ fn popPid(list: *PidList) ?usize {
 
 pub fn Pipe(comptime T: type, comptime limit: usize) type {
     return struct {
-        buffer: ring.AtomicRing(T, [limit]T) = ring.AtomicRing(T, [limit]T).init(undefined),
+        buffer: ring.AtomicRing(T, [limit]T) = ring.AtomicRing(T, [limit]T).init(undefined, limit),
 
         waiting_for_items_lock: spin.Mutex = .{},
         waiting_for_items: PidList = .{},
@@ -234,4 +234,4 @@ var cpu_table: [32]Cpu = undefined;
 
 var ready_r_lock: spin.Mutex = .{};
 var ready_w_lock: spin.Mutex = .{};
-var ready: ring.AtomicRing(usize, [256]usize) = ring.AtomicRing(usize, [256]usize).init(undefined);
+var ready: ring.AtomicRing(usize, [256]usize) = ring.AtomicRing(usize, [256]usize).init(undefined, 256);

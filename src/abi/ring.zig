@@ -130,9 +130,9 @@ pub fn AtomicRing(comptime T: type, comptime Storage: type) type {
 
         const Self = @This();
 
-        pub fn init(storage: Storage) Self {
+        pub fn init(storage: Storage, len: usize) Self {
             return Self{
-                .marker = .{ .capacity = storage.len },
+                .marker = .{ .capacity = len },
                 .storage = storage,
             };
         }

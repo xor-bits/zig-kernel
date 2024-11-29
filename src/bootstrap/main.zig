@@ -16,7 +16,7 @@ var initfs_tar = std.ArrayList(u8).init(heap.allocator());
 //
 
 fn main(initfs: []const u8) !void {
-    log.info("hello from bootstrap", .{});
+    log.info("hello from bootstrap {}", .{@sizeOf(abi.sys.SubmissionEntry)});
 
     var initfs_tar_gz = std.io.fixedBufferStream(initfs);
     try std.compress.flate.inflate.decompress(.gzip, initfs_tar_gz.reader(), initfs_tar.writer());
@@ -90,6 +90,17 @@ fn main(initfs: []const u8) !void {
 
     abi.sys.system_map(1, maps.items);
     abi.sys.system_exec(1, header.entry, 0x7FFF_FFF4_0000);
+
+    const submissions = try heap.allocator().alloc(abi.sys.SubmissionEntry, 64);
+    const completions = try heap.allocator().alloc(abi.sys.CompletionEntry, 128);
+    const rings = try heap.allocator().create(struct {
+        submissions: abi.ring.AtomicRing(abi.sys.SubmissionEntry, [*]abi.sys.SubmissionEntry),
+        completions: abi.ring.AtomicRing(abi.sys.CompletionEntry, [*]abi.sys.CompletionEntry),
+    });
+    rings.submissions = abi.ring.AtomicRing(abi.sys.SubmissionEntry, [*]abi.sys.SubmissionEntry).init(submissions.ptr, submissions.len);
+    rings.completions = abi.ring.AtomicRing(abi.sys.CompletionEntry, [*]abi.sys.CompletionEntry).init(completions.ptr, completions.len);
+
+    try abi.sys.ringSetup(&rings.submissions, &rings.completions);
 
     initfsd();
 }
