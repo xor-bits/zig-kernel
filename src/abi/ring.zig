@@ -123,15 +123,18 @@ pub const Marker = extern struct {
 /// multiple concurrent readers or multiple concurrent writers cause UB
 ///
 /// reading and writing at the same time is allowed
-pub fn AtomicRing(comptime T: type, comptime size: usize) type {
+pub fn AtomicRing(comptime T: type, comptime Storage: type) type {
     return extern struct {
-        storage: [size]T = undefined,
-        marker: Marker = .{ .capacity = size },
+        storage: Storage,
+        marker: Marker,
 
         const Self = @This();
 
-        pub fn init() Self {
-            return Self{};
+        pub fn init(storage: Storage) Self {
+            return Self{
+                .marker = .{ .capacity = storage.len },
+                .storage = storage,
+            };
         }
 
         pub fn push(self: *Self, v: T) error{Full}!void {
