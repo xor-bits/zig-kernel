@@ -195,7 +195,26 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
         .yield => {
             proc.yield(current_pid, trap);
         },
-        .ring_setup => {},
+        .ring_setup => {
+            const submission_queue: *abi.sys.SubmissionQueue = untrustedPtr(abi.sys.SubmissionQueue, trap.arg0) catch {
+                trap.syscall_id = abi.sys.encodeError(error.PermissionDenied);
+                return;
+            };
+            const completion_queue: *abi.sys.CompletionQueue = untrustedPtr(abi.sys.CompletionQueue, trap.arg0) catch {
+                trap.syscall_id = abi.sys.encodeError(error.PermissionDenied);
+                return;
+            };
+
+            if (current_proc.queues_n >= current_proc.queues.len) {
+                trap.syscall_id = abi.sys.encodeError(abi.sys.Error.InternalError);
+                return;
+            }
+            current_proc.queues[current_proc.queues_n] = .{
+                .sq = submission_queue,
+                .cq = completion_queue,
+            };
+            current_proc.queues_n += 1;
+        },
         .vfs_proto_create => {
             if (trap.arg1 >= 16) {
                 log.warn("vfs proto name too long", .{});

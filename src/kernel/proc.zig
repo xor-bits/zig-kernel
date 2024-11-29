@@ -29,6 +29,12 @@ pub const Context = struct {
 
     protos: [1]?*main.Protocol = .{null},
 
+    queues_n: usize = 0,
+    queues: [1]struct {
+        sq: *abi.sys.SubmissionQueue,
+        cq: *abi.sys.CompletionQueue,
+    } = undefined,
+
     pub const ProtocolNext = struct {
         id: usize,
     };

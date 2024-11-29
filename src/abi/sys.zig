@@ -22,6 +22,7 @@ pub const Error = error{
     UnknownError,
     BadFileDescriptor,
     PermissionDenied,
+    InternalError,
 
     // pub fn decode() Self!usize {}
 };
@@ -38,6 +39,7 @@ pub fn encodeError(err: Error) usize {
     return @bitCast(-@as(isize, switch (err) {
         error.PermissionDenied => 12,
         error.BadFileDescriptor => 16,
+        error.InternalError => 30,
         error.UnknownError => std.debug.panic("unknown error shouldn't be encoded", .{}),
     }));
 }
@@ -50,6 +52,7 @@ pub fn decode(v: usize) Error!usize {
         std.math.minInt(isize)...0 => v,
         12 => error.PermissionDenied,
         16 => error.BadFileDescriptor,
+        30 => error.InternalError,
         else => return error.UnknownError,
     };
 }
@@ -68,11 +71,7 @@ pub fn ringSetup(
     submission_queue: *SubmissionQueue,
     completion_queue: *CompletionQueue,
 ) Error!void {
-    _ = completion_queue; // autofix
-    _ = submission_queue; // autofix
-    // var params: RingParams = undefined;
-    // try call(.ring_setup, .{ entries, @intFromPtr(&params) });
-    // return params;
+    _ = try call(.ring_setup, .{ @intFromPtr(submission_queue), @intFromPtr(completion_queue) });
 }
 
 pub fn vfs_proto_create(name: []const u8) Error!usize {
