@@ -21,6 +21,7 @@ pub const Id = enum(usize) {
 pub const Error = error{
     UnknownError,
     BadFileDescriptor,
+    PermissionDenied,
 
     // pub fn decode() Self!usize {}
 };
@@ -35,6 +36,7 @@ pub fn encode(result: Error!usize) usize {
 
 pub fn encodeError(err: Error) usize {
     return @bitCast(-@as(isize, switch (err) {
+        error.PermissionDenied => 12,
         error.BadFileDescriptor => 16,
         error.UnknownError => std.debug.panic("unknown error shouldn't be encoded", .{}),
     }));
@@ -46,6 +48,7 @@ pub fn decode(v: usize) Error!usize {
 
     return switch (err) {
         std.math.minInt(isize)...0 => v,
+        12 => error.PermissionDenied,
         16 => error.BadFileDescriptor,
         else => return error.UnknownError,
     };
@@ -62,8 +65,8 @@ pub fn yield() void {
 }
 
 pub fn ringSetup(
-    submission_queue: *ring.AtomicRing(SubmissionEntry, [*]SubmissionEntry),
-    completion_queue: *ring.AtomicRing(CompletionEntry, [*]CompletionEntry),
+    submission_queue: *SubmissionQueue,
+    completion_queue: *CompletionQueue,
 ) Error!void {
     _ = completion_queue; // autofix
     _ = submission_queue; // autofix
@@ -120,6 +123,8 @@ pub fn system_exec(pid: usize, ip: usize, sp: usize) void {
 //     }
 // }
 
+pub const SubmissionQueue = ring.AtomicRing(SubmissionEntry, [*]SubmissionEntry);
+
 /// io operation
 pub const SubmissionEntry = extern struct {
     user_data: u64,
@@ -130,6 +135,8 @@ pub const SubmissionEntry = extern struct {
     opcode: u8,
     flags: u8,
 };
+
+pub const CompletionQueue = ring.AtomicRing(CompletionEntry, [*]CompletionEntry);
 
 /// io operation result
 pub const CompletionEntry = extern struct {

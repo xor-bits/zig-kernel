@@ -94,11 +94,11 @@ fn main(initfs: []const u8) !void {
     const submissions = try heap.allocator().alloc(abi.sys.SubmissionEntry, 64);
     const completions = try heap.allocator().alloc(abi.sys.CompletionEntry, 128);
     const rings = try heap.allocator().create(struct {
-        submissions: abi.ring.AtomicRing(abi.sys.SubmissionEntry, [*]abi.sys.SubmissionEntry),
-        completions: abi.ring.AtomicRing(abi.sys.CompletionEntry, [*]abi.sys.CompletionEntry),
+        submissions: abi.sys.SubmissionQueue,
+        completions: abi.sys.CompletionQueue,
     });
-    rings.submissions = abi.ring.AtomicRing(abi.sys.SubmissionEntry, [*]abi.sys.SubmissionEntry).init(submissions.ptr, submissions.len);
-    rings.completions = abi.ring.AtomicRing(abi.sys.CompletionEntry, [*]abi.sys.CompletionEntry).init(completions.ptr, completions.len);
+    rings.submissions = abi.sys.SubmissionQueue.init(submissions.ptr, submissions.len);
+    rings.completions = abi.sys.CompletionQueue.init(completions.ptr, completions.len);
 
     try abi.sys.ringSetup(&rings.submissions, &rings.completions);
 
