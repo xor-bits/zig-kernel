@@ -96,13 +96,19 @@ fn main(initfs: []const u8) !void {
     const rings = try heap.allocator().create(struct {
         submissions: abi.sys.SubmissionQueue,
         completions: abi.sys.CompletionQueue,
+        futex: std.atomic.Value(usize),
     });
     rings.submissions = abi.sys.SubmissionQueue.init(submissions.ptr, submissions.len);
     rings.completions = abi.sys.CompletionQueue.init(completions.ptr, completions.len);
+    rings.futex = .{ .raw = 0 };
 
-    try abi.sys.ringSetup(&rings.submissions, &rings.completions);
+    try abi.sys.ringSetup(&rings.submissions, &rings.completions, &rings.futex);
     try rings.submissions.push(undefined);
-    try abi.sys.ringWait();
+    const now = rings.futex.load(.acquire);
+    if (rings.completions.pop()) |_| {} else {
+        abi.sys.futex_wait(&rings.futex.raw, now);
+    }
+    log.info("got a completed task", .{});
 
     initfsd();
 }

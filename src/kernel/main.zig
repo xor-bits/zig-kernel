@@ -223,7 +223,11 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
                 trap.syscall_id = abi.sys.encodeError(error.PermissionDenied);
                 return;
             };
-            const completion_queue: *abi.sys.CompletionQueue = untrustedPtr(abi.sys.CompletionQueue, trap.arg0) catch {
+            const completion_queue: *abi.sys.CompletionQueue = untrustedPtr(abi.sys.CompletionQueue, trap.arg1) catch {
+                trap.syscall_id = abi.sys.encodeError(error.PermissionDenied);
+                return;
+            };
+            const completion_futex: *std.atomic.Value(usize) = untrustedPtr(std.atomic.Value(usize), trap.arg2) catch {
                 trap.syscall_id = abi.sys.encodeError(error.PermissionDenied);
                 return;
             };
@@ -235,6 +239,7 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
             current_proc.queues[current_proc.queues_n] = .{
                 .sq = submission_queue,
                 .cq = completion_queue,
+                .futex = completion_futex,
             };
             current_proc.queues_n += 1;
         },

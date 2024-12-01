@@ -82,11 +82,13 @@ pub fn futex_wake(value: *const usize, n: usize) void {
     _ = call(.futex_wake, .{ @intFromPtr(value), n }) catch unreachable;
 }
 
+/// create a I/O ring, the futex is used to wait
 pub fn ringSetup(
     submission_queue: *SubmissionQueue,
     completion_queue: *CompletionQueue,
+    futex: *std.atomic.Value(usize),
 ) Error!void {
-    _ = try call(.ring_setup, .{ @intFromPtr(submission_queue), @intFromPtr(completion_queue) });
+    _ = try call(.ring_setup, .{ @intFromPtr(submission_queue), @intFromPtr(completion_queue), @intFromPtr(futex) });
 }
 
 pub fn ringWait() Error!void {

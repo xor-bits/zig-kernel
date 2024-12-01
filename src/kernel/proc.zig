@@ -38,6 +38,7 @@ pub const Context = struct {
     queues: [1]struct {
         sq: *abi.sys.SubmissionQueue,
         cq: *abi.sys.CompletionQueue,
+        futex: *std.atomic.Value(usize),
     } = undefined,
 };
 
