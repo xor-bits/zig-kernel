@@ -148,11 +148,15 @@ pub const SubmissionQueue = ring.AtomicRing(SubmissionEntry, [*]SubmissionEntry)
 /// io operation
 pub const SubmissionEntry = extern struct {
     user_data: u64,
-    offset: u64,
+    offset: usize,
     buffer: [*]u8,
     buffer_len: u32,
     fd: i16,
-    opcode: u8,
+    opcode: enum(u8) {
+        vfs_proto_next_open,
+        open,
+        _,
+    },
     flags: u8,
 };
 
@@ -161,7 +165,7 @@ pub const CompletionQueue = ring.AtomicRing(CompletionEntry, [*]CompletionEntry)
 /// io operation result
 pub const CompletionEntry = extern struct {
     user_data: u64,
-    result: i32,
+    result: usize,
     flags: u32,
 };
 

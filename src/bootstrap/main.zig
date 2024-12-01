@@ -100,57 +100,35 @@ fn main(initfs: []const u8) !void {
     abi.sys.system_map(1, maps.items);
     abi.sys.system_exec(1, header.entry, 0x7FFF_FFF4_0000);
 
-    const submissions = try heap.allocator().alloc(abi.sys.SubmissionEntry, 64);
-    const completions = try heap.allocator().alloc(abi.sys.CompletionEntry, 128);
-    const rings = try heap.allocator().create(struct {
-        submissions: abi.sys.SubmissionQueue,
-        completions: abi.sys.CompletionQueue,
-        futex: std.atomic.Value(usize),
-    });
-    rings.submissions = abi.sys.SubmissionQueue.init(submissions.ptr, submissions.len);
-    rings.completions = abi.sys.CompletionQueue.init(completions.ptr, completions.len);
-    rings.futex = .{ .raw = 0 };
-
-    try abi.sys.ringSetup(&rings.submissions, &rings.completions, &rings.futex);
-    try rings.submissions.push(undefined);
-    const now = rings.futex.load(.acquire);
-    if (rings.completions.pop()) |_| {} else {
-        abi.sys.futex_wait(&rings.futex.raw, now);
-    }
-    log.info("got a completed task", .{});
-
     initfsd();
 }
 
+var buf: [0x1000]u8 align(0x1000) = undefined;
+
 fn initfsd() noreturn {
+    const io_ring = abi.IoRing.init(64, heap.allocator()) catch unreachable;
+    defer io_ring.deinit();
+
     const proto = abi.sys.vfs_proto_create("initfs") catch |err| {
         std.debug.panic("failed to create VFS proto: {}", .{err});
     };
     log.info("vfs proto handle: {!}", .{proto});
 
-    var request: abi.sys.ProtocolRequest = undefined;
-    var path_buf: [4096]u8 = undefined;
-    abi.sys.vfs_proto_next(proto, &request, &path_buf) catch |err| {
-        std.debug.panic("failed to use VFS proto: {}", .{err});
-    };
-    log.info("request id: {}", .{request.id});
+    io_ring.submit(.{
+        .user_data = 0,
+        .opcode = .vfs_proto_next_open,
+        .flags = 0,
+        .fd = @truncate(@as(i128, proto)),
+        .buffer = &buf,
+        .buffer_len = 0x1000,
+        .offset = 0,
+    }) catch unreachable;
 
-    switch (request.ty) {
-        .open => {
-            log.info("request open: {s}, {}, {}", .{
-                path_buf[0..request.data.open.path_len],
-                request.data.open.flags,
-                request.data.open.mode,
-            });
-        },
-        .close => {
-            log.info("request open: {s}, {}, {}", .{
-                path_buf[0..request.data.open.path_len],
-                request.data.open.flags,
-                request.data.open.mode,
-            });
-        },
-    }
+    const result = io_ring.wait();
+    const path_len = result.result;
+
+    const path = buf[0..path_len];
+    log.info("got initfs open request: {s}", .{path});
 
     while (true) {
         abi.sys.yield();

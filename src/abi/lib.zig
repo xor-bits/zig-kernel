@@ -57,3 +57,70 @@ pub const SysLog = struct {
     }
     pub fn flush(_: @This()) Error!void {}
 };
+
+//
+
+pub const IoRing = struct {
+    inner: *Inner,
+    alloc: std.mem.Allocator,
+
+    const Inner = struct {
+        submissions: sys.SubmissionQueue,
+        completions: sys.CompletionQueue,
+        futex: std.atomic.Value(usize),
+    };
+
+    const Self = @This();
+
+    pub fn init(entries: usize, alloc: std.mem.Allocator) !Self {
+        const self = Self{
+            .inner = try alloc.create(Inner),
+            .alloc = alloc,
+        };
+        errdefer alloc.destroy(self.inner);
+
+        const submissions = try alloc.alloc(sys.SubmissionEntry, entries);
+        errdefer alloc.free(submissions);
+        const completions = try alloc.alloc(sys.CompletionEntry, entries * 2);
+        errdefer alloc.free(completions);
+
+        self.inner.submissions = sys.SubmissionQueue.init(submissions.ptr, submissions.len);
+        self.inner.completions = sys.CompletionQueue.init(completions.ptr, completions.len);
+        self.inner.futex = .{ .raw = 0 };
+
+        try sys.ringSetup(
+            &self.inner.submissions,
+            &self.inner.completions,
+            &self.inner.futex,
+        );
+
+        return self;
+    }
+
+    pub fn deinit(self: *const Self) void {
+        // FIXME: ringDelete syscall
+        std.debug.panic("FIXME missing syscall", .{});
+
+        self.alloc.free(self.inner.submissions);
+        self.alloc.free(self.inner.completions);
+        self.alloc.destroy(self.inner);
+    }
+
+    pub fn submit(self: *const Self, entry: sys.SubmissionEntry) error{Full}!void {
+        try self.inner.submissions.push(entry);
+    }
+
+    pub fn next(self: *const Self) ?sys.CompletionEntry {
+        return self.inner.completions.pop();
+    }
+
+    pub fn wait(self: *const Self) sys.CompletionEntry {
+        while (true) {
+            const now = self.inner.futex.load(.acquire);
+            if (self.next()) |_next| {
+                return _next;
+            }
+            sys.futex_wait(&self.inner.futex.raw, now);
+        }
+    }
+};
