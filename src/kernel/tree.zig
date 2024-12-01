@@ -2,6 +2,10 @@ const std = @import("std");
 
 //
 
+const log = std.log.scoped(.tree);
+
+//
+
 pub fn defaultOrder(comptime K: type) fn (K, K) std.math.Order {
     return struct {
         fn inner(a: K, b: K) std.math.Order {
@@ -67,17 +71,37 @@ pub fn RbTree(
         }
 
         pub fn debug(self: *Self) void {
-            _debug(self.root, 0);
+            log.info("{any} = {any}", .{ self.depth(), self });
         }
 
-        fn _debug(node: ?*Node, lvl: usize) void {
-            std.log.info("{d}:", .{lvl});
-            if (node) |_node| {
-                std.log.info(" {any}", .{_node.key});
-                _debug(_node.child[0], lvl + 1);
-                _debug(_node.child[1], lvl + 1);
-            } else {
-                std.log.info(" null", .{});
+        pub fn depth(self: *Self) usize {
+            var d: usize = 0;
+            iter(self.root, 0, &d, struct {
+                fn inner(max_depth: *usize, _d: usize, _: *Node) !void {
+                    max_depth.* = @max(max_depth.*, _d);
+                }
+            }.inner) catch unreachable;
+            return d;
+        }
+
+        pub fn format(self: *Self, comptime fmt: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+            _ = fmt;
+
+            try std.fmt.format(writer, "{{ ", .{});
+            try iter(self.root, 0, writer, struct {
+                fn inner(w: anytype, _: usize, node: *Node) !void {
+                    try std.fmt.format(w, "({any}, {any}), ", .{ node.key, node.value });
+                }
+            }.inner);
+            try std.fmt.format(writer, "}}", .{});
+        }
+
+        fn iter(_node: ?*Node, d: usize, ctx: anytype, callback: anytype) !void {
+            const node = _node orelse return;
+            try callback(ctx, d, node);
+
+            for (node.child) |next| {
+                try iter(next, d + 1, ctx, callback);
             }
         }
 
@@ -101,6 +125,17 @@ pub fn RbTree(
                 },
                 .vacant => |node| {
                     self.insert1(inserting, node.parent, node.dir);
+                    return null;
+                },
+            }
+        }
+
+        pub fn remove(self: *Self, key: K) ?*Node {
+            switch (self.entry(key)) {
+                .occupied => |node| {
+                    return self.removeNode(node);
+                },
+                .vacant => {
                     return null;
                 },
             }
@@ -200,6 +235,116 @@ pub fn RbTree(
             }
 
             // case i3
+            return;
+        }
+
+        fn removeNode(self: *Self, node: *Node) *Node {
+            if (node.child[0] != null and node.child[1] != null) {
+                var left = node.child[1].?;
+                while (true) {
+                    if (left.child[0]) |next| {
+                        left = next;
+                    } else {
+                        std.mem.swap(K, &node.key, &left.key);
+                        std.mem.swap(V, &node.value, &left.value);
+                        return self.removeNode(left);
+                    }
+                }
+            }
+
+            if (node.child[0]) |left| {
+                std.mem.swap(K, &node.key, &left.key);
+                std.mem.swap(V, &node.value, &left.value);
+                std.mem.swap([2]?*Node, &node.child, &left.child);
+                node.color = .black;
+                return left;
+            }
+
+            if (node.child[1]) |right| {
+                std.mem.swap(K, &node.key, &right.key);
+                std.mem.swap(V, &node.value, &right.value);
+                std.mem.swap([2]?*Node, &node.child, &right.child);
+                node.color = .black;
+                return right;
+            }
+
+            if (self.root == node) {
+                self.root = null;
+                return node;
+            }
+
+            if (Node.color(node) == .black) {
+                self.remove2(node);
+            }
+
+            return node;
+        }
+
+        fn remove2(self: *Self, _node: *Node) void {
+            var node = _node;
+            var parent = node.parent.?;
+            var dir = node.dir();
+            parent.child[@intFromEnum(dir)] = null;
+
+            var sibling: *Node = undefined;
+            var close_nephew: ?*Node = undefined;
+            var distant_nephew: ?*Node = undefined;
+
+            while (true) {
+                sibling = parent.child[@intFromEnum(mirror(dir))].?;
+                close_nephew = sibling.child[@intFromEnum(dir)];
+                distant_nephew = sibling.child[@intFromEnum(mirror(dir))];
+
+                if (Node.color(sibling) == .red) {
+                    // case d3
+                    _ = self.rotateDir(parent, dir);
+                    parent.color = .red;
+                    sibling.color = .black;
+                    sibling = close_nephew.?;
+                    distant_nephew = sibling.child[@intFromEnum(mirror(dir))];
+                }
+                if (Node.color(distant_nephew) == .red) {
+                    // case d6
+                    _ = self.rotateDir(parent, dir);
+                    sibling.color = parent.color;
+                    parent.color = .black;
+                    distant_nephew.?.color = .black;
+                    return;
+                }
+                if (Node.color(close_nephew) == .red) {
+                    // case d5
+                    _ = self.rotateDir(sibling, mirror(dir));
+                    sibling.color = .red;
+                    close_nephew.?.color = .black;
+                    distant_nephew = sibling;
+                    sibling = close_nephew.?;
+
+                    // case d6
+                    _ = self.rotateDir(parent, dir);
+                    sibling.color = parent.color;
+                    parent.color = .black;
+                    distant_nephew.?.color = .black;
+                    return;
+                }
+                if (Node.color(parent) == .red) {
+                    // case d4
+                    sibling.color = .red;
+                    parent.color = .black;
+                    return;
+                }
+
+                // case d2
+                sibling.color = .red;
+                node = parent;
+
+                // iterate 2 tree levels higher
+                parent = node.parent orelse {
+                    break;
+                };
+                dir = node.dir();
+            }
+
+            // case d1
             return;
         }
     };
