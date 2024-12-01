@@ -38,6 +38,15 @@ fn main(initfs: []const u8) !void {
         },
     });
 
+    try maps.append(abi.sys.Map{
+        .dst = abi.BOOTSTRAP_HEAP,
+        .src = abi.sys.MapSource.newLazy(abi.BOOTSTRAP_HEAP_SIZE),
+        .flags = .{
+            .write = true,
+            .execute = false,
+        },
+    });
+
     while (try program_headers.next()) |program_header| {
         if (program_header.p_type != std.elf.PT_LOAD) {
             continue;
