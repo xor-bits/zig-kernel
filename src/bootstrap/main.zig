@@ -78,7 +78,7 @@ fn main(initfs: []const u8) !void {
 
         if (zero_vaddr_bottom != zero_vaddr_top) {
             try maps.append(abi.sys.Map{
-                .dst = data_vaddr_bottom,
+                .dst = zero_vaddr_bottom,
                 .src = abi.sys.MapSource.newLazy(zero_vaddr_top - segment_vaddr_bottom),
                 .flags = flags,
             });
