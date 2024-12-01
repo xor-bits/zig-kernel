@@ -25,7 +25,7 @@ pub const Context = struct {
 
     /// futex uses this field to make a linked list
     /// if multiple processes are waiting on the same address
-    futex_next: ?*Context = null,
+    futex_next: ?usize = null,
 
     previous_job: union(enum) {
         yield: void,
@@ -160,9 +160,6 @@ pub fn futex_wait(value: *std.atomic.Value(usize), expected: usize, trap: *arch.
     const this_pid = currentPid().?;
     const this = find(this_pid);
 
-    futex_tree_lock.lock();
-    defer futex_tree_lock.unlock();
-
     // the address is already checked to be safe to use
     if (value.load(.acquire) != expected) {
         return;
@@ -170,13 +167,14 @@ pub fn futex_wait(value: *std.atomic.Value(usize), expected: usize, trap: *arch.
 
     const addr = this.addr_space.?.translate(pmem.VirtAddr.new(@intFromPtr(value))).?;
 
+    futex_tree_lock.lock();
+    defer futex_tree_lock.unlock();
+
     // add the process into the sleep queue
     switch (futex_tree.entry(addr)) {
         .occupied => |entry| {
             const already_waiting_pid = entry.value;
-            const already_waiting = find(already_waiting_pid);
-
-            this.futex_next = already_waiting;
+            this.futex_next = already_waiting_pid;
             entry.value = this_pid;
         },
         .vacant => |entry| {
@@ -193,8 +191,36 @@ pub fn futex_wait(value: *std.atomic.Value(usize), expected: usize, trap: *arch.
     unlockAndYield(trap);
 
     const next_pid = popWait();
-
     lockAndSwitchTo(next_pid, trap);
+}
+
+pub fn futex_wake(value: *std.atomic.Value(usize), n: usize) void {
+    if (n == 0) return;
+
+    const this_pid = currentPid().?;
+    const this = find(this_pid);
+    const addr = this.addr_space.?.translate(pmem.VirtAddr.new(@intFromPtr(value))) orelse return;
+
+    futex_wake_external(addr, n);
+}
+
+pub fn futex_wake_external(addr: pmem.PhysAddr, n: usize) void {
+    if (n == 0) return;
+
+    futex_tree_lock.lock();
+    defer futex_tree_lock.unlock();
+
+    const node = futex_tree.remove(addr) orelse return;
+
+    var first_proc = node.value;
+    for (0..n) |_| {
+        pushReady(first_proc);
+        if (find(first_proc).futex_next) |next_proc| {
+            first_proc = next_proc;
+        } else {
+            break;
+        }
+    }
 }
 
 pub fn yield(now_pid: usize, trap: *arch.SyscallRegs) void {

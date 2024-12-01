@@ -91,11 +91,6 @@ fn main(initfs: []const u8) !void {
     abi.sys.system_map(1, maps.items);
     abi.sys.system_exec(1, header.entry, 0x7FFF_FFF4_0000);
 
-    const v: usize = 2;
-    log.info("futex wait", .{});
-    abi.sys.futex_wait(&v, 2);
-    log.info("futex done", .{});
-
     const submissions = try heap.allocator().alloc(abi.sys.SubmissionEntry, 64);
     const completions = try heap.allocator().alloc(abi.sys.CompletionEntry, 128);
     const rings = try heap.allocator().create(struct {

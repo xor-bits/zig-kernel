@@ -197,15 +197,27 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
             proc.yield(current_pid, trap);
         },
         .futex_wait => {
-            const expected = trap.arg1;
             const value: *std.atomic.Value(usize) = untrustedPtr(std.atomic.Value(usize), trap.arg0) catch {
                 trap.syscall_id = abi.sys.encodeError(error.PermissionDenied);
                 return;
             };
+            const expected = trap.arg1;
 
             proc.futex_wait(value, expected, trap);
         },
-        .futex_wake => {},
+        .futex_wake => {
+            const value: *std.atomic.Value(usize) = untrustedPtr(std.atomic.Value(usize), trap.arg0) catch {
+                trap.syscall_id = abi.sys.encodeError(error.PermissionDenied);
+                return;
+            };
+            const n = trap.arg1;
+
+            // check the address with a page fault
+            const v: *volatile usize = @ptrCast(value);
+            _ = v.*;
+
+            proc.futex_wake(value, n);
+        },
         .ring_setup => {
             const submission_queue: *abi.sys.SubmissionQueue = untrustedPtr(abi.sys.SubmissionQueue, trap.arg0) catch {
                 trap.syscall_id = abi.sys.encodeError(error.PermissionDenied);
