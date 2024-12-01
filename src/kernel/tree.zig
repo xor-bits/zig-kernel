@@ -164,7 +164,6 @@ pub fn RbTree(
             };
 
             while (true) {
-                std.log.info("next lvl", .{});
                 const dir = dirFromOrder(order(key, parent.key)) orelse {
                     return Entry{ .occupied = parent };
                 };
