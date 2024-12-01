@@ -7,6 +7,7 @@ pub const vmem = @import("vmem.zig");
 pub const pmem = @import("pmem.zig");
 pub const ring = abi.ring;
 pub const main = @import("main.zig");
+pub const tree = @import("tree.zig");
 
 //
 
@@ -22,9 +23,13 @@ pub const Context = struct {
     trap: arch.SyscallRegs = .{},
     is_system: bool = false,
 
+    /// futex uses this field to make a linked list
+    /// if multiple processes are waiting on the same address
+    futex_next: ?*Context = null,
+
     previous_job: union(enum) {
         yield: void,
-        protocol_next: ProtocolNext,
+        futex: void,
     } = .yield,
 
     protos: [1]?*main.Protocol = .{null},
@@ -34,10 +39,6 @@ pub const Context = struct {
         sq: *abi.sys.SubmissionQueue,
         cq: *abi.sys.CompletionQueue,
     } = undefined,
-
-    pub const ProtocolNext = struct {
-        id: usize,
-    };
 };
 
 pub const Cpu = struct {
@@ -123,6 +124,20 @@ pub fn popReady() ?usize {
     return ready.pop();
 }
 
+pub fn popWait() usize {
+    while (true) {
+        if (popReady()) |next| {
+            return next;
+        }
+
+        @setCold(true);
+
+        // halt the CPU until there is something to do
+        // FIXME: switch to a temporary VMM and release the current process
+        arch.x86_64.ints.wait();
+    }
+}
+
 pub fn nextPid(now_pid: usize) ?usize {
     const next_pid = popReady() orelse {
         return null;
@@ -132,7 +147,55 @@ pub fn nextPid(now_pid: usize) ?usize {
     return next_pid;
 }
 
-pub fn trySwitchTo() bool {}
+const FutexTree = tree.RbTree(pmem.PhysAddr, usize, struct {
+    fn inner(a: pmem.PhysAddr, b: pmem.PhysAddr) std.math.Order {
+        return std.math.order(a.raw, b.raw);
+    }
+}.inner);
+var futex_tree_lock: spin.Mutex = .{};
+var futex_tree: FutexTree = .{};
+var futex_node_allocator = std.heap.MemoryPool(FutexTree.Node).init(pmem.page_allocator);
+
+pub fn futex_wait(value: *std.atomic.Value(usize), expected: usize, trap: *arch.SyscallRegs) void {
+    const this_pid = currentPid().?;
+    const this = find(this_pid);
+
+    futex_tree_lock.lock();
+    defer futex_tree_lock.unlock();
+
+    // the address is already checked to be safe to use
+    if (value.load(.acquire) != expected) {
+        return;
+    }
+
+    const addr = this.addr_space.?.translate(pmem.VirtAddr.new(@intFromPtr(value))).?;
+
+    // add the process into the sleep queue
+    switch (futex_tree.entry(addr)) {
+        .occupied => |entry| {
+            const already_waiting_pid = entry.value;
+            const already_waiting = find(already_waiting_pid);
+
+            this.futex_next = already_waiting;
+            entry.value = this_pid;
+        },
+        .vacant => |entry| {
+            const node = futex_node_allocator.create() catch {
+                std.debug.panic("futex OOM", .{});
+            };
+            node.key = addr;
+            node.value = this_pid;
+            futex_tree.insertVacant(node, entry);
+        },
+    }
+
+    this.previous_job = .{ .futex = void{} };
+    unlockAndYield(trap);
+
+    const next_pid = popWait();
+
+    lockAndSwitchTo(next_pid, trap);
+}
 
 pub fn yield(now_pid: usize, trap: *arch.SyscallRegs) void {
     const next_pid = popReady() orelse {

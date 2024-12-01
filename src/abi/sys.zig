@@ -7,8 +7,11 @@ const ring = @import("ring.zig");
 pub const Id = enum(usize) {
     log = 0x1,
     yield = 0x2,
+    futex_wait = 0x3,
+    futex_wake = 0x4,
 
     ring_setup = 0x801,
+    ring_wait = 0x802,
 
     vfs_proto_create = 0x1001,
     vfs_proto_next = 0x1002,
@@ -67,11 +70,27 @@ pub fn yield() void {
     _ = call(.yield, .{}) catch unreachable;
 }
 
+/// goes to sleep if the `[value]` is `expected`
+pub fn futex_wait(value: *const usize, expected: usize) void {
+    // the only possible error is using an invalid address,
+    // which either page faults or GP faults anyways
+    _ = call(.futex_wait, .{ @intFromPtr(value), expected }) catch unreachable;
+}
+
+/// wake up `n` tasks sleeping on `[value]`
+pub fn futex_wake(value: *const usize, n: usize) void {
+    _ = call(.futex_wake, .{ @intFromPtr(value), n }) catch unreachable;
+}
+
 pub fn ringSetup(
     submission_queue: *SubmissionQueue,
     completion_queue: *CompletionQueue,
 ) Error!void {
     _ = try call(.ring_setup, .{ @intFromPtr(submission_queue), @intFromPtr(completion_queue) });
+}
+
+pub fn ringWait() Error!void {
+    _ = try call(.ring_wait, .{});
 }
 
 pub fn vfs_proto_create(name: []const u8) Error!usize {

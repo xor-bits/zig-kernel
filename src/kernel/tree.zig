@@ -124,7 +124,7 @@ pub fn RbTree(
                     return inserting;
                 },
                 .vacant => |node| {
-                    self.insert1(inserting, node.parent, node.dir);
+                    self.insertVacant(inserting, node);
                     return null;
                 },
             }
@@ -143,11 +143,17 @@ pub fn RbTree(
 
         pub const Entry = union(enum) {
             occupied: *Node,
-            vacant: struct {
-                parent: ?*Node,
-                dir: Dir,
-            },
+            vacant: Vacant,
         };
+
+        pub const Vacant = struct {
+            parent: ?*Node,
+            dir: Dir,
+        };
+
+        pub fn insertVacant(self: *Self, node: *Node, _entry: Vacant) void {
+            self.insert1(node, _entry.parent, _entry.dir);
+        }
 
         pub fn entry(self: *Self, key: K) Entry {
             var parent: *Node = self.root orelse {

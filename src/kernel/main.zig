@@ -13,6 +13,7 @@ const ring = abi.ring;
 const spin = @import("spin.zig");
 const util = @import("util.zig");
 const vmem = @import("vmem.zig");
+const tree = @import("tree.zig");
 
 //
 
@@ -195,6 +196,16 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
         .yield => {
             proc.yield(current_pid, trap);
         },
+        .futex_wait => {
+            const expected = trap.arg1;
+            const value: *std.atomic.Value(usize) = untrustedPtr(std.atomic.Value(usize), trap.arg0) catch {
+                trap.syscall_id = abi.sys.encodeError(error.PermissionDenied);
+                return;
+            };
+
+            proc.futex_wait(value, expected, trap);
+        },
+        .futex_wake => {},
         .ring_setup => {
             const submission_queue: *abi.sys.SubmissionQueue = untrustedPtr(abi.sys.SubmissionQueue, trap.arg0) catch {
                 trap.syscall_id = abi.sys.encodeError(error.PermissionDenied);
@@ -214,6 +225,10 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
                 .cq = completion_queue,
             };
             current_proc.queues_n += 1;
+        },
+        .ring_wait => {
+
+            // current_proc.queues[0].sq.;
         },
         .vfs_proto_create => {
             if (trap.arg1 >= 16) {

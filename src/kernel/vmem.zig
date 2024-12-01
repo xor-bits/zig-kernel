@@ -333,6 +333,43 @@ pub const AddressSpace = struct {
         }
     }
 
+    pub fn translate(self: *Self, vaddr: pmem.VirtAddr) ?pmem.PhysAddr {
+        const levels = vaddr.levels();
+
+        const l4entries = self.root();
+        const l4entry = &l4entries[levels[3]];
+
+        if (l4entry.present == 0) {
+            return null;
+        }
+
+        const l3entries = physPageAsPageTable(pmem.PhysPage.new(l4entry.page_index));
+        const l3entry = &l3entries[levels[2]];
+
+        std.debug.assert(l3entry.huge_page == 0);
+        if (l3entry.present == 0) {
+            return null;
+        }
+
+        const l2entries = physPageAsPageTable(pmem.PhysPage.new(l3entry.page_index));
+        const l2entry = &l2entries[levels[1]];
+
+        std.debug.assert(l2entry.huge_page == 0);
+        if (l2entry.present == 0) {
+            return null;
+        }
+
+        const l1entries = physPageAsPageTable(pmem.PhysPage.new(l2entry.page_index));
+        const l1entry = &l1entries[levels[0]];
+
+        if (l1entry.present == 0) {
+            return null;
+        }
+
+        const page_start = pmem.PhysPage.new(l1entry.page_index).toPhys();
+        return pmem.PhysAddr.new(page_start.raw + vaddr.offset());
+    }
+
     pub fn mapGlobals(self: Self) void {
         const to_table = self.root();
         const from_table = global_higher_half.get().?;
