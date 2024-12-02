@@ -38,7 +38,7 @@ pub const Context = struct {
     queues: [1]struct {
         sq: *abi.sys.SubmissionQueue,
         cq: *abi.sys.CompletionQueue,
-        futex: *std.atomic.Value(usize),
+        futex: pmem.PhysAddr,
     } = undefined,
 };
 
@@ -146,6 +146,33 @@ pub fn nextPid(now_pid: usize) ?usize {
     pushReady(now_pid);
 
     return next_pid;
+}
+
+pub fn ioJobs(proc: *Context) void {
+    for (proc.queues[0..proc.queues_n]) |queue| {
+        if (!queue.cq.canWrite(1)) {
+            continue;
+        }
+
+        std.log.info("found queue", .{});
+
+        // FIXME: validate the queue memory and slots instead of just trusting it
+        const submission: abi.sys.SubmissionEntry = queue.sq.pop() orelse continue;
+
+        switch (submission.opcode) {
+            .vfs_proto_next_open => {},
+            .open => {},
+            else => queue.cq.push(.{
+                .user_data = submission.user_data,
+                .result = abi.sys.encode(error.InvalidArgument),
+                .flags = 0,
+            }) catch {},
+        }
+
+        const futex = queue.futex.toHhdm().ptr(*std.atomic.Value(usize));
+        _ = futex.fetchAdd(1, .release);
+        futex_wake_external(queue.futex, 1);
+    }
 }
 
 const FutexTree = tree.RbTree(pmem.PhysAddr, usize, struct {

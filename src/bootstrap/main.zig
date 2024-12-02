@@ -124,11 +124,11 @@ fn initfsd() noreturn {
         .offset = 0,
     }) catch unreachable;
 
-    const result = io_ring.wait();
-    const path_len = result.result;
+    // const result = io_ring.wait();
+    // const path_len = result.result;
 
-    const path = buf[0..path_len];
-    log.info("got initfs open request: {s}", .{path});
+    // const path = buf[0..path_len];
+    // log.info("got initfs open request: {s}", .{path});
 
     while (true) {
         abi.sys.yield();

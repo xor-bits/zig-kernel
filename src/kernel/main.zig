@@ -164,6 +164,8 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
     const current_pid = proc.currentPid().?;
     const current_proc = proc.find(current_pid);
 
+    proc.ioJobs(current_proc);
+
     // TODO: once every CPU has reached this, bootloader_reclaimable memory could be freed
     // just some few things need to be copied, but the page map(s) and stack(s) are already copied
 
@@ -231,6 +233,10 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
                 trap.syscall_id = abi.sys.encodeError(error.PermissionDenied);
                 return;
             };
+            const futex = current_proc.addr_space.?.translate(pmem.VirtAddr.new(@intFromPtr(completion_futex))) orelse {
+                trap.syscall_id = abi.sys.encodeError(error.PermissionDenied);
+                return;
+            };
 
             if (current_proc.queues_n >= current_proc.queues.len) {
                 trap.syscall_id = abi.sys.encodeError(abi.sys.Error.InternalError);
@@ -239,7 +245,7 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
             current_proc.queues[current_proc.queues_n] = .{
                 .sq = submission_queue,
                 .cq = completion_queue,
-                .futex = completion_futex,
+                .futex = futex,
             };
             current_proc.queues_n += 1;
         },

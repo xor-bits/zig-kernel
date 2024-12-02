@@ -137,6 +137,14 @@ pub fn AtomicRing(comptime T: type, comptime Storage: type) type {
             };
         }
 
+        pub fn canWrite(self: *Self, n: usize) bool {
+            return self.marker.acquire(n) != null;
+        }
+
+        pub fn canRead(self: *Self, n: usize) bool {
+            return self.marker.consume(n) != null;
+        }
+
         pub fn push(self: *Self, v: T) error{Full}!void {
             const slot = self.marker.acquire(1) orelse return error.Full;
             self.storage[slot.first] = v;

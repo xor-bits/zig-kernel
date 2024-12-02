@@ -26,6 +26,7 @@ pub const Error = error{
     BadFileDescriptor,
     PermissionDenied,
     InternalError,
+    InvalidArgument,
 
     // pub fn decode() Self!usize {}
 };
@@ -42,6 +43,7 @@ pub fn encodeError(err: Error) usize {
     return @bitCast(-@as(isize, switch (err) {
         error.PermissionDenied => 12,
         error.BadFileDescriptor => 16,
+        error.InvalidArgument => 23,
         error.InternalError => 30,
         error.UnknownError => std.debug.panic("unknown error shouldn't be encoded", .{}),
     }));
@@ -55,6 +57,7 @@ pub fn decode(v: usize) Error!usize {
         std.math.minInt(isize)...0 => v,
         12 => error.PermissionDenied,
         16 => error.BadFileDescriptor,
+        23 => error.InvalidArgument,
         30 => error.InternalError,
         else => return error.UnknownError,
     };

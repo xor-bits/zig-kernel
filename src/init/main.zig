@@ -33,6 +33,6 @@ export fn _start() linksection(".text._start") callconv(.C) noreturn {
     log.info("{any}", .{r});
 
     while (true) {
-        abi.sys.yield();
+        // abi.sys.yield();
     }
 }
