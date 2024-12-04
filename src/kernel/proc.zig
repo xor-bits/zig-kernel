@@ -38,8 +38,10 @@ pub const Context = struct {
         futex: void,
     } = .yield,
 
+    protos_n: usize = 0,
     protos: [1]?*main.Protocol = .{null},
 
+    // unhandled: ?abi.sys.SubmissionEntry,
     queues_n: usize = 0,
     queues: [1]struct {
         sq: *abi.sys.SubmissionQueue,
@@ -172,7 +174,7 @@ pub fn nextPid(now_pid: usize) ?usize {
 }
 
 pub fn tick() void {
-    log.info("TIMER INTERRUPT", .{});
+    log.info("TIMER INTERRUPT, pid={any}", .{currentPid()});
 }
 
 pub fn ioJobs(proc: *Context) void {
@@ -185,8 +187,12 @@ pub fn ioJobs(proc: *Context) void {
         const submission: abi.sys.SubmissionEntry = queue.sq.pop() orelse continue;
 
         switch (submission.opcode) {
-            .vfs_proto_next_open => {},
-            .open => {},
+            .vfs_proto_next_open => {
+                log.info("got vfs_proto_next_open", .{});
+            },
+            .open => {
+                log.info("got open", .{});
+            },
             else => queue.cq.push(.{
                 .user_data = submission.user_data,
                 .result = abi.sys.encode(error.InvalidArgument),
@@ -198,6 +204,14 @@ pub fn ioJobs(proc: *Context) void {
         _ = futex.fetchAdd(1, .release);
         futex_wake_external(queue.futex, 1);
     }
+}
+
+fn vfs_proto_next_open(proc: *Context, req: abi.sys.SubmissionEntry) abi.sys.Error!usize {
+    if (req.fd == 0 or req.fd - 1 >= proc.protos_n) {
+        return error.BadFileDescriptor;
+    }
+
+    proc.protos[req.fd - 1];
 }
 
 const FutexTree = tree.RbTree(pmem.PhysAddr, usize, struct {
