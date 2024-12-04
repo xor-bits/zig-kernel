@@ -130,22 +130,22 @@ var lazy_wait_vmm = lazy.Lazy(vmem.AddressSpace).new();
 
 /// NOTE: might or might not switch to another VMM
 pub fn popWait() usize {
-    var first = true;
+    if (popReady()) |next| {
+        return next;
+    }
+
+    @setCold(true);
+
+    const vmm = lazy_wait_vmm.waitOrInit(struct {
+        pub fn init() vmem.AddressSpace {
+            return vmem.AddressSpace.new();
+        }
+    });
+    vmm.switchTo();
+
     while (true) {
         if (popReady()) |next| {
             return next;
-        }
-
-        @setCold(true);
-
-        if (first) {
-            first = false;
-            const vmm = lazy_wait_vmm.waitOrInit(struct {
-                pub fn init() vmem.AddressSpace {
-                    return vmem.AddressSpace.new();
-                }
-            });
-            vmm.switchTo();
         }
 
         // halt the CPU until there is something to do
