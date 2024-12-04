@@ -30,6 +30,16 @@ pub fn hpet_spin_wait(micros: u32, just_before: anytype) void {
     }
 }
 
+pub fn now() u64 {
+    const regs = hpet_regs_lazy.get().?.*;
+    return regs.main_counter_value;
+}
+
+pub fn asNanos(t: u64) u128 {
+    const regs = hpet_regs_lazy.get().?.*;
+    return @as(u128, t) * regs.caps_and_id.counter_period_femtoseconds / 1_000_000;
+}
+
 //
 
 var hpet_regs_lazy = lazy.Lazy(*volatile HpetRegs).new();

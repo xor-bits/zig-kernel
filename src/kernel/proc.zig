@@ -2,6 +2,7 @@ const std = @import("std");
 const abi = @import("abi");
 
 pub const arch = @import("arch.zig");
+pub const hpet = @import("hpet.zig");
 pub const lazy = @import("lazy.zig");
 pub const main = @import("main.zig");
 pub const pmem = @import("pmem.zig");
@@ -9,6 +10,10 @@ pub const ring = abi.ring;
 pub const spin = @import("spin.zig");
 pub const tree = @import("tree.zig");
 pub const vmem = @import("vmem.zig");
+
+//
+
+const log = std.log.scoped(.proc);
 
 //
 
@@ -150,7 +155,10 @@ pub fn popWait() usize {
 
         // halt the CPU until there is something to do
         // FIXME: switch to a temporary VMM and release the current process
+        const before_wait = hpet.now();
         arch.x86_64.ints.wait();
+        const elapsed: f64 = @floatFromInt(hpet.asNanos(hpet.now() - before_wait));
+        log.info("hlt lasted {d}ms", .{elapsed / 1_000_000.0});
     }
 }
 
