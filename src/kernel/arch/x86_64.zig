@@ -656,7 +656,6 @@ pub const Idt = extern struct {
                     pfec.user_mode,
                     pfec.caused_by_write,
                 ) catch {
-                    flush_tlb_addr(target_addr);
                     return;
                 };
 

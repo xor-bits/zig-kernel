@@ -179,6 +179,10 @@ pub const AddressSpace = struct {
                 self.mapLazy(dst, bytes, _flags);
             },
         }
+
+        if (self.isCurrent()) {
+            arch.x86_64.flush_tlb();
+        }
     }
 
     fn mapBytes(self: Self, _dst: pmem.VirtAddr, _src: []const u8, _flags: Entry) void {
@@ -339,6 +343,7 @@ pub const AddressSpace = struct {
             l1entry.page_index = allocated.page_index;
             l1entry.lazy_alloc = 0;
             l1entry.present = 1;
+            arch.x86_64.flush_tlb_addr(vaddr.raw);
             return error.Handled;
         }
     }
