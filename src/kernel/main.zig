@@ -398,23 +398,23 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
     }
 }
 
-pub fn isInLowerHalf(comptime T: type, bottom: usize, length: usize) error{ Overflow, IsHigherHalf }!void {
+pub fn isInLowerHalf(comptime T: type, bottom: usize, length: usize) abi.sys.Error!void {
     const byte_len = @mulWithOverflow(@sizeOf(T), length);
     if (byte_len[1] != 0) {
-        return error.Overflow;
+        return error.InvalidAddress;
     }
 
     const top = @addWithOverflow(bottom, byte_len[0]);
     if (top[1] != 0) {
-        return error.Overflow;
+        return error.InvalidAddress;
     }
 
     if (top[0] >= 0x8000_0000_0000) {
-        return error.IsHigherHalf;
+        return error.InvalidAddress;
     }
 }
 
-pub fn untrustedSlice(comptime T: type, bottom: usize, length: usize) error{ Overflow, IsHigherHalf }![]T {
+pub fn untrustedSlice(comptime T: type, bottom: usize, length: usize) abi.sys.Error![]T {
     try isInLowerHalf(T, bottom, length);
 
     // pagefaults from the kernel touching lower half should just kill the process,
@@ -425,7 +425,7 @@ pub fn untrustedSlice(comptime T: type, bottom: usize, length: usize) error{ Ove
     return first[0..length];
 }
 
-pub fn untrustedPtr(comptime T: type, ptr: usize) error{ Overflow, IsHigherHalf }!*T {
+pub fn untrustedPtr(comptime T: type, ptr: usize) abi.sys.Error!*T {
     const slice = try untrustedSlice(T, ptr, 1);
     return &slice[0];
 }

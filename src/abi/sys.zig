@@ -22,11 +22,13 @@ pub const Id = enum(usize) {
 };
 
 pub const Error = error{
-    UnknownError,
+    InvalidAddress,
     BadFileDescriptor,
     PermissionDenied,
     InternalError,
     InvalidArgument,
+
+    UnknownError,
 
     // pub fn decode() Self!usize {}
 };
@@ -41,6 +43,7 @@ pub fn encode(result: Error!usize) usize {
 
 pub fn encodeError(err: Error) usize {
     return @bitCast(-@as(isize, switch (err) {
+        error.InvalidAddress => 1,
         error.PermissionDenied => 12,
         error.BadFileDescriptor => 16,
         error.InvalidArgument => 23,
@@ -55,6 +58,7 @@ pub fn decode(v: usize) Error!usize {
 
     return switch (err) {
         std.math.minInt(isize)...0 => v,
+        1 => error.InvalidAddress,
         12 => error.PermissionDenied,
         16 => error.BadFileDescriptor,
         23 => error.InvalidArgument,
