@@ -146,7 +146,17 @@ pub const AddressSpace = struct {
         };
     }
 
+    pub fn isCurrent(self: Self) bool {
+        const current_cr3: u64 = arch.x86_64.rdcr3();
+        const next_cr3: u64 = @as(u64, self.cr3.page_index) << 12;
+        return next_cr3 == current_cr3;
+    }
+
     pub fn switchTo(self: Self) void {
+        if (self.isCurrent()) {
+            return;
+        }
+
         arch.x86_64.wrcr3(@as(u64, self.cr3.page_index) << 12);
         // log.info("cr3 is now 0x{x}", .{arch.x86_64.rdcr3()});
     }
