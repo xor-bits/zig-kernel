@@ -55,6 +55,11 @@ fn deepClone(from: *const Entry, to: *Entry, level: usize) void {
 
 //
 
+pub const Privilege = enum(u3) {
+    kernel = 0, // ring 0
+    user = 3, // ring 3
+};
+
 pub const PageSize = enum {
     size512gib,
     size1gib,
@@ -108,6 +113,9 @@ pub const MapSource = union(enum) {
 
     /// allocate (n divceil 0x1000) pages on page fault (overcommit) (lazy physical memory allocation)
     lazy: usize,
+
+    /// allocate (n divceil 0x1000) immediately
+    prealloc: usize,
 };
 
 pub const AddressSpace = struct {
@@ -173,10 +181,14 @@ pub const AddressSpace = struct {
         switch (src) {
             .borrow, .owned => std.debug.panic("TODO: borrow and owned mapping", .{}),
             .bytes => |bytes| {
-                self.mapBytes(dst, bytes, _flags);
+                self.mapImmediate(dst, bytes.len, _flags);
+                self.writeBytes(dst, bytes, null) catch unreachable;
             },
             .lazy => |bytes| {
                 self.mapLazy(dst, bytes, _flags);
+            },
+            .prealloc => |bytes| {
+                self.mapImmediate(dst, bytes, _flags);
             },
         }
 
@@ -185,50 +197,65 @@ pub const AddressSpace = struct {
         }
     }
 
-    fn mapBytes(self: Self, _dst: pmem.VirtAddr, _src: []const u8, _flags: Entry) void {
-        var dst = _dst;
+    /// write a slice of bytes `_src` (from the current address space)
+    /// into possibly inactive address space `self`
+    /// at address `_dst`
+    ///
+    /// if `perms` is not `null`, URWX permissions get checked using that permission level
+    pub fn writeBytes(self: Self, dst: pmem.VirtAddr, _src: []const u8, perms: ?Privilege) error{NotMapped}!void {
+        _ = perms; // autofix
+        // TODO: use memcpy under some specific cases (mapped & `perms == .kernel`)
+
         var src = _src;
 
-        var flags = Entry{
-            .present = 1,
-            .writeable = _flags.writeable,
-            .user_accessible = _flags.user_accessible,
-        };
+        const whole_pages_start = std.mem.alignForward(usize, dst.raw, 0x1000);
 
-        const aligned = std.mem.alignForward(usize, dst.raw, 0x1000);
-        if (aligned != dst.raw) {
-            // map the first partial page
-            const beg = aligned - dst.raw;
-            const zeroes_beg = 0x1000 - beg;
+        // write the first non-whole page
+        if (whole_pages_start != dst.raw) {
+            const n = @min(whole_pages_start - dst.raw, src.len);
+            const paddr = self.translate(dst) orelse return error.NotMapped;
 
-            const new_table: *[0x1000]u8 = @ptrCast(allocZeroedTable());
-            const src_len = @min(src.len, beg);
-            std.mem.copyForwards(u8, new_table[zeroes_beg..], src[0..src_len]);
-            const allocated = pmem.HhdmAddr.new(new_table).toPhys().toPage();
-            flags.page_index = allocated.page_index;
-
-            const vaddr = pmem.VirtAddr.new(aligned - 0x1000);
-            self.mapSingle(vaddr, flags);
-
-            dst = pmem.VirtAddr.new(aligned);
-            src = src[src_len..];
+            const dst_bytes = paddr.toHhdm().ptr([*]u8);
+            std.mem.copyForwards(u8, dst_bytes[0..n], src[0..n]);
+            src = src[n..];
         }
 
-        const n_pages = std.mem.alignForward(usize, src.len, 0x1000) >> 12;
-
-        log.info("mapping {d} pages", .{n_pages});
-        for (0..n_pages) |i| {
+        // write the middle whole pages
+        const whole_pages = src.len >> 12;
+        for (0..whole_pages) |i| {
             const offs = i * 0x1000;
-            const vaddr = pmem.VirtAddr.new(dst.raw + offs);
-            const new_table: *[0x1000]u8 = @ptrCast(allocZeroedTable());
+            const paddr = self.translate(pmem.VirtAddr.new(whole_pages_start + offs)) orelse return error.NotMapped;
 
-            const len = @min(src.len - offs, 0x1000);
-            std.mem.copyForwards(u8, new_table[0..], src[offs .. offs + len]);
-            const allocated = pmem.HhdmAddr.new(new_table).toPhys().toPage();
-            flags.page_index = allocated.page_index;
-
-            self.mapSingle(vaddr, flags);
+            const dst_bytes = paddr.toHhdm().ptr([*]u8);
+            std.mem.copyForwards(u8, dst_bytes[0..0x1000], src[offs .. offs + 0x1000]);
         }
+
+        // write the last non-whole page
+        const last_page_size = src.len & ((1 << 12) - 1);
+        if (last_page_size != 0) {
+            const offs = whole_pages * 0x1000;
+            const paddr = self.translate(pmem.VirtAddr.new(whole_pages_start + offs)) orelse return error.NotMapped;
+
+            const dst_bytes = paddr.toHhdm().ptr([*]u8);
+            std.mem.copyForwards(u8, dst_bytes[0..last_page_size], src[offs .. offs + last_page_size]);
+        }
+    }
+
+    pub fn readBytes(self: Self, dst: pmem.VirtAddr, _src: []const u8, perms: ?Privilege) error{NotMapped}!void {
+        _ = self; // autofix
+        _ = dst; // autofix
+        _ = _src; // autofix
+        _ = perms; // autofix
+        // TODO:
+        std.debug.panic("TODO", .{});
+    }
+
+    pub fn copyBytes(self: Self, dst: pmem.VirtAddr, _src: []const u8, perms: ?Privilege) error{NotMapped}!void {
+        _ = self; // autofix
+        _ = dst; // autofix
+        _ = _src; // autofix
+        _ = perms; // autofix
+        std.debug.panic("TODO", .{});
     }
 
     fn mapLazy(self: Self, dst: pmem.VirtAddr, bytes: usize, _flags: Entry) void {
@@ -246,6 +273,26 @@ pub const AddressSpace = struct {
         for (0..n_pages) |i| {
             const offs = i * 0x1000;
             const vaddr = pmem.VirtAddr.new(first_page + offs);
+            self.mapSingle(vaddr, flags);
+        }
+    }
+
+    fn mapImmediate(self: Self, dst: pmem.VirtAddr, bytes: usize, _flags: Entry) void {
+        var flags = Entry{
+            .present = 1,
+            .writeable = _flags.writeable,
+            .user_accessible = _flags.user_accessible,
+        };
+
+        const first_page = std.mem.alignBackward(usize, dst.raw, 0x1000);
+        const zeroes_beg = dst.raw - first_page;
+        const n_pages = std.mem.alignForward(usize, zeroes_beg + bytes, 0x1000) >> 12;
+
+        log.info("mapping {d} pages", .{n_pages});
+        for (0..n_pages) |i| {
+            const offs = i * 0x1000;
+            const vaddr = pmem.VirtAddr.new(first_page + offs);
+            flags.page_index = pmem.HhdmAddr.new(allocZeroedTable()).toPhys().toPage().page_index;
             self.mapSingle(vaddr, flags);
         }
     }
@@ -348,7 +395,7 @@ pub const AddressSpace = struct {
         }
     }
 
-    pub fn translate(self: *Self, vaddr: pmem.VirtAddr) ?pmem.PhysAddr {
+    pub fn translate(self: Self, vaddr: pmem.VirtAddr) ?pmem.PhysAddr {
         const levels = vaddr.levels();
 
         const l4entries = self.root();
