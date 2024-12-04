@@ -323,7 +323,7 @@ pub fn find(pid: usize) *Context {
 }
 
 pub fn currentPid() ?usize {
-    return cpu_table[arch.cpu_id()].current_pid.?;
+    return cpu_table[arch.cpu_id()].current_pid;
 }
 
 pub fn current() *Context {
