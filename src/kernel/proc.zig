@@ -447,3 +447,37 @@ var cpu_table: [32]Cpu = undefined;
 var ready_r_lock: spin.Mutex = .{};
 var ready_w_lock: spin.Mutex = .{};
 var ready: ring.AtomicRing(usize, [256]usize) = ring.AtomicRing(usize, [256]usize).init(undefined, 256);
+
+//
+
+pub fn isInLowerHalf(comptime T: type, bottom: usize, length: usize) abi.sys.Error!void {
+    const byte_len = @mulWithOverflow(@sizeOf(T), length);
+    if (byte_len[1] != 0) {
+        return error.InvalidAddress;
+    }
+
+    const top = @addWithOverflow(bottom, byte_len[0]);
+    if (top[1] != 0) {
+        return error.InvalidAddress;
+    }
+
+    if (top[0] >= 0x8000_0000_0000) {
+        return error.InvalidAddress;
+    }
+}
+
+pub fn untrustedSlice(comptime T: type, bottom: usize, length: usize) abi.sys.Error![]T {
+    try isInLowerHalf(T, bottom, length);
+
+    // pagefaults from the kernel touching lower half should just kill the process,
+    // way faster and easier than testing for access
+    // (no supervisor pages are ever mapped to lower half)
+
+    const first: [*]T = @ptrFromInt(bottom);
+    return first[0..length];
+}
+
+pub fn untrustedPtr(comptime T: type, ptr: usize) abi.sys.Error!*T {
+    const slice = try untrustedSlice(T, ptr, 1);
+    return &slice[0];
+}

@@ -199,7 +199,7 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
                 return;
             }
 
-            const msg = untrustedSlice(u8, trap.arg0, trap.arg1) catch |err| {
+            const msg = proc.untrustedSlice(u8, trap.arg0, trap.arg1) catch |err| {
                 log.warn("user space sent a bad syscall: {}", .{err});
                 return;
             };
@@ -210,7 +210,7 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
             proc.yield(current_pid, trap);
         },
         .futex_wait => {
-            const value: *std.atomic.Value(usize) = untrustedPtr(std.atomic.Value(usize), trap.arg0) catch {
+            const value: *std.atomic.Value(usize) = proc.untrustedPtr(std.atomic.Value(usize), trap.arg0) catch {
                 trap.syscall_id = abi.sys.encodeError(error.PermissionDenied);
                 return;
             };
@@ -219,7 +219,7 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
             proc.futex_wait(value, expected, trap);
         },
         .futex_wake => {
-            const value: *std.atomic.Value(usize) = untrustedPtr(std.atomic.Value(usize), trap.arg0) catch {
+            const value: *std.atomic.Value(usize) = proc.untrustedPtr(std.atomic.Value(usize), trap.arg0) catch {
                 trap.syscall_id = abi.sys.encodeError(error.PermissionDenied);
                 return;
             };
@@ -232,15 +232,15 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
             proc.futex_wake(value, n);
         },
         .ring_setup => {
-            const submission_queue: *abi.sys.SubmissionQueue = untrustedPtr(abi.sys.SubmissionQueue, trap.arg0) catch {
+            const submission_queue: *abi.sys.SubmissionQueue = proc.untrustedPtr(abi.sys.SubmissionQueue, trap.arg0) catch {
                 trap.syscall_id = abi.sys.encodeError(error.PermissionDenied);
                 return;
             };
-            const completion_queue: *abi.sys.CompletionQueue = untrustedPtr(abi.sys.CompletionQueue, trap.arg1) catch {
+            const completion_queue: *abi.sys.CompletionQueue = proc.untrustedPtr(abi.sys.CompletionQueue, trap.arg1) catch {
                 trap.syscall_id = abi.sys.encodeError(error.PermissionDenied);
                 return;
             };
-            const completion_futex: *std.atomic.Value(usize) = untrustedPtr(std.atomic.Value(usize), trap.arg2) catch {
+            const completion_futex: *std.atomic.Value(usize) = proc.untrustedPtr(std.atomic.Value(usize), trap.arg2) catch {
                 trap.syscall_id = abi.sys.encodeError(error.PermissionDenied);
                 return;
             };
@@ -271,7 +271,7 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
                 return;
             }
 
-            const name = untrustedSlice(u8, trap.arg0, trap.arg1) catch |err| {
+            const name = proc.untrustedSlice(u8, trap.arg0, trap.arg1) catch |err| {
                 log.warn("user space sent a bad syscall: {}", .{err});
                 return;
             };
@@ -314,11 +314,11 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
             // path_buf: *[4096]u8,
 
             const handle: usize = trap.arg0;
-            const request: *abi.sys.ProtocolRequest = untrustedPtr(abi.sys.ProtocolRequest, trap.arg1) catch |err| {
+            const request: *abi.sys.ProtocolRequest = proc.untrustedPtr(abi.sys.ProtocolRequest, trap.arg1) catch |err| {
                 log.warn("user space sent a bad syscall: {}", .{err});
                 return;
             };
-            const path_buf: *[4096]u8 = untrustedPtr([4096]u8, trap.arg2) catch |err| {
+            const path_buf: *[4096]u8 = proc.untrustedPtr([4096]u8, trap.arg2) catch |err| {
                 log.warn("user space sent a bad syscall: {}", .{err});
                 return;
             };
@@ -336,7 +336,7 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
         },
         .system_map => {
             const target_pid = trap.arg0;
-            const maps = untrustedSlice(abi.sys.Map, trap.arg1, trap.arg2) catch |err| {
+            const maps = proc.untrustedSlice(abi.sys.Map, trap.arg1, trap.arg2) catch |err| {
                 log.warn("user space sent a bad syscall: {}", .{err});
                 return;
             };
@@ -348,7 +348,7 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
             const vmm = &target_proc.addr_space.?;
 
             for (maps) |map| {
-                isInLowerHalf(u8, map.dst, map.src.length()) catch |err| {
+                proc.isInLowerHalf(u8, map.dst, map.src.length()) catch |err| {
                     log.warn("user space sent a bad syscall: {}", .{err});
                     return;
                 };
@@ -396,36 +396,4 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
         },
         // else => std.debug.panic("TODO", .{}),
     }
-}
-
-pub fn isInLowerHalf(comptime T: type, bottom: usize, length: usize) abi.sys.Error!void {
-    const byte_len = @mulWithOverflow(@sizeOf(T), length);
-    if (byte_len[1] != 0) {
-        return error.InvalidAddress;
-    }
-
-    const top = @addWithOverflow(bottom, byte_len[0]);
-    if (top[1] != 0) {
-        return error.InvalidAddress;
-    }
-
-    if (top[0] >= 0x8000_0000_0000) {
-        return error.InvalidAddress;
-    }
-}
-
-pub fn untrustedSlice(comptime T: type, bottom: usize, length: usize) abi.sys.Error![]T {
-    try isInLowerHalf(T, bottom, length);
-
-    // pagefaults from the kernel touching lower half should just kill the process,
-    // way faster and easier than testing for access
-    // (no supervisor pages are ever mapped to lower half)
-
-    const first: [*]T = @ptrFromInt(bottom);
-    return first[0..length];
-}
-
-pub fn untrustedPtr(comptime T: type, ptr: usize) abi.sys.Error!*T {
-    const slice = try untrustedSlice(T, ptr, 1);
-    return &slice[0];
 }
