@@ -128,6 +128,7 @@ pub fn popReady() ?usize {
 
 var lazy_wait_vmm = lazy.Lazy(vmem.AddressSpace).new();
 
+/// NOTE: might or might not switch to another VMM
 pub fn popWait() usize {
     var first = true;
     while (true) {
