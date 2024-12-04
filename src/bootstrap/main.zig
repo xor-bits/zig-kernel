@@ -125,6 +125,7 @@ fn initfsd() noreturn {
     }) catch unreachable;
 
     const result = io_ring.wait();
+    log.info("result={any}", .{abi.sys.decode(result.result)});
     const path_len = result.result;
 
     const path = buf[0..path_len];

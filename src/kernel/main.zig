@@ -148,7 +148,18 @@ fn main() noreturn {
 
 pub const Protocol = struct {
     name: [16:0]u8,
-    sleepers: proc.Pipe(void, 16) = .{},
+    open: ?RingEntry = null,
+};
+
+pub const RingEntry = struct {
+    // used in the CompletionEntry
+    user_data: u64,
+    // which process has the correct io ring
+    process_id: usize,
+    // which io ring in the process
+    ring_id: usize,
+    // recurring, ...
+    flags: usize,
 };
 
 var known_protos: struct {
@@ -275,6 +286,8 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
                     .name = "initfs".* ++ std.mem.zeroes([10]u8),
                 };
                 known_protos.initfs_lock.unlock();
+                // FIXME:
+                current_proc.protos_n += 1;
                 current_proc.protos[0] = &known_protos.initfs.?;
                 trap.syscall_id = 1;
             } else if (std.mem.eql(u8, name, "fs")) {
@@ -287,6 +300,7 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
                     .name = "fs".* ++ std.mem.zeroes([14]u8),
                 };
                 known_protos.fs_lock.unlock();
+                current_proc.protos_n += 1;
                 current_proc.protos[0] = &known_protos.fs.?;
                 trap.syscall_id = 1;
             } else {
@@ -384,7 +398,7 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
     }
 }
 
-fn isInLowerHalf(comptime T: type, bottom: usize, length: usize) error{ Overflow, IsHigherHalf }!void {
+pub fn isInLowerHalf(comptime T: type, bottom: usize, length: usize) error{ Overflow, IsHigherHalf }!void {
     const byte_len = @mulWithOverflow(@sizeOf(T), length);
     if (byte_len[1] != 0) {
         return error.Overflow;
@@ -400,7 +414,7 @@ fn isInLowerHalf(comptime T: type, bottom: usize, length: usize) error{ Overflow
     }
 }
 
-fn untrustedSlice(comptime T: type, bottom: usize, length: usize) error{ Overflow, IsHigherHalf }![]T {
+pub fn untrustedSlice(comptime T: type, bottom: usize, length: usize) error{ Overflow, IsHigherHalf }![]T {
     try isInLowerHalf(T, bottom, length);
 
     // pagefaults from the kernel touching lower half should just kill the process,
@@ -411,7 +425,7 @@ fn untrustedSlice(comptime T: type, bottom: usize, length: usize) error{ Overflo
     return first[0..length];
 }
 
-fn untrustedPtr(comptime T: type, ptr: usize) error{ Overflow, IsHigherHalf }!*T {
+pub fn untrustedPtr(comptime T: type, ptr: usize) error{ Overflow, IsHigherHalf }!*T {
     const slice = try untrustedSlice(T, ptr, 1);
     return &slice[0];
 }

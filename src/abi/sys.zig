@@ -150,7 +150,7 @@ pub const SubmissionQueue = ring.AtomicRing(SubmissionEntry, [*]SubmissionEntry)
 
 /// io operation
 pub const SubmissionEntry = extern struct {
-    user_data: u64,
+    user_data: u64 = 0,
     offset: usize,
     buffer: [*]u8,
     buffer_len: u32,
@@ -167,9 +167,8 @@ pub const CompletionQueue = ring.AtomicRing(CompletionEntry, [*]CompletionEntry)
 
 /// io operation result
 pub const CompletionEntry = extern struct {
-    user_data: u64,
+    user_data: u64 = 0,
     result: usize,
-    flags: u32,
 };
 
 pub const ProtocolRequest = extern struct {

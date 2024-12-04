@@ -48,6 +48,12 @@ pub const Context = struct {
         cq: *abi.sys.CompletionQueue,
         futex: pmem.PhysAddr,
     } = undefined,
+
+    const Self = @This();
+
+    fn pidOf(self: *Self) usize {
+        return (@intFromPtr(self) - @intFromPtr(&proc_table)) / @sizeOf(Self);
+    }
 };
 
 pub const Cpu = struct {
@@ -178,7 +184,7 @@ pub fn tick() void {
 }
 
 pub fn ioJobs(proc: *Context) void {
-    for (proc.queues[0..proc.queues_n]) |queue| {
+    for (proc.queues[0..proc.queues_n], 0..) |queue, ring_id| {
         if (!queue.cq.canWrite(1)) {
             continue;
         }
@@ -186,32 +192,76 @@ pub fn ioJobs(proc: *Context) void {
         // FIXME: validate the queue memory and slots instead of just trusting it
         const submission: abi.sys.SubmissionEntry = queue.sq.pop() orelse continue;
 
+        var result: ?abi.sys.CompletionEntry = null;
         switch (submission.opcode) {
             .vfs_proto_next_open => {
-                log.info("got vfs_proto_next_open", .{});
+                result = resultToCompletionEntry(
+                    vfs_proto_next_open(proc, ring_id, submission),
+                );
             },
             .open => {
-                log.info("got open", .{});
+                result = resultToCompletionEntry(
+                    open(proc, ring_id, submission),
+                );
             },
-            else => queue.cq.push(.{
+            else => result = .{
                 .user_data = submission.user_data,
                 .result = abi.sys.encode(error.InvalidArgument),
-                .flags = 0,
-            }) catch {},
+            },
         }
 
-        const futex = queue.futex.toHhdm().ptr(*std.atomic.Value(usize));
-        _ = futex.fetchAdd(1, .release);
-        futex_wake_external(queue.futex, 1);
+        if (result) |_result| {
+            // this is why shadowing is useful
+            var __result = _result;
+            __result.user_data = submission.user_data;
+            queue.cq.push(__result) catch {};
+
+            const futex = queue.futex.toHhdm().ptr(*std.atomic.Value(usize));
+            _ = futex.fetchAdd(1, .release);
+            futex_wake_external(queue.futex, 1);
+        }
     }
 }
 
-fn vfs_proto_next_open(proc: *Context, req: abi.sys.SubmissionEntry) abi.sys.Error!usize {
-    if (req.fd == 0 or req.fd - 1 >= proc.protos_n) {
+fn resultToCompletionEntry(v: abi.sys.Error!?abi.sys.CompletionEntry) ?abi.sys.CompletionEntry {
+    return v catch |e| {
+        return .{
+            .result = abi.sys.encodeError(e),
+        };
+    };
+}
+
+fn vfs_proto_next_open(proc: *Context, ring_id: usize, req: abi.sys.SubmissionEntry) abi.sys.Error!?abi.sys.CompletionEntry {
+    if (req.fd <= 0 or req.fd - 1 >= proc.protos_n) {
+        log.warn("fd out of bounds", .{});
         return error.BadFileDescriptor;
     }
 
-    proc.protos[req.fd - 1];
+    const fd: usize = @intCast(req.fd);
+    const proto: *main.Protocol = proc.protos[fd - 1] orelse {
+        log.warn("fd not assigned", .{});
+        return error.BadFileDescriptor;
+    };
+
+    proto.open = .{
+        .user_data = req.user_data,
+        .process_id = proc.pidOf(),
+        .ring_id = ring_id,
+        .flags = 1,
+    };
+
+    return null;
+}
+
+fn open(proc: *Context, ring_id: usize, req: abi.sys.SubmissionEntry) abi.sys.Error!?abi.sys.CompletionEntry {
+    _ = req; // autofix
+    _ = proc; // autofix
+    _ = ring_id; // autofix
+
+    // const path = try main.untrustedSlice(u8, @intFromPtr(req.buffer), req.buffer_len);
+    // log.info("open `{s}`", .{path});
+
+    return null;
 }
 
 const FutexTree = tree.RbTree(pmem.PhysAddr, usize, struct {
