@@ -193,7 +193,7 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
                 return;
             };
 
-            log.info("{s}", .{std.mem.trimRight(u8, msg, "\n")});
+            log.info("(pid={d}) {s}", .{ current_pid, std.mem.trimRight(u8, msg, "\n") });
         },
         .yield => {
             proc.yield(current_pid, trap);
