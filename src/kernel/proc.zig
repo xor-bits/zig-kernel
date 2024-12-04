@@ -2,12 +2,13 @@ const std = @import("std");
 const abi = @import("abi");
 
 pub const arch = @import("arch.zig");
-pub const spin = @import("spin.zig");
-pub const vmem = @import("vmem.zig");
+pub const lazy = @import("lazy.zig");
+pub const main = @import("main.zig");
 pub const pmem = @import("pmem.zig");
 pub const ring = abi.ring;
-pub const main = @import("main.zig");
+pub const spin = @import("spin.zig");
 pub const tree = @import("tree.zig");
+pub const vmem = @import("vmem.zig");
 
 //
 
@@ -125,6 +126,8 @@ pub fn popReady() ?usize {
     return ready.pop();
 }
 
+var lazy_wait_vmm = lazy.Lazy(vmem.AddressSpace).new();
+
 pub fn popWait() usize {
     while (true) {
         if (popReady()) |next| {
@@ -132,6 +135,13 @@ pub fn popWait() usize {
         }
 
         @setCold(true);
+
+        const vmm = lazy_wait_vmm.waitOrInit(struct {
+            pub fn init() vmem.AddressSpace {
+                return vmem.AddressSpace.new();
+            }
+        });
+        vmm.switchTo();
 
         // halt the CPU until there is something to do
         // FIXME: switch to a temporary VMM and release the current process
@@ -153,8 +163,6 @@ pub fn ioJobs(proc: *Context) void {
         if (!queue.cq.canWrite(1)) {
             continue;
         }
-
-        std.log.info("found queue", .{});
 
         // FIXME: validate the queue memory and slots instead of just trusting it
         const submission: abi.sys.SubmissionEntry = queue.sq.pop() orelse continue;
