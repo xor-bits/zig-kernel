@@ -3,9 +3,10 @@ const builtin = @import("builtin");
 
 const acpi = @import("acpi.zig");
 const arch = @import("arch.zig");
-const pmem = @import("pmem.zig");
-const lazy = @import("lazy.zig");
 const hpet = @import("hpet.zig");
+const lazy = @import("lazy.zig");
+const pmem = @import("pmem.zig");
+const proc = @import("proc.zig");
 
 const log = std.log.scoped(.apic);
 
@@ -155,12 +156,11 @@ fn measure_apic_timer_speed(lapic: *volatile LocalApicRegs) u32 {
 
 pub fn spurious(_: *const anyopaque) void {
     eoi();
-    log.info("SPURIOUS INTERRUPT", .{});
 }
 
 pub fn timer(_: *const anyopaque) void {
     eoi();
-    log.info("TIMER INTERRUPT", .{});
+    proc.tick();
 }
 
 fn eoi() void {

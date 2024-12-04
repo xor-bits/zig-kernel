@@ -171,6 +171,10 @@ pub fn nextPid(now_pid: usize) ?usize {
     return next_pid;
 }
 
+pub fn tick() void {
+    log.info("TIMER INTERRUPT", .{});
+}
+
 pub fn ioJobs(proc: *Context) void {
     for (proc.queues[0..proc.queues_n]) |queue| {
         if (!queue.cq.canWrite(1)) {
