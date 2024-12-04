@@ -40,6 +40,11 @@ pub fn asNanos(t: u64) u128 {
     return @as(u128, t) * regs.caps_and_id.counter_period_femtoseconds / 1_000_000;
 }
 
+pub fn elapsedNanos(from_then: u64) u128 {
+    const regs = hpet_regs_lazy.get().?.*;
+    return @as(u128, regs.main_counter_value - from_then) * regs.caps_and_id.counter_period_femtoseconds / 1_000_000;
+}
+
 //
 
 var hpet_regs_lazy = lazy.Lazy(*volatile HpetRegs).new();

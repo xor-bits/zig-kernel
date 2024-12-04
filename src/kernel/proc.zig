@@ -157,7 +157,7 @@ pub fn popWait() usize {
         // FIXME: switch to a temporary VMM and release the current process
         const before_wait = hpet.now();
         arch.x86_64.ints.wait();
-        const elapsed: f64 = @floatFromInt(hpet.asNanos(hpet.now() - before_wait));
+        const elapsed: f64 = @floatFromInt(hpet.elapsedNanos(before_wait));
         log.info("hlt lasted {d}ms", .{elapsed / 1_000_000.0});
     }
 }
