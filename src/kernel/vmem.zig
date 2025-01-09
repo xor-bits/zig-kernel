@@ -480,10 +480,6 @@ pub const AddressSpace = struct {
             }
 
             fn printRange(from: @This(), to: pmem.VirtAddr) void {
-                if (from.base.raw > 0xffff_8000_3000_0000 and from.base.raw < 0xffff_ffff_8000_0000) {
-                    return;
-                }
-
                 log.info("{s}R{s}{s} [ 0x{x:0>16}..0x{x:0>16} ] => 0x{x:0>16}", .{
                     if (from.user) "U" else "-",
                     if (from.write) "W" else "-",

@@ -5,28 +5,55 @@ const ring = @import("ring.zig");
 //
 
 pub const Id = enum(usize) {
+    /// print debug logs to serial output
     log = 0x1,
+
+    /// give up the CPU for other tasks
     yield = 0x2,
+
+    /// wait on physical memory, depending on the value
     futex_wait = 0x3,
+
+    /// wake waiters on physical memory
     futex_wake = 0x4,
 
+    /// deprecated
     ring_setup = 0x801,
+    /// deprecated
     ring_wait = 0x802,
-
+    /// deprecated
     vfs_proto_create = 0x1001,
+    /// deprecated
     vfs_proto_next = 0x1002,
 
-    // system_fork = 0x8000_0001,
-    system_map = 0x8000_0002,
-    system_exec = 0x8000_0003,
+    /// fork the virtual address space, making both copy on write
+    ///
+    /// only system processes can use this
+    system_fork = 0x8000_0001,
+
+    /// make a ref counted copy of the virtual address space, this is for threads
+    ///
+    /// only system processes can use this
+    system_spawn = 0x8000_0002,
+
+    /// map memory to virtual address space
+    ///
+    /// only system processes can use this
+    system_map = 0x8000_0003,
+
+    /// mark process as ready to run again
+    ///
+    /// only system processes can use this
+    system_exec = 0x8000_0004,
 };
 
 pub const Error = error{
     InvalidAddress,
-    BadFileDescriptor,
     PermissionDenied,
-    InternalError,
+    BadFileDescriptor,
+    InvalidProtocol,
     InvalidArgument,
+    InternalError,
 
     UnknownError,
 
@@ -46,6 +73,7 @@ pub fn encodeError(err: Error) usize {
         error.InvalidAddress => 1,
         error.PermissionDenied => 12,
         error.BadFileDescriptor => 16,
+        error.InvalidProtocol => 20,
         error.InvalidArgument => 23,
         error.InternalError => 30,
         error.UnknownError => std.debug.panic("unknown error shouldn't be encoded", .{}),
@@ -61,6 +89,7 @@ pub fn decode(v: usize) Error!usize {
         1 => error.InvalidAddress,
         12 => error.PermissionDenied,
         16 => error.BadFileDescriptor,
+        20 => error.InvalidProtocol,
         23 => error.InvalidArgument,
         30 => error.InternalError,
         else => return error.UnknownError,
@@ -241,6 +270,8 @@ pub const MapSource = extern struct {
 
     data: extern union {
         /// allocate pages immediately, and write bytes into them
+        ///
+        /// whole pages are filled with zeroes before writing
         bytes: extern struct {
             first: [*]const u8,
             len: usize,

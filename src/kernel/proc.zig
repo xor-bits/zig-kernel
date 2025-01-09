@@ -41,9 +41,10 @@ pub const Context = struct {
     protos_n: usize = 0,
     protos: [1]?*main.Protocol = .{null},
 
-    // unhandled: ?abi.sys.SubmissionEntry,
     queues_n: usize = 0,
     queues: [1]struct {
+        // FIXME: lock
+        unhandled: ?abi.sys.SubmissionEntry = null,
         sq: *abi.sys.SubmissionQueue,
         cq: *abi.sys.CompletionQueue,
         futex: pmem.PhysAddr,
@@ -184,13 +185,17 @@ pub fn tick() void {
 }
 
 pub fn ioJobs(proc: *Context) void {
-    for (proc.queues[0..proc.queues_n], 0..) |queue, ring_id| {
+    for (proc.queues[0..proc.queues_n], 0..) |*queue, ring_id| {
         if (!queue.cq.canWrite(1)) {
             continue;
         }
 
         // FIXME: validate the queue memory and slots instead of just trusting it
-        const submission: abi.sys.SubmissionEntry = queue.sq.pop() orelse continue;
+        const submission: abi.sys.SubmissionEntry = if (queue.unhandled) |unhandled|
+            unhandled
+        else
+            queue.sq.pop() orelse continue;
+        queue.unhandled = null;
 
         var result: ?abi.sys.CompletionEntry = null;
         switch (submission.opcode) {
@@ -244,22 +249,85 @@ fn vfs_proto_next_open(proc: *Context, ring_id: usize, req: abi.sys.SubmissionEn
     };
 
     proto.open = .{
-        .user_data = req.user_data,
+        .req = req,
         .process_id = proc.pidOf(),
         .ring_id = ring_id,
-        .flags = 1,
     };
 
     return null;
 }
 
 fn open(proc: *Context, ring_id: usize, req: abi.sys.SubmissionEntry) abi.sys.Error!?abi.sys.CompletionEntry {
-    _ = req; // autofix
-    _ = proc; // autofix
-    _ = ring_id; // autofix
+    if (req.buffer_len > 0x1000 + 3 + 16) {
+        return error.InvalidArgument;
+    }
 
-    // const path = try main.untrustedSlice(u8, @intFromPtr(req.buffer), req.buffer_len);
-    // log.info("open `{s}`", .{path});
+    var path: []const u8 = try untrustedSlice(u8, @intFromPtr(req.buffer), req.buffer_len);
+
+    var proto: []const u8 = "fs";
+    if (std.mem.indexOf(u8, path[0..@min(19, path.len)], "://")) |split_idx| {
+        proto = path[0..split_idx];
+        path = path[split_idx + 3 ..];
+    }
+
+    var protocol_maybe: ?*main.Protocol = null;
+    if (std.mem.eql(u8, proto, "fs")) {
+        main.known_protos.fs_lock.lock();
+        defer main.known_protos.fs_lock.unlock();
+
+        protocol_maybe = if (main.known_protos.fs) |*s| s else null;
+    } else if (std.mem.eql(u8, proto, "initfs")) {
+        main.known_protos.initfs_lock.lock();
+        defer main.known_protos.initfs_lock.unlock();
+
+        protocol_maybe = if (main.known_protos.initfs) |*s| s else null;
+    }
+
+    if (path.len > 0x1000) {
+        return error.InvalidArgument;
+    }
+
+    const protocol = protocol_maybe orelse return error.InvalidProtocol;
+    protocol.lock.lock();
+    defer protocol.lock.unlock();
+
+    const target_req = protocol.open orelse return error.InvalidProtocol;
+    protocol.open = null;
+
+    const target_proc = find(target_req.process_id);
+    const target_ring = &target_proc.queues[target_req.ring_id];
+
+    const slot: abi.ring.Slot = target_ring.cq.marker.acquire(1) orelse {
+        proc.queues[ring_id].unhandled = req;
+        log.info("unhandled", .{});
+        return null;
+    };
+    target_proc.addr_space.?.writeBytes(
+        pmem.VirtAddr.new(@intFromPtr(target_req.req.buffer)),
+        path,
+        .user,
+    ) catch {
+        // FIXME: segfault the target proc
+    };
+    const completion = abi.sys.CompletionEntry{
+        .user_data = target_req.req.user_data,
+        .result = path.len,
+    };
+    const completion_bytes: [*]const u8 = @ptrCast(&completion);
+    target_proc.addr_space.?.writeBytes(
+        pmem.VirtAddr.new(@intFromPtr(target_ring.cq.storage)),
+        completion_bytes[0..@sizeOf(abi.sys.CompletionEntry)],
+        .user,
+    ) catch {
+        // FIXME: segfault the target proc
+    };
+
+    target_ring.cq.marker.produce(slot);
+    const futex = target_ring.futex.toHhdm().ptr(*std.atomic.Value(usize));
+    _ = futex.fetchAdd(1, .release);
+    futex_wake_external(target_ring.futex, 1);
+
+    log.info("open `{s}` in `{s}`", .{ path, proto });
 
     return null;
 }

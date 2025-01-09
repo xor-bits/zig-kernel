@@ -147,22 +147,21 @@ fn main() noreturn {
 }
 
 pub const Protocol = struct {
+    lock: spin.Mutex = .{},
     name: [16:0]u8,
     open: ?RingEntry = null,
 };
 
 pub const RingEntry = struct {
-    // used in the CompletionEntry
-    user_data: u64,
     // which process has the correct io ring
     process_id: usize,
     // which io ring in the process
     ring_id: usize,
-    // recurring, ...
-    flags: usize,
+
+    req: abi.sys.SubmissionEntry,
 };
 
-var known_protos: struct {
+pub var known_protos: struct {
     initfs_lock: spin.Mutex = .{},
     initfs: ?Protocol = null,
     fs_lock: spin.Mutex = .{},
@@ -204,7 +203,13 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
                 return;
             };
 
-            log.info("(pid={d}) {s}", .{ current_pid, std.mem.trimRight(u8, msg, "\n") });
+            var lines = std.mem.splitScalar(u8, msg, '\n');
+            while (lines.next()) |line| {
+                if (line.len == 0) {
+                    continue;
+                }
+                log.info("[ pid={d} ]: {s}", .{ current_pid, line });
+            }
         },
         .yield => {
             proc.yield(current_pid, trap);
@@ -333,6 +338,12 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
             };
 
             _ = .{ request, path_buf, proto };
+        },
+        .system_fork => {
+            std.debug.panic("TODO: system_fork", .{});
+        },
+        .system_spawn => {
+            std.debug.panic("TODO: system_fork", .{});
         },
         .system_map => {
             const target_pid = trap.arg0;
