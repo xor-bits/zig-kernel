@@ -14,6 +14,7 @@ const spin = @import("spin.zig");
 const util = @import("util.zig");
 const vmem = @import("vmem.zig");
 const tree = @import("tree.zig");
+const slab = @import("slab.zig");
 
 //
 
