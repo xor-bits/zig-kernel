@@ -2,6 +2,7 @@ pub const std = @import("std");
 
 pub const spin = @import("spin.zig");
 pub const pmem = @import("pmem.zig");
+pub const util = @import("util.zig");
 
 const log = std.log.scoped(.slab);
 
@@ -15,24 +16,42 @@ pub const SlabAllocator = struct {
     // TODO: keep track of allocated slabs and the allocated object counts in them
     // so that slabs can be freed back into some cache of slabs, or back to the pmem alloc
 
+    /// page allocation counter
+    counter: std.atomic.Value(usize),
+
     lists: [9]FreeList,
 
     const Self = @This();
 
     pub fn init() Self {
-        return Self{
+        return .{
+            .counter = std.atomic.Value(usize).init(0),
             .lists = .{
-                .{ .mutex = spin.Mutex.new(), .next = null },
-                .{ .mutex = spin.Mutex.new(), .next = null },
-                .{ .mutex = spin.Mutex.new(), .next = null },
-                .{ .mutex = spin.Mutex.new(), .next = null },
-                .{ .mutex = spin.Mutex.new(), .next = null },
-                .{ .mutex = spin.Mutex.new(), .next = null },
-                .{ .mutex = spin.Mutex.new(), .next = null },
-                .{ .mutex = spin.Mutex.new(), .next = null },
-                .{ .mutex = spin.Mutex.new(), .next = null },
+                FreeList.init(),
+                FreeList.init(),
+                FreeList.init(),
+                FreeList.init(),
+                FreeList.init(),
+                FreeList.init(),
+                FreeList.init(),
+                FreeList.init(),
+                FreeList.init(),
             },
         };
+    }
+
+    pub fn print_stats(self: *Self) void {
+        const pages = self.counter.load(.acquire);
+
+        log.info("Slab allocator stats:", .{});
+        log.info(" - total memory: {}B", .{util.NumberPrefix(usize, .binary).new(pages * 0x1000)});
+
+        for (self.lists[0..], 0..) |*l, i| {
+            log.info(" - [{}B]: {} pcs", .{
+                util.NumberPrefix(usize, .binary).new(@as(usize, 8) << @as(u6, @truncate(i))),
+                l.stats(),
+            });
+        }
     }
 
     const List = struct {
@@ -86,7 +105,7 @@ pub const SlabAllocator = struct {
             std.debug.panic("TODO: big allocs", .{});
         };
 
-        return correct_list.list.pop(correct_list.size);
+        return correct_list.list.pop(correct_list.size, &self.counter);
     }
 
     pub fn resize(self: *Self, old_size: usize, new_size: usize, ptr_align: usize) bool {
@@ -107,16 +126,33 @@ pub const SlabAllocator = struct {
 };
 
 const FreeList = struct {
+    // object allocation counter
+    counter: std.atomic.Value(usize),
+
     mutex: spin.Mutex,
     next: ?*Node,
 
     const Self = @This();
+
+    pub fn init() Self {
+        return .{
+            .counter = std.atomic.Value(usize).init(0),
+            .mutex = spin.Mutex.new(),
+            .next = null,
+        };
+    }
+
+    pub fn stats(self: *Self) usize {
+        return self.counter.load(.acquire);
+    }
 
     pub fn try_pop(self: *Self) ?[*]u8 {
         self.mutex.lock();
         defer self.mutex.unlock();
 
         if (self.next) |next| {
+            // return the immediately available usable object
+            _ = self.counter.fetchAdd(1, .monotonic);
             self.next = next.next;
             return @ptrCast(next);
         } else {
@@ -124,7 +160,7 @@ const FreeList = struct {
         }
     }
 
-    pub fn pop(self: *Self, obj_size: usize) ?[*]u8 {
+    pub fn pop(self: *Self, obj_size: usize, counter: *std.atomic.Value(usize)) ?[*]u8 {
         if (self.try_pop()) |next| {
             return next;
         }
@@ -137,6 +173,7 @@ const FreeList = struct {
 
         const slab: [*]u8 = @ptrCast(pmem.page_allocator.create(pmem.Page) catch return null);
         const obj_count: usize = @sizeOf(pmem.Page) / obj_size;
+        _ = counter.fetchAdd(1, .monotonic);
 
         self.mutex.lock();
         defer self.mutex.unlock();
@@ -147,6 +184,7 @@ const FreeList = struct {
         }
 
         // return the first one
+        _ = self.counter.fetchAdd(1, .monotonic);
         return @ptrCast(slab);
     }
 
