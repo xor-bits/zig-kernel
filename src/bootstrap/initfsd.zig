@@ -23,10 +23,22 @@ pub fn run() noreturn {
     const io_ring = abi.IoRing.init(64, heap.allocator()) catch unreachable;
     defer io_ring.deinit();
 
-    const proto = abi.sys.vfs_proto_create("initfs") catch |err| {
-        std.debug.panic("failed to create VFS proto: {}", .{err});
+    // FIXME: syscall to allocate fds or maybe control fds from userspace too
+
+    io_ring.submit(.{
+        .user_data = 0,
+        .opcode = .proto_create,
+        .flags = 0,
+        .fd = 0,
+        .buffer = @constCast(@ptrCast("initfs")), // wont be written to
+        .buffer_len = 6,
+        .offset = 0,
+    }) catch unreachable;
+
+    var result = io_ring.wait();
+    const proto = abi.sys.decode(result.result) catch |err| {
+        std.debug.panic("failed to create a protocol: {}", .{err});
     };
-    log.info("vfs proto handle: {!}", .{proto});
 
     var buf: [0x1000]u8 = undefined;
 
@@ -40,8 +52,8 @@ pub fn run() noreturn {
         .offset = 0,
     }) catch unreachable;
 
-    const result = io_ring.wait();
-    log.info("result={any}", .{abi.sys.decode(result.result)});
+    result = io_ring.wait();
+    log.info("next_open result={any}", .{abi.sys.decode(result.result)});
     const path_len = result.result;
 
     const path = buf[0..path_len];

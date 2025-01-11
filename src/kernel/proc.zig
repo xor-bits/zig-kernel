@@ -200,9 +200,14 @@ pub fn ioJobs(proc: *Context) void {
 
         var result: ?abi.sys.CompletionEntry = null;
         switch (submission.opcode) {
+            .proto_create => {
+                result = resultToCompletionEntry(
+                    proto_create(proc, ring_id, submission),
+                );
+            },
             .proto_next_open => {
                 result = resultToCompletionEntry(
-                    vfs_proto_next_open(proc, ring_id, submission),
+                    proto_next_open(proc, ring_id, submission),
                 );
             },
             .open => {
@@ -237,7 +242,57 @@ fn resultToCompletionEntry(v: abi.sys.Error!?abi.sys.CompletionEntry) ?abi.sys.C
     };
 }
 
-fn vfs_proto_next_open(proc: *Context, ring_id: usize, req: abi.sys.SubmissionEntry) abi.sys.Error!?abi.sys.CompletionEntry {
+fn proto_create(proc: *Context, _: usize, req: abi.sys.SubmissionEntry) abi.sys.Error!?abi.sys.CompletionEntry {
+    const name = try untrustedSlice(u8, @intFromPtr(req.buffer), @as(usize, req.buffer_len));
+
+    if (name.len > 16) {
+        log.warn("vfs proto name too long", .{});
+        return abi.sys.Error.InvalidArgument;
+    }
+
+    // FIXME: use a map
+    if (std.mem.eql(u8, name, "initfs")) {
+        main.known_protos.initfs_lock.lock();
+        defer main.known_protos.initfs_lock.unlock();
+        if (main.known_protos.initfs != null) {
+            log.warn("vfs proto already registered", .{});
+            return abi.sys.Error.InternalError;
+        }
+        main.known_protos.initfs = .{
+            .name = "initfs".* ++ std.mem.zeroes([10]u8),
+        };
+
+        // FIXME:
+        const fd = proc.protos_n;
+        proc.protos_n += 1;
+        proc.protos[fd] = &main.known_protos.initfs.?;
+
+        log.info("initfs registered", .{});
+
+        return abi.sys.CompletionEntry{ .result = fd + 1 };
+    } else if (std.mem.eql(u8, name, "fs")) {
+        main.known_protos.fs_lock.lock();
+        defer main.known_protos.fs_lock.unlock();
+        if (main.known_protos.fs != null) {
+            log.warn("vfs proto already registered", .{});
+            return abi.sys.Error.InternalError;
+        }
+        main.known_protos.fs = .{
+            .name = "fs".* ++ std.mem.zeroes([14]u8),
+        };
+
+        const fd = proc.protos_n;
+        proc.protos_n += 1;
+        proc.protos[fd] = &main.known_protos.fs.?;
+
+        return abi.sys.CompletionEntry{ .result = fd + 1 };
+    } else {
+        log.warn("FIXME: other vfs proto name", .{});
+        return abi.sys.Error.InternalError;
+    }
+}
+
+fn proto_next_open(proc: *Context, ring_id: usize, req: abi.sys.SubmissionEntry) abi.sys.Error!?abi.sys.CompletionEntry {
     if (req.fd <= 0 or req.fd - 1 >= proc.protos_n) {
         log.warn("fd out of bounds", .{});
         return error.BadFileDescriptor;

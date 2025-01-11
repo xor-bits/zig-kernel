@@ -17,14 +17,8 @@ pub const Id = enum(usize) {
     /// wake waiters on physical memory
     futex_wake = 0x4,
 
-    /// deprecated
+    /// create new io ring
     ring_setup = 0x801,
-    /// deprecated
-    ring_wait = 0x802,
-    /// deprecated
-    vfs_proto_create = 0x1001,
-    /// deprecated
-    vfs_proto_next = 0x1002,
 
     /// fork the virtual address space, making both copy on write
     ///
@@ -189,6 +183,7 @@ pub const SubmissionEntry = extern struct {
     buffer_len: u32,
     fd: i16,
     opcode: enum(u8) {
+        proto_create,
         proto_next_open,
         open,
         _,
