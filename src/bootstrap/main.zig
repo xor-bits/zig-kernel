@@ -26,7 +26,14 @@ fn main(initfs: []const u8) !void {
 }
 
 fn exec_elf(path: []const u8) !void {
-    var elf = std.io.fixedBufferStream(initfsd.openFile(path).?);
+    const elf_bytes = initfsd.openFile(path).?;
+    var elf = std.io.fixedBufferStream(elf_bytes);
+
+    var crc: u32 = 0;
+    for (elf_bytes) |b| {
+        crc = @addWithOverflow(crc, @as(u32, b))[0];
+    }
+    log.info("xor crc of `{s}` is {d}", .{ path, crc });
 
     var maps = std.ArrayList(abi.sys.Map).init(heap.allocator());
 
