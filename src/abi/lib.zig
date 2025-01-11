@@ -114,6 +114,15 @@ pub const IoRing = struct {
         return self.inner.completions.pop();
     }
 
+    pub fn spin(self: *const Self) sys.CompletionEntry {
+        while (true) {
+            if (self.next()) |_next| {
+                return _next;
+            }
+            sys.yield();
+        }
+    }
+
     pub fn wait(self: *const Self) sys.CompletionEntry {
         while (true) {
             const now = self.inner.futex.load(.acquire);

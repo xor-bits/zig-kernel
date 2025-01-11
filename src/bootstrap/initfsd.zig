@@ -35,7 +35,9 @@ pub fn run() noreturn {
         .offset = 0,
     }) catch unreachable;
 
-    var result = io_ring.wait();
+    log.info("proto_create submit", .{});
+
+    var result = io_ring.spin();
     const proto = abi.sys.decode(result.result) catch |err| {
         std.debug.panic("failed to create a protocol: {}", .{err});
     };
@@ -51,8 +53,9 @@ pub fn run() noreturn {
         .buffer_len = 0x1000,
         .offset = 0,
     }) catch unreachable;
+    log.info("proto_next_open submit", .{});
 
-    result = io_ring.wait();
+    result = io_ring.spin();
     log.info("next_open result={any}", .{abi.sys.decode(result.result)});
     const path_len = result.result;
 

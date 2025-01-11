@@ -182,7 +182,10 @@ pub fn nextPid(now_pid: usize) ?usize {
 
 pub fn tick() void {
     log.info("TIMER INTERRUPT, pid={any}", .{currentPid()});
-    // ioJobs(current());
+
+    if (currentPid()) |current_pid| {
+        ioJobs(find(current_pid));
+    }
 }
 
 pub fn ioJobs(proc: *Context) void {
@@ -266,8 +269,6 @@ fn proto_create(proc: *Context, _: usize, req: abi.sys.SubmissionEntry) abi.sys.
         const fd = proc.protos_n;
         proc.protos_n += 1;
         proc.protos[fd] = &main.known_protos.initfs.?;
-
-        log.info("initfs registered", .{});
 
         return abi.sys.CompletionEntry{ .result = fd + 1 };
     } else if (std.mem.eql(u8, name, "fs")) {
