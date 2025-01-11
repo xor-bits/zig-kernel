@@ -189,7 +189,7 @@ pub const SubmissionEntry = extern struct {
     buffer_len: u32,
     fd: i16,
     opcode: enum(u8) {
-        vfs_proto_next_open,
+        proto_next_open,
         open,
         _,
     },

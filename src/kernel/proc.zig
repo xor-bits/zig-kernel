@@ -200,7 +200,7 @@ pub fn ioJobs(proc: *Context) void {
 
         var result: ?abi.sys.CompletionEntry = null;
         switch (submission.opcode) {
-            .vfs_proto_next_open => {
+            .proto_next_open => {
                 result = resultToCompletionEntry(
                     vfs_proto_next_open(proc, ring_id, submission),
                 );

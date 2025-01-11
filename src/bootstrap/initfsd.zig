@@ -32,7 +32,7 @@ pub fn run() noreturn {
 
     io_ring.submit(.{
         .user_data = 0,
-        .opcode = .vfs_proto_next_open,
+        .opcode = .proto_next_open,
         .flags = 0,
         .fd = @truncate(@as(i128, proto)),
         .buffer = &buf,
