@@ -241,13 +241,43 @@ pub const AddressSpace = struct {
         }
     }
 
-    pub fn readBytes(self: Self, dst: pmem.VirtAddr, _src: []const u8, perms: ?Privilege) error{NotMapped}!void {
-        _ = self; // autofix
-        _ = dst; // autofix
-        _ = _src; // autofix
+    pub fn readBytes(self: Self, _dst: []u8, src: pmem.VirtAddr, perms: ?Privilege) error{NotMapped}!void {
         _ = perms; // autofix
-        // TODO:
-        std.debug.panic("TODO", .{});
+        // TODO: use memcpy under some specific cases (mapped & `perms == .kernel`)
+
+        var dst = _dst;
+
+        const whole_pages_start = std.mem.alignForward(usize, src.raw, 0x1000);
+
+        // read the first non-whole page
+        if (whole_pages_start != src.raw) {
+            const n = @min(whole_pages_start - src.raw, dst.len);
+            const paddr = self.translate(src) orelse return error.NotMapped;
+
+            const src_bytes = paddr.toHhdm().ptr([*]u8);
+            std.mem.copyForwards(u8, dst[0..n], src_bytes[0..n]);
+            dst = dst[n..];
+        }
+
+        // read the middle whole pages
+        const whole_pages = dst.len >> 12;
+        for (0..whole_pages) |i| {
+            const offs = i * 0x1000;
+            const paddr = self.translate(pmem.VirtAddr.new(whole_pages_start + offs)) orelse return error.NotMapped;
+
+            const src_bytes = paddr.toHhdm().ptr([*]u8);
+            std.mem.copyForwards(u8, src_bytes[0..0x1000], dst[offs .. offs + 0x1000]);
+        }
+
+        // read the last non-whole page
+        const last_page_size = dst.len & ((1 << 12) - 1);
+        if (last_page_size != 0) {
+            const offs = whole_pages * 0x1000;
+            const paddr = self.translate(pmem.VirtAddr.new(whole_pages_start + offs)) orelse return error.NotMapped;
+
+            const src_bytes = paddr.toHhdm().ptr([*]u8);
+            std.mem.copyForwards(u8, src_bytes[0..last_page_size], dst[offs .. offs + last_page_size]);
+        }
     }
 
     pub fn copyBytes(self: Self, dst: pmem.VirtAddr, _src: []const u8, perms: ?Privilege) error{NotMapped}!void {

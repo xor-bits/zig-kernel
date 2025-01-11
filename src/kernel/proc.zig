@@ -182,6 +182,7 @@ pub fn nextPid(now_pid: usize) ?usize {
 
 pub fn tick() void {
     log.info("TIMER INTERRUPT, pid={any}", .{currentPid()});
+    // ioJobs(current());
 }
 
 pub fn ioJobs(proc: *Context) void {
@@ -295,39 +296,42 @@ fn open(proc: *Context, ring_id: usize, req: abi.sys.SubmissionEntry) abi.sys.Er
     protocol.open = null;
 
     const target_proc = find(target_req.process_id);
+
+    log.info("open `{s}` in `{s}`", .{ path, proto });
+
+    target_proc.addr_space.?.switchTo();
+    defer proc.addr_space.?.switchTo();
+
     const target_ring = &target_proc.queues[target_req.ring_id];
+
+    // FIXME: massive security bugs from trusting the user given buffer
+    // the buffer could easily point to kernel memory,
+    // letting the user process write any data over the kernel code
 
     const slot: abi.ring.Slot = target_ring.cq.marker.acquire(1) orelse {
         proc.queues[ring_id].unhandled = req;
         log.info("unhandled", .{});
         return null;
     };
-    target_proc.addr_space.?.writeBytes(
-        pmem.VirtAddr.new(@intFromPtr(target_req.req.buffer)),
-        path,
+    proc.addr_space.?.readBytes(
+        target_req.req.buffer[0..path.len],
+        pmem.VirtAddr.new(@intFromPtr(path.ptr)),
         .user,
     ) catch {
         // FIXME: segfault the target proc
+
     };
     const completion = abi.sys.CompletionEntry{
         .user_data = target_req.req.user_data,
         .result = path.len,
     };
-    const completion_bytes: [*]const u8 = @ptrCast(&completion);
-    target_proc.addr_space.?.writeBytes(
-        pmem.VirtAddr.new(@intFromPtr(target_ring.cq.storage)),
-        completion_bytes[0..@sizeOf(abi.sys.CompletionEntry)],
-        .user,
-    ) catch {
-        // FIXME: segfault the target proc
-    };
-
+    target_ring.cq.storage[slot.first] = completion;
     target_ring.cq.marker.produce(slot);
+
+    // wake the target process if it was waiting on the ring futex
     const futex = target_ring.futex.toHhdm().ptr(*std.atomic.Value(usize));
     _ = futex.fetchAdd(1, .release);
     futex_wake_external(target_ring.futex, 1);
-
-    log.info("open `{s}` in `{s}`", .{ path, proto });
 
     return null;
 }

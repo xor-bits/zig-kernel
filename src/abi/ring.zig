@@ -60,7 +60,7 @@ pub const Marker = extern struct {
 
         return Slot{
             .first = write,
-            .len = avail - 1,
+            .len = @max(avail, 1) - 1,
         };
     }
 
