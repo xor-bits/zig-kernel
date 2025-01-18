@@ -2,6 +2,7 @@ const std = @import("std");
 
 pub const sys = @import("sys.zig");
 pub const ring = @import("ring.zig");
+pub const io = @import("io.zig");
 
 //
 
@@ -88,13 +89,16 @@ pub const IoRing = struct {
         self.inner.completions = sys.CompletionQueue.init(completions.ptr, completions.len);
         self.inner.futex = .{ .raw = 0 };
 
+        return self;
+    }
+
+    /// tell the kernel to start listening for submissions
+    pub fn setup(self: *const Self) !void {
         try sys.ringSetup(
             &self.inner.submissions,
             &self.inner.completions,
             &self.inner.futex,
         );
-
-        return self;
     }
 
     pub fn deinit(self: *const Self) void {
@@ -107,29 +111,77 @@ pub const IoRing = struct {
     }
 
     pub fn submit(self: *const Self, entry: sys.SubmissionEntry) error{Full}!void {
-        try self.inner.submissions.push(entry);
+        try push(sys.SubmissionEntry, &self.inner.submissions, entry);
     }
 
-    pub fn next(self: *const Self) ?sys.CompletionEntry {
-        return self.inner.completions.pop();
+    pub fn next_completion(self: *const Self) ?sys.CompletionEntry {
+        return next(sys.CompletionEntry, &self.inner.completions);
     }
 
-    pub fn spin(self: *const Self) sys.CompletionEntry {
-        while (true) {
-            if (self.next()) |_next| {
-                return _next;
-            }
-            sys.yield();
-        }
+    pub fn spin_completion(self: *const Self) sys.CompletionEntry {
+        return spin(sys.CompletionEntry, &self.inner.completions);
     }
 
-    pub fn wait(self: *const Self) sys.CompletionEntry {
-        while (true) {
-            const now = self.inner.futex.load(.acquire);
-            if (self.next()) |_next| {
-                return _next;
-            }
-            sys.futex_wait(&self.inner.futex.raw, now);
-        }
+    pub fn wait_completion(self: *const Self) sys.CompletionEntry {
+        return wait(sys.CompletionEntry, &self.inner.completions, &self.inner.futex);
+    }
+
+    pub fn complete(self: *const Self, entry: sys.CompletionEntry) error{Full}!void {
+        try push(sys.CompletionEntry, &self.inner.completions, entry);
+    }
+
+    pub fn next_submission(self: *const Self) ?sys.SubmissionEntry {
+        return next(sys.SubmissionEntry, &self.inner.submissions);
+    }
+
+    pub fn spin_submission(self: *const Self) sys.SubmissionEntry {
+        return spin(sys.SubmissionEntry, &self.inner.submissions);
+    }
+
+    pub fn wait_submission(self: *const Self) sys.SubmissionEntry {
+        return wait(sys.SubmissionEntry, &self.inner.submissions, &self.inner.futex);
     }
 };
+
+fn push(
+    comptime T: type,
+    queue: *ring.AtomicRing(T, [*]T),
+    entry: T,
+) error{Full}!void {
+    try queue.push(entry);
+}
+
+fn next(
+    comptime T: type,
+    queue: *ring.AtomicRing(T, [*]T),
+    // futex: *std.atomic.Value(usize),
+) ?T {
+    return queue.pop();
+}
+
+fn spin(
+    comptime T: type,
+    queue: *ring.AtomicRing(T, [*]T),
+    // futex: *std.atomic.Value(usize),
+) T {
+    while (true) {
+        if (next(T, queue)) |_next| {
+            return _next;
+        }
+        sys.yield();
+    }
+}
+
+fn wait(
+    comptime T: type,
+    queue: *ring.AtomicRing(T, [*]T),
+    futex: *std.atomic.Value(usize),
+) T {
+    while (true) {
+        const now = futex.load(.acquire);
+        if (next(T, queue)) |_next| {
+            return _next;
+        }
+        sys.futex_wait(&futex.raw, now);
+    }
+}

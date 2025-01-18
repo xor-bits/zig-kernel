@@ -246,12 +246,18 @@ fn resultToCompletionEntry(v: abi.sys.Error!?abi.sys.CompletionEntry) ?abi.sys.C
 }
 
 fn proto_create(proc: *Context, _: usize, req: abi.sys.SubmissionEntry) abi.sys.Error!?abi.sys.CompletionEntry {
-    const name = try untrustedSlice(u8, @intFromPtr(req.buffer), @as(usize, req.buffer_len));
-
-    if (name.len > 16) {
-        log.warn("vfs proto name too long", .{});
+    if (req.buffer_len != @sizeOf(abi.io.ProtoCreate.Buffer)) {
         return abi.sys.Error.InvalidArgument;
     }
+
+    if (@intFromPtr(req.buffer) % @alignOf(abi.io.ProtoCreate.Buffer) != 0) {
+        return abi.sys.Error.InvalidArgument;
+    }
+
+    const buffer = @as(*abi.io.ProtoCreate.Buffer, @alignCast(@ptrCast(req.buffer))).*;
+    const name = std.mem.sliceTo(&buffer.protocol, 0);
+
+    log.info("creating proto: `{s}`", .{name});
 
     // FIXME: use a map
     if (std.mem.eql(u8, name, "initfs")) {
