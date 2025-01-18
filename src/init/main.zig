@@ -29,7 +29,7 @@ export fn _start() linksection(".text._start") callconv(.C) noreturn {
         .offset = 0,
     }) catch unreachable;
 
-    const r = io_ring.wait();
+    const r = io_ring.wait_submission();
     log.info("result={any}", .{abi.sys.decode(r.result)});
     log.info("{any}", .{r});
 

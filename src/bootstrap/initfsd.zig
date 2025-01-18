@@ -20,27 +20,24 @@ pub fn init(initfs: []const u8) !void {
 }
 
 pub fn run() noreturn {
+    // io ring for sending requests elsewhere
     const io_ring = abi.IoRing.init(64, heap.allocator()) catch unreachable;
     defer io_ring.deinit();
+    io_ring.setup() catch unreachable;
 
-    // FIXME: syscall to allocate fds or maybe control fds from userspace too
+    // io ring for receiving protocol requests
+    const proto_io_ring = abi.IoRing.init(128, heap.allocator()) catch unreachable;
+    defer proto_io_ring.deinit();
 
-    io_ring.submit(.{
-        .user_data = 0,
-        .opcode = .proto_create,
-        .flags = 0,
-        .fd = 0,
-        .buffer = @constCast(@ptrCast("initfs")), // wont be written to
-        .buffer_len = 6,
-        .offset = 0,
-    }) catch unreachable;
-
-    log.info("proto_create submit", .{});
-
-    var result = io_ring.spin();
-    const proto = abi.sys.decode(result.result) catch |err| {
+    // initialize the initfs protocol and wait for it to be created
+    abi.io.sync(abi.io.ProtoCreate.newRing(
+        "initfs" ++ std.mem.zeroes([10:0]u8),
+        &proto_io_ring,
+    ), &io_ring) catch |err| {
         std.debug.panic("failed to create a protocol: {}", .{err});
     };
+
+    proto_io_ring.wait_submission();
 
     var buf: [0x1000]u8 = undefined;
 
@@ -48,19 +45,21 @@ pub fn run() noreturn {
         .user_data = 0,
         .opcode = .proto_next_open,
         .flags = 0,
-        .fd = @truncate(@as(i128, proto)),
+        .fd = @truncate(proto),
         .buffer = &buf,
         .buffer_len = 0x1000,
         .offset = 0,
     }) catch unreachable;
     log.info("proto_next_open submit", .{});
 
-    result = io_ring.spin();
+    const result = io_ring.spin_submission();
     log.info("next_open result={any}", .{abi.sys.decode(result.result)});
     const path_len = result.result;
 
     const path = buf[0..path_len];
     log.info("got initfs open request: {s}", .{path});
+
+    // openFile(path);
 
     while (true) {
         abi.sys.yield();

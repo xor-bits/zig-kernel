@@ -173,6 +173,8 @@ pub fn system_exec(pid: usize, ip: usize, sp: usize) void {
 //     }
 // }
 
+pub const Fd = u16;
+
 pub const SubmissionQueue = ring.AtomicRing(SubmissionEntry, [*]SubmissionEntry);
 
 /// io operation
@@ -181,7 +183,7 @@ pub const SubmissionEntry = extern struct {
     offset: usize,
     buffer: [*]u8,
     buffer_len: u32,
-    fd: i16,
+    fd: Fd,
     opcode: enum(u8) {
         proto_create,
         proto_next_open,
