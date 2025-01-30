@@ -238,6 +238,7 @@ fn createBootstrapBin(
     const bootstrap_bin_step = b.addObjCopy(bootstrap_elf_step.getEmittedBin(), .{
         .format = .bin,
     });
+    bootstrap_bin_step.step.dependOn(&bootstrap_elf_step.step);
 
     const install_bootstrap_bin = b.addInstallFile(bootstrap_bin_step.getOutput(), "bootstrap.bin");
     b.getInstallStep().dependOn(&install_bootstrap_bin.step);
