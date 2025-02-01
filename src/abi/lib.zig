@@ -168,8 +168,14 @@ fn spin(
         if (next(T, queue)) |_next| {
             return _next;
         }
-        sys.yield();
+
+        yield_cold();
     }
+}
+
+fn yield_cold() void {
+    @setCold(true);
+    sys.yield();
 }
 
 fn wait(
@@ -182,6 +188,12 @@ fn wait(
         if (next(T, queue)) |_next| {
             return _next;
         }
-        sys.futex_wait(&futex.raw, now);
+
+        futex_wait_cold(&futex.raw, now);
     }
+}
+
+fn futex_wait_cold(value: *const usize, expected: usize) void {
+    @setCold(true);
+    sys.futex_wait(value, expected);
 }
