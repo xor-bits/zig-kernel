@@ -18,28 +18,33 @@ pub const ProtoCreate = struct {
     pub const Return = abi.sys.Error!void;
 
     pub const Buffer = extern struct {
-        protocol: [16:0]u8,
+        protocol: [16]u8,
         submission_queue: *abi.sys.SubmissionQueue,
         completion_queue: *abi.sys.CompletionQueue,
         futex: *std.atomic.Value(usize),
+        buffers: [*]u8,
+        buffer_size: usize,
     };
 
     const Self = @This();
 
-    pub fn new(val: Buffer) Self {
-        return Self{
-            .buffer = val,
-        };
+    pub fn new(comptime name: []const u8, proto_ring: *const abi.IoRing, buffers: []u8) Self {
+        const pad: usize = 16 - name.len;
+        const protocol = name ++ std.mem.zeroes([pad:0]u8);
+
+        return newRaw(.{
+            .protocol = protocol.*,
+            .submission_queue = &proto_ring.inner.submissions,
+            .completion_queue = &proto_ring.inner.completions,
+            .futex = &proto_ring.inner.futex,
+            .buffers = buffers.ptr,
+            .buffer_size = buffers.len,
+        });
     }
 
-    pub fn newRing(name: *const [16:0]u8, proto_ring: *const abi.IoRing) Self {
+    pub fn newRaw(val: Buffer) Self {
         return Self{
-            .buffer = .{
-                .protocol = name.*,
-                .submission_queue = &proto_ring.inner.submissions,
-                .completion_queue = &proto_ring.inner.completions,
-                .futex = &proto_ring.inner.futex,
-            },
+            .buffer = val,
         };
     }
 

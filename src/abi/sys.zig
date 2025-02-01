@@ -47,11 +47,38 @@ pub const Id = enum(usize) {
 
 pub const Error = error{
     InvalidAddress,
+    NoSuchProcess,
+    OutOfVirtualMemory,
+    OutOfMemory,
+    InvalidAlloc,
+    InvalidUtf8,
+
+    NotFound,
+    AlreadyExists,
+    NotADirectory,
+    NotAFile,
+    FilesystemError,
     PermissionDenied,
+    UnexpectedEOF,
+    Interrupted,
+    WriteZero,
     BadFileDescriptor,
-    InvalidProtocol,
+
+    InvalidFlags,
+
+    InvalidDomain,
+    InvalidType,
+    UnknownProtocol,
+
+    ConnectionRefused,
+    Closed,
+
     InvalidArgument,
-    InternalError,
+
+    IsAPipe,
+    NotASocket,
+
+    Unimplemented,
 
     UnknownError,
 
@@ -69,11 +96,39 @@ pub fn encode(result: Error!usize) usize {
 pub fn encodeError(err: Error) usize {
     return @bitCast(-@as(isize, switch (err) {
         error.InvalidAddress => 1,
+        error.NoSuchProcess => 2,
+        error.OutOfVirtualMemory => 3,
+        error.OutOfMemory => 4,
+        error.InvalidAlloc => 5,
+        error.InvalidUtf8 => 6,
+
+        error.NotFound => 7,
+        error.AlreadyExists => 8,
+        error.NotADirectory => 9,
+        error.NotAFile => 10,
+        error.FilesystemError => 11,
         error.PermissionDenied => 12,
+        error.UnexpectedEOF => 13,
+        error.Interrupted => 14,
+        error.WriteZero => 15,
         error.BadFileDescriptor => 16,
-        error.InvalidProtocol => 20,
+
+        error.InvalidFlags => 17,
+
+        error.InvalidDomain => 18,
+        error.InvalidType => 19,
+        error.UnknownProtocol => 20,
+
+        error.ConnectionRefused => 21,
+        error.Closed => 22,
+
         error.InvalidArgument => 23,
-        error.InternalError => 30,
+
+        error.IsAPipe => 24,
+        error.NotASocket => 25,
+
+        error.Unimplemented => 26,
+
         error.UnknownError => std.debug.panic("unknown error shouldn't be encoded", .{}),
     }));
 }
@@ -85,11 +140,39 @@ pub fn decode(v: usize) Error!usize {
     return switch (err) {
         std.math.minInt(isize)...0 => v,
         1 => error.InvalidAddress,
+        2 => error.NoSuchProcess,
+        3 => error.OutOfVirtualMemory,
+        4 => error.OutOfMemory,
+        5 => error.InvalidAlloc,
+        6 => error.InvalidUtf8,
+
+        7 => error.NotFound,
+        8 => error.AlreadyExists,
+        9 => error.NotADirectory,
+        10 => error.NotAFile,
+        11 => error.FilesystemError,
         12 => error.PermissionDenied,
+        13 => error.UnexpectedEOF,
+        14 => error.Interrupted,
+        15 => error.WriteZero,
         16 => error.BadFileDescriptor,
-        20 => error.InvalidProtocol,
+
+        17 => error.InvalidFlags,
+
+        18 => error.InvalidDomain,
+        19 => error.InvalidType,
+        20 => error.UnknownProtocol,
+
+        21 => error.ConnectionRefused,
+        22 => error.Closed,
+
         23 => error.InvalidArgument,
-        30 => error.InternalError,
+
+        24 => error.IsAPipe,
+        25 => error.NotASocket,
+
+        26 => error.Unimplemented,
+
         else => return error.UnknownError,
     };
 }
@@ -200,7 +283,6 @@ pub const SubmissionEntry = extern struct {
     fd: Fd,
     opcode: enum(u8) {
         proto_create,
-        proto_next_open,
         open,
         _,
     },

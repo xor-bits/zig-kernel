@@ -17,6 +17,7 @@ export fn _start() linksection(".text._start") callconv(.C) noreturn {
 
     const io_ring = abi.IoRing.init(64, heap.allocator()) catch unreachable;
     defer io_ring.deinit();
+    io_ring.setup() catch unreachable;
 
     const path = "initfs:///sbin/init";
     io_ring.submit(.{
@@ -29,11 +30,11 @@ export fn _start() linksection(".text._start") callconv(.C) noreturn {
         .offset = 0,
     }) catch unreachable;
 
-    const r = io_ring.wait_submission();
+    const r = io_ring.wait_completion();
     log.info("result={any}", .{abi.sys.decode(r.result)});
     log.info("{any}", .{r});
 
     while (true) {
-        // abi.sys.yield();
+        abi.sys.yield();
     }
 }

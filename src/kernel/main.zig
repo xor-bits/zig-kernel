@@ -147,28 +147,6 @@ fn main() noreturn {
     proc.returnEarly(0);
 }
 
-pub const Protocol = struct {
-    lock: spin.Mutex = .{},
-    name: [16:0]u8,
-    open: ?RingEntry = null,
-};
-
-pub const RingEntry = struct {
-    // which process has the correct io ring
-    process_id: usize,
-    // which io ring in the process
-    ring_id: usize,
-
-    req: abi.sys.SubmissionEntry,
-};
-
-pub var known_protos: struct {
-    initfs_lock: spin.Mutex = .{},
-    initfs: ?Protocol = null,
-    fs_lock: spin.Mutex = .{},
-    fs: ?Protocol = null,
-} = .{};
-
 pub fn syscall(trap: *arch.SyscallRegs) void {
     const log = std.log.scoped(.syscall);
 
@@ -265,13 +243,13 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
                 trap.syscall_id = abi.sys.encodeError(error.PermissionDenied);
                 return;
             };
-            const futex = current_proc.addr_space.?.translate(pmem.VirtAddr.new(@intFromPtr(completion_futex))) orelse {
+            const futex = current_proc.addr_space.?.translate(pmem.VirtAddr.new(@intFromPtr(completion_futex)), true) orelse {
                 trap.syscall_id = abi.sys.encodeError(error.PermissionDenied);
                 return;
             };
 
             if (current_proc.queues_n >= current_proc.queues.len) {
-                trap.syscall_id = abi.sys.encodeError(abi.sys.Error.InternalError);
+                trap.syscall_id = abi.sys.encodeError(abi.sys.Error.Unimplemented);
                 return;
             }
             current_proc.queues[current_proc.queues_n] = .{

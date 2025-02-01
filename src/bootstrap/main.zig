@@ -26,7 +26,8 @@ fn main(initfs: []const u8) !void {
 }
 
 fn exec_elf(path: []const u8) !void {
-    const elf_bytes = initfsd.openFile(path).?;
+    const elf_file = initfsd.openFile(path).?;
+    const elf_bytes = initfsd.readFile(elf_file);
     var elf = std.io.fixedBufferStream(elf_bytes);
 
     var crc: u32 = 0;

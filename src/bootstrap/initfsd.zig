@@ -25,48 +25,64 @@ pub fn run() noreturn {
     defer io_ring.deinit();
     io_ring.setup() catch unreachable;
 
+    // each request has 8 pages of room for copying the request buffer data over
+    // all of them are lazy allocated, and lazy zeroed once handled
+    const multi_buffer = heap.allocator().alloc(abi.sys.Page, 128 * 8) catch unreachable;
+    defer heap.allocator().free(multi_buffer);
+
     // io ring for receiving protocol requests
     const proto_io_ring = abi.IoRing.init(128, heap.allocator()) catch unreachable;
     defer proto_io_ring.deinit();
 
     // initialize the initfs protocol and wait for it to be created
-    abi.io.sync(abi.io.ProtoCreate.newRing(
-        "initfs" ++ std.mem.zeroes([10:0]u8),
+    abi.io.sync(abi.io.ProtoCreate.new(
+        "initfs",
         &proto_io_ring,
+        @as([*]u8, @ptrCast(multi_buffer.ptr))[0 .. multi_buffer.len * 0x1000],
     ), &io_ring) catch |err| {
         std.debug.panic("failed to create a protocol: {}", .{err});
     };
 
-    proto_io_ring.wait_submission();
-
-    var buf: [0x1000]u8 = undefined;
-
-    io_ring.submit(.{
-        .user_data = 0,
-        .opcode = .proto_next_open,
-        .flags = 0,
-        .fd = @truncate(proto),
-        .buffer = &buf,
-        .buffer_len = 0x1000,
-        .offset = 0,
-    }) catch unreachable;
-    log.info("proto_next_open submit", .{});
-
-    const result = io_ring.spin_submission();
-    log.info("next_open result={any}", .{abi.sys.decode(result.result)});
-    const path_len = result.result;
-
-    const path = buf[0..path_len];
-    log.info("got initfs open request: {s}", .{path});
-
-    // openFile(path);
-
     while (true) {
-        abi.sys.yield();
+        log.info("waiting for request", .{});
+        const request = proto_io_ring.wait_submission();
+        handle_request(&request, &proto_io_ring);
     }
 }
 
-pub fn openFile(path: []const u8) ?[]const u8 {
+fn handle_request(req: *const abi.sys.SubmissionEntry, proto_io_ring: *const abi.IoRing) void {
+    // log.info("got request: {any}", .{req});
+
+    const result = switch (req.opcode) {
+        .open => handle_open(req),
+        else => 0,
+    };
+
+    proto_io_ring.complete(.{
+        .user_data = req.user_data,
+        .result = abi.sys.encode(result),
+    }) catch unreachable;
+
+    defer {
+        // mark the pages as lazy allocated again,
+        // effectively zeroing out the memory and freeing the physical allocation
+        const buffer_page_count = std.math.divCeil(usize, req.buffer_len, 0x1000) catch unreachable;
+        const buffer_pages: []abi.sys.Page = @as([*]abi.sys.Page, @alignCast(@ptrCast(req.buffer)))[0..buffer_page_count];
+        abi.sys.lazy_zero(buffer_pages);
+    }
+}
+
+fn handle_open(req: *const abi.sys.SubmissionEntry) abi.sys.Error!usize {
+    const path = req.buffer[0..req.buffer_len];
+    log.info("got open: {s}", .{path});
+
+    const file = openFile(path) orelse {
+        return abi.sys.Error.NotFound;
+    };
+    return file; // returns the file index as the file descriptor number
+}
+
+pub fn openFile(path: []const u8) ?usize {
     const Block = [512]u8;
     const len = initfs_tar.items.len / 512;
     const blocks_ptr: [*]const Block = @ptrCast(initfs_tar.items.ptr);
@@ -74,7 +90,8 @@ pub fn openFile(path: []const u8) ?[]const u8 {
 
     var i: usize = 0;
     while (i < len) {
-        const header: *const TarEntryHeader = @ptrCast(&blocks[i]);
+        const header_i = i;
+        const header: *const TarEntryHeader = @ptrCast(&blocks[header_i]);
         const size = std.fmt.parseInt(usize, std.mem.sliceTo(header.size[0..12], 0), 8) catch 0;
         const size_blocks = if (size % 512 == 0) size / 512 else size / 512 + 1;
 
@@ -85,46 +102,37 @@ pub fn openFile(path: []const u8) ?[]const u8 {
             return null;
         }
 
-        const bytes_blocks = blocks[i .. i + size_blocks];
-        const first_byte: [*]const u8 = @ptrCast(bytes_blocks);
-        const bytes = first_byte[0..size];
         i += size_blocks; // skip the file data
-
         if (header.ty != 0 and header.ty != '0') {
             // skip non files
             continue;
         }
 
-        // const this_path = header.name[0..100];
-        // var path_iter = std.mem.splitBackwardsScalar(u8, path, '/');
-        // const file = path_iter.next() orelse continue;
-        // const path = path_iter.rest();
-        // if (file.len == 0) {
-        //     // skip non files AGAIN, because tar
-        //     continue;
-        // }
-
         if (!pathEql(path, std.mem.sliceTo(header.name[0..100], 0))) {
             continue;
         }
 
-        return bytes;
-
-        // const blocks = if (size % 512 == 0) size / 512 else size / 512 + 1;
-
-        // var file = try std.ArrayList(u8).initCapacity(heap.allocator(), blocks * 512);
-        // for (0..blocks) |_| {
-        //     const block = block_iter.next() orelse return error.TarUnexpectedEof;
-        //     if (block.len == 512) {
-        //         file.appendSliceAssumeCapacity(block);
-        //     }
-        // }
-        // file.shrinkRetainingCapacity(size);
-
-        // log.info("{s}", .{file.items});
+        return header_i;
     }
 
     return null;
+}
+
+pub fn readFile(header_i: usize) []const u8 {
+    const Block = [512]u8;
+    const len = initfs_tar.items.len / 512;
+    const blocks_ptr: [*]const Block = @ptrCast(initfs_tar.items.ptr);
+    const blocks = blocks_ptr[0..len];
+
+    const header: *const TarEntryHeader = @ptrCast(&blocks[header_i]);
+    const size = std.fmt.parseInt(usize, std.mem.sliceTo(header.size[0..12], 0), 8) catch 0;
+    const size_blocks = if (size % 512 == 0) size / 512 else size / 512 + 1;
+
+    const bytes_blocks = blocks[header_i + 1 .. header_i + size_blocks + 1];
+    const first_byte: [*]const u8 = @ptrCast(bytes_blocks);
+    const bytes = first_byte[0..size];
+
+    return bytes;
 }
 
 fn pathEql(a: []const u8, b: []const u8) bool {

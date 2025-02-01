@@ -116,7 +116,21 @@ pub fn RbTree(
             }
         }
 
-        pub fn insert(self: *Self, inserting: *Node) ?*Node {
+        /// returns true only if it was new
+        pub fn insert(self: *Self, inserting: *Node) bool {
+            switch (self.entry(inserting.key)) {
+                .occupied => {
+                    return false;
+                },
+                .vacant => |node| {
+                    self.insertVacant(inserting, node);
+                    return true;
+                },
+            }
+        }
+
+        /// returns the old value
+        pub fn replace(self: *Self, inserting: *Node) void {
             switch (self.entry(inserting.key)) {
                 .occupied => |node| {
                     std.mem.swap(K, &node.key, &inserting.key);

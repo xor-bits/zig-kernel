@@ -216,7 +216,7 @@ pub const AddressSpace = struct {
         // write the first non-whole page
         if (whole_pages_start != dst.raw) {
             const n = @min(whole_pages_start - dst.raw, src.len);
-            const paddr = self.translate(dst) orelse return error.NotMapped;
+            const paddr = self.translate(dst, true) orelse return error.NotMapped;
 
             const dst_bytes = paddr.toHhdm().ptr([*]u8);
             std.mem.copyForwards(u8, dst_bytes[0..n], src[0..n]);
@@ -227,7 +227,7 @@ pub const AddressSpace = struct {
         const whole_pages = src.len >> 12;
         for (0..whole_pages) |i| {
             const offs = i * 0x1000;
-            const paddr = self.translate(pmem.VirtAddr.new(whole_pages_start + offs)) orelse return error.NotMapped;
+            const paddr = self.translate(pmem.VirtAddr.new(whole_pages_start + offs), true) orelse return error.NotMapped;
 
             const dst_bytes = paddr.toHhdm().ptr([*]u8);
             std.mem.copyForwards(u8, dst_bytes[0..0x1000], src[offs .. offs + 0x1000]);
@@ -237,7 +237,7 @@ pub const AddressSpace = struct {
         const last_page_size = src.len & ((1 << 12) - 1);
         if (last_page_size != 0) {
             const offs = whole_pages * 0x1000;
-            const paddr = self.translate(pmem.VirtAddr.new(whole_pages_start + offs)) orelse return error.NotMapped;
+            const paddr = self.translate(pmem.VirtAddr.new(whole_pages_start + offs), true) orelse return error.NotMapped;
 
             const dst_bytes = paddr.toHhdm().ptr([*]u8);
             std.mem.copyForwards(u8, dst_bytes[0..last_page_size], src[offs .. offs + last_page_size]);
@@ -255,7 +255,10 @@ pub const AddressSpace = struct {
         // read the first non-whole page
         if (whole_pages_start != src.raw) {
             const n = @min(whole_pages_start - src.raw, dst.len);
-            const paddr = self.translate(src) orelse return error.NotMapped;
+            // TODO: instead of triggering the lazy here,
+            // we could read from some global const zero page
+            // to avoid allocating
+            const paddr = self.translate(src, true) orelse return error.NotMapped;
 
             const src_bytes = paddr.toHhdm().ptr([*]u8);
             std.mem.copyForwards(u8, dst[0..n], src_bytes[0..n]);
@@ -266,7 +269,7 @@ pub const AddressSpace = struct {
         const whole_pages = dst.len >> 12;
         for (0..whole_pages) |i| {
             const offs = i * 0x1000;
-            const paddr = self.translate(pmem.VirtAddr.new(whole_pages_start + offs)) orelse return error.NotMapped;
+            const paddr = self.translate(pmem.VirtAddr.new(whole_pages_start + offs), true) orelse return error.NotMapped;
 
             const src_bytes = paddr.toHhdm().ptr([*]u8);
             std.mem.copyForwards(u8, src_bytes[0..0x1000], dst[offs .. offs + 0x1000]);
@@ -276,7 +279,7 @@ pub const AddressSpace = struct {
         const last_page_size = dst.len & ((1 << 12) - 1);
         if (last_page_size != 0) {
             const offs = whole_pages * 0x1000;
-            const paddr = self.translate(pmem.VirtAddr.new(whole_pages_start + offs)) orelse return error.NotMapped;
+            const paddr = self.translate(pmem.VirtAddr.new(whole_pages_start + offs), true) orelse return error.NotMapped;
 
             const src_bytes = paddr.toHhdm().ptr([*]u8);
             std.mem.copyForwards(u8, src_bytes[0..last_page_size], dst[offs .. offs + last_page_size]);
@@ -429,7 +432,7 @@ pub const AddressSpace = struct {
         }
     }
 
-    pub fn translate(self: Self, vaddr: pmem.VirtAddr) ?pmem.PhysAddr {
+    pub fn translate(self: Self, vaddr: pmem.VirtAddr, triggers_lazy: bool) ?pmem.PhysAddr {
         const levels = vaddr.levels();
 
         const l4entries = self.root();
@@ -459,7 +462,11 @@ pub const AddressSpace = struct {
         const l1entry = &l1entries[levels[0]];
 
         if (l1entry.present == 0) {
-            return null;
+            if (triggers_lazy and l1entry.lazy_alloc != 0) {
+                triggerLazyEntry(l1entry);
+            } else {
+                return null;
+            }
         }
 
         const page_start = pmem.PhysPage.new(l1entry.page_index).toPhys();
