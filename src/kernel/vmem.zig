@@ -424,11 +424,7 @@ pub const AddressSpace = struct {
         }
 
         if (l1entry.lazy_alloc != 0) {
-            const allocated = pmem.HhdmAddr.new(allocZeroedTable()).toPhys().toPage();
-            l1entry.page_index = allocated.page_index;
-            l1entry.lazy_alloc = 0;
-            l1entry.present = 1;
-            arch.x86_64.flush_tlb_addr(vaddr.raw);
+            triggerLazyEntry(l1entry);
             return error.Handled;
         }
     }
@@ -468,6 +464,15 @@ pub const AddressSpace = struct {
 
         const page_start = pmem.PhysPage.new(l1entry.page_index).toPhys();
         return pmem.PhysAddr.new(page_start.raw + vaddr.offset());
+    }
+
+    // trigger a lazy page to allocate,
+    // assumes the entry to be lazy
+    fn triggerLazyEntry(entry: *Entry) void {
+        const allocated = pmem.HhdmAddr.new(allocZeroedTable()).toPhys().toPage();
+        entry.page_index = allocated.page_index;
+        entry.lazy_alloc = 0;
+        entry.present = 1;
     }
 
     pub fn mapGlobals(self: Self) void {
