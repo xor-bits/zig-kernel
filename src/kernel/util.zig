@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const slab = @import("slab.zig");
+
 const Glyph = @import("font").Glyph;
 
 const log = std.log.scoped(.util);
@@ -262,3 +264,50 @@ const Pixel = struct {
     green: u8,
     blue: u8,
 };
+
+//
+
+pub fn Arc(comptime T: type) type {
+    return struct {
+        val: *Inner,
+
+        const Inner = struct {
+            val: T,
+            count: std.atomic.Value(usize),
+        };
+
+        const Self = @This();
+
+        pub fn init(val: T) std.mem.Allocator.Error!Self {
+            const new = try slab.global_allocator.allocator().create(Inner);
+            new.val = val;
+            new.count = .{ .raw = 0 };
+            return .{ .val = new };
+        }
+
+        pub fn clone(self: Self) !Self {
+            const old = self.val.count.fetchAdd(1, .monotonic);
+            if (old >= (std.math.maxInt(usize) >> 1)) {
+                @setCold(true);
+                return error.TooManyRefs;
+            }
+
+            return .{ .val = self.val };
+        }
+
+        pub fn deinit(self: Self) void {
+            const cnt = self.val.count.fetchSub(1, .release);
+            if (cnt >= 2) {
+                return;
+            }
+
+            @setCold(true);
+
+            slab.global_allocator.allocator().destroy(self.val);
+        }
+
+        pub fn get(self: Self) *T {
+            return &self.val.val;
+        }
+    };
+}

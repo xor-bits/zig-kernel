@@ -10,6 +10,9 @@ pub const ring = abi.ring;
 pub const spin = @import("spin.zig");
 pub const tree = @import("tree.zig");
 pub const vmem = @import("vmem.zig");
+pub const util = @import("util.zig");
+pub const slab = @import("slab.zig");
+pub const proto = @import("proto.zig");
 
 //
 
@@ -38,8 +41,8 @@ pub const Context = struct {
         futex: void,
     } = .yield,
 
-    protos_n: usize = 0,
-    protos: [1]?*main.Protocol = .{null},
+    // linked list of protocols owned by this
+    protos: ?*proto.Protocol = null,
 
     queues_n: usize = 0,
     queues: [1]struct {
@@ -47,8 +50,11 @@ pub const Context = struct {
         unhandled: ?abi.sys.SubmissionEntry = null,
         sq: *abi.sys.SubmissionQueue,
         cq: *abi.sys.CompletionQueue,
+        // FIXME: make sure the page doesnt get freed
         futex: pmem.PhysAddr,
     } = undefined,
+
+    // TODO: fd map
 
     const Self = @This();
 
@@ -208,11 +214,6 @@ pub fn ioJobs(proc: *Context) void {
                     proto_create(proc, ring_id, submission),
                 );
             },
-            .proto_next_open => {
-                result = resultToCompletionEntry(
-                    proto_next_open(proc, ring_id, submission),
-                );
-            },
             .open => {
                 result = resultToCompletionEntry(
                     open(proc, ring_id, submission),
@@ -235,6 +236,48 @@ pub fn ioJobs(proc: *Context) void {
             futex_wake_external(queue.futex, 1);
         }
     }
+
+    var next_proto = proc.protos;
+    while (next_proto) |protocol| {
+        next_proto = protocol.next;
+
+        const handler = &protocol.handler.?;
+
+        // FIXME: validate the queue memory and slots instead of just trusting it
+        const completion: abi.sys.CompletionEntry = if (handler.unhandled) |unhandled|
+            unhandled
+        else
+            protocol.handler.?.completion_queue.pop() orelse continue;
+        handler.unhandled = null;
+
+        // log.debug("got completion", .{});
+
+        if (handler.sources.remove(completion.user_data)) |source_node| {
+            const source_node_copy = source_node.*;
+            slab.global_allocator.allocator().destroy(source_node);
+
+            // FIXME: nothing if the proc is gone
+            const source_proc = find(source_node_copy.value.process_id);
+            // FIXME: nothing if the queue is gone
+            const source_queue = source_proc.queues[source_node_copy.value.queue_id];
+            // FIXME: use the queue without switching page maps
+            source_proc.addr_space.?.switchTo();
+            defer proc.addr_space.?.switchTo();
+            // the user process is responsible for not submitting too much crap
+            // without collecting the results
+            //
+            // the completion queue size is 2x the submission queue size,
+            // so well behaved apps dont have issues with results getting discarded
+            source_queue.cq.push(.{
+                .user_data = source_node_copy.value.user_data,
+                .result = completion.result,
+            }) catch {};
+
+            futex_wake_external(source_queue.futex, 1);
+        } else {
+            log.err("protocol handler returned user_data that was invalid", .{});
+        }
+    }
 }
 
 fn resultToCompletionEntry(v: abi.sys.Error!?abi.sys.CompletionEntry) ?abi.sys.CompletionEntry {
@@ -246,6 +289,8 @@ fn resultToCompletionEntry(v: abi.sys.Error!?abi.sys.CompletionEntry) ?abi.sys.C
 }
 
 fn proto_create(proc: *Context, _: usize, req: abi.sys.SubmissionEntry) abi.sys.Error!?abi.sys.CompletionEntry {
+    log.debug("proto_create", .{});
+
     if (req.buffer_len != @sizeOf(abi.io.ProtoCreate.Buffer)) {
         return abi.sys.Error.InvalidArgument;
     }
@@ -255,69 +300,23 @@ fn proto_create(proc: *Context, _: usize, req: abi.sys.SubmissionEntry) abi.sys.
     }
 
     const buffer = @as(*abi.io.ProtoCreate.Buffer, @alignCast(@ptrCast(req.buffer))).*;
-    const name = std.mem.sliceTo(&buffer.protocol, 0);
+    const name = &buffer.protocol;
 
-    log.info("creating proto: `{s}`", .{name});
+    // FIXME: untrusted pointers all over the place
 
-    // FIXME: use a map
-    if (std.mem.eql(u8, name, "initfs")) {
-        main.known_protos.initfs_lock.lock();
-        defer main.known_protos.initfs_lock.unlock();
-        if (main.known_protos.initfs != null) {
-            log.warn("vfs proto already registered", .{});
-            return abi.sys.Error.InternalError;
-        }
-        main.known_protos.initfs = .{
-            .name = "initfs".* ++ std.mem.zeroes([10]u8),
-        };
-
-        // FIXME:
-        const fd = proc.protos_n;
-        proc.protos_n += 1;
-        proc.protos[fd] = &main.known_protos.initfs.?;
-
-        return abi.sys.CompletionEntry{ .result = fd + 1 };
-    } else if (std.mem.eql(u8, name, "fs")) {
-        main.known_protos.fs_lock.lock();
-        defer main.known_protos.fs_lock.unlock();
-        if (main.known_protos.fs != null) {
-            log.warn("vfs proto already registered", .{});
-            return abi.sys.Error.InternalError;
-        }
-        main.known_protos.fs = .{
-            .name = "fs".* ++ std.mem.zeroes([14]u8),
-        };
-
-        const fd = proc.protos_n;
-        proc.protos_n += 1;
-        proc.protos[fd] = &main.known_protos.fs.?;
-
-        return abi.sys.CompletionEntry{ .result = fd + 1 };
-    } else {
-        log.warn("FIXME: other vfs proto name", .{});
-        return abi.sys.Error.InternalError;
-    }
-}
-
-fn proto_next_open(proc: *Context, ring_id: usize, req: abi.sys.SubmissionEntry) abi.sys.Error!?abi.sys.CompletionEntry {
-    if (req.fd <= 0 or req.fd - 1 >= proc.protos_n) {
-        log.warn("fd out of bounds", .{});
-        return error.BadFileDescriptor;
-    }
-
-    const fd: usize = @intCast(req.fd);
-    const proto: *main.Protocol = proc.protos[fd - 1] orelse {
-        log.warn("fd not assigned", .{});
-        return error.BadFileDescriptor;
-    };
-
-    proto.open = .{
-        .req = req,
+    const protocol = try proto.register(name, .{
         .process_id = proc.pidOf(),
-        .ring_id = ring_id,
-    };
+        .submission_queue = buffer.submission_queue,
+        .completion_queue = buffer.completion_queue,
+        .futex = buffer.futex,
+        .buffers = buffer.buffers,
+        .buffer_size = buffer.buffer_size,
+    });
 
-    return null;
+    protocol.next = proc.protos;
+    proc.protos = protocol;
+
+    return abi.sys.CompletionEntry{ .result = 0 };
 }
 
 fn open(proc: *Context, ring_id: usize, req: abi.sys.SubmissionEntry) abi.sys.Error!?abi.sys.CompletionEntry {
@@ -327,73 +326,87 @@ fn open(proc: *Context, ring_id: usize, req: abi.sys.SubmissionEntry) abi.sys.Er
 
     var path: []const u8 = try untrustedSlice(u8, @intFromPtr(req.buffer), req.buffer_len);
 
-    var proto: []const u8 = "fs";
+    var protocol_name: []const u8 = "fs";
     if (std.mem.indexOf(u8, path[0..@min(19, path.len)], "://")) |split_idx| {
-        proto = path[0..split_idx];
+        protocol_name = path[0..split_idx];
         path = path[split_idx + 3 ..];
     }
 
-    var protocol_maybe: ?*main.Protocol = null;
-    if (std.mem.eql(u8, proto, "fs")) {
-        main.known_protos.fs_lock.lock();
-        defer main.known_protos.fs_lock.unlock();
-
-        protocol_maybe = if (main.known_protos.fs) |*s| s else null;
-    } else if (std.mem.eql(u8, proto, "initfs")) {
-        main.known_protos.initfs_lock.lock();
-        defer main.known_protos.initfs_lock.unlock();
-
-        protocol_maybe = if (main.known_protos.initfs) |*s| s else null;
-    }
+    log.debug("open `{s}` in `{s}`", .{ path, protocol_name });
 
     if (path.len > 0x1000) {
-        return error.InvalidArgument;
+        return abi.sys.Error.InvalidArgument;
     }
 
-    const protocol = protocol_maybe orelse return error.InvalidProtocol;
+    const protocol = try proto.find(protocol_name);
     protocol.lock.lock();
     defer protocol.lock.unlock();
 
-    const target_req = protocol.open orelse return error.InvalidProtocol;
-    protocol.open = null;
+    const handler = &(protocol.handler orelse return abi.sys.Error.UnknownProtocol);
 
-    const target_proc = find(target_req.process_id);
+    const target_proc = find(handler.process_id);
 
-    log.info("open `{s}` in `{s}`", .{ path, proto });
+    // FIXME: handler sanitation
 
+    // target_proc.lock.lock();
+    // defer target_proc.lock.unlock();
+
+    // FIXME: copy the other way, to remove these 2 switches
+    // it requires using the ring buffer indirectly
     target_proc.addr_space.?.switchTo();
     defer proc.addr_space.?.switchTo();
 
-    const target_ring = &target_proc.queues[target_req.ring_id];
-
-    // FIXME: massive security bugs from trusting the user given buffer
-    // the buffer could easily point to kernel memory,
-    // letting the user process write any data over the kernel code
-
-    const slot: abi.ring.Slot = target_ring.cq.marker.acquire(1) orelse {
+    const slot = handler.submission_queue.marker.acquire(1) orelse {
         proc.queues[ring_id].unhandled = req;
-        log.info("unhandled", .{});
         return null;
     };
+
+    const user_data = handler.sources_next;
+    handler.sources_next = handler.sources_next +% 1;
+
+    const source_node = slab.global_allocator.allocator().create(proto.Sources.Node) catch unreachable; // FIXME: OOM
+    source_node.key = user_data;
+    source_node.value = .{
+        .process_id = proc.pidOf(),
+        .queue_id = ring_id,
+        .user_data = req.user_data,
+    };
+    if (!handler.sources.insert(source_node)) {
+        // FIXME: IDs wrapped
+        log.err("protocol user_data IDs wrapped", .{});
+    }
+
+    // write the buffer data to the target process
+    // handler.buffers is already verified to be usable
+    const per_submission_buffer: [*]u8 = @ptrCast(&handler.buffers[slot.first * handler.buffer_size]);
     proc.addr_space.?.readBytes(
-        target_req.req.buffer[0..path.len],
+        per_submission_buffer[0..path.len],
         pmem.VirtAddr.new(@intFromPtr(path.ptr)),
         .user,
-    ) catch {
-        // FIXME: segfault the target proc
-
+    ) catch unreachable; // FIXME: segfault
+    // target_proc.addr_space.?.writeBytes(
+    //     pmem.VirtAddr.new(@intFromPtr(per_submission_buffer)),
+    //     path,
+    //     .user,
+    // ) catch unreachable; // FIXME: segfault
+    // FIXME: untrusted pointer
+    handler.submission_queue.storage[slot.first] = .{
+        .user_data = user_data,
+        .offset = req.offset,
+        .buffer = @ptrCast(per_submission_buffer),
+        .buffer_len = @truncate(path.len), // path is less than or equal to 0x1000
+        .fd = 0,
+        .opcode = .open,
+        .flags = req.flags,
     };
-    const completion = abi.sys.CompletionEntry{
-        .user_data = target_req.req.user_data,
-        .result = path.len,
-    };
-    target_ring.cq.storage[slot.first] = completion;
-    target_ring.cq.marker.produce(slot);
+    handler.submission_queue.marker.produce(slot);
 
-    // wake the target process if it was waiting on the ring futex
-    const futex = target_ring.futex.toHhdm().ptr(*std.atomic.Value(usize));
-    _ = futex.fetchAdd(1, .release);
-    futex_wake_external(target_ring.futex, 1);
+    const addr = target_proc.addr_space.?.translate(
+        pmem.VirtAddr.new(@intFromPtr(handler.futex)),
+        true,
+    ) orelse unreachable; // FIXME: segfault
+    futex_wake_external(addr, 1);
+    log.info("done producing", .{});
 
     return null;
 }
@@ -416,7 +429,10 @@ pub fn futex_wait(value: *std.atomic.Value(usize), expected: usize, trap: *arch.
         return;
     }
 
-    const addr = this.addr_space.?.translate(pmem.VirtAddr.new(@intFromPtr(value))).?;
+    const addr = this.addr_space.?.translate(pmem.VirtAddr.new(@intFromPtr(value)), false) orelse {
+        // not mapped, do nothing as it might have been a lazy page
+        return;
+    };
 
     futex_tree_lock.lock();
     defer futex_tree_lock.unlock();
@@ -450,7 +466,7 @@ pub fn futex_wake(value: *std.atomic.Value(usize), n: usize) void {
 
     const this_pid = currentPid().?;
     const this = find(this_pid);
-    const addr = this.addr_space.?.translate(pmem.VirtAddr.new(@intFromPtr(value))) orelse return;
+    const addr = this.addr_space.?.translate(pmem.VirtAddr.new(@intFromPtr(value)), true) orelse return;
 
     futex_wake_external(addr, n);
 }
@@ -602,6 +618,10 @@ pub fn isInLowerHalf(comptime T: type, bottom: usize, length: usize) abi.sys.Err
 
 pub fn untrustedSlice(comptime T: type, bottom: usize, length: usize) abi.sys.Error![]T {
     try isInLowerHalf(T, bottom, length);
+
+    if (bottom % @alignOf(T) != 0) {
+        return abi.sys.Error.InvalidArgument;
+    }
 
     // pagefaults from the kernel touching lower half should just kill the process,
     // way faster and easier than testing for access
