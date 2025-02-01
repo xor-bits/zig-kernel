@@ -237,6 +237,21 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
 
             proc.futex_wake(value, n);
         },
+        .lazy_zero => {
+            const pages = proc.untrustedSlice(abi.sys.Page, trap.arg0, trap.arg1) catch {
+                // FIXME: segfault
+                std.log.err("SEGFAULT", .{});
+                return;
+            };
+
+            current_proc.addr_space.?.map(
+                pmem.VirtAddr.new(@intFromPtr(pages.ptr)),
+                .{ .lazy = pages.len },
+                .{
+                    .writeable = 1,
+                },
+            );
+        },
         .ring_setup => {
             const submission_queue: *abi.sys.SubmissionQueue = proc.untrustedPtr(abi.sys.SubmissionQueue, trap.arg0) catch {
                 trap.syscall_id = abi.sys.encodeError(error.PermissionDenied);

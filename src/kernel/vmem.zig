@@ -178,6 +178,9 @@ pub const AddressSpace = struct {
         // TODO: huge page support maybe
         // it would require the pmem allocator to have huge page support aswell
 
+        // FIXME: stop the whole process, IPI other processors out of there and then start it again
+        // to avoid race conditions
+
         switch (src) {
             .borrow, .owned => std.debug.panic("TODO: borrow and owned mapping", .{}),
             .bytes => |bytes| {
@@ -367,6 +370,11 @@ pub const AddressSpace = struct {
 
         const l1entries = physPageAsPageTable(pmem.PhysPage.new(l2entry.page_index));
         const l1entry = &l1entries[levels[0]];
+
+        if (l1entry.present == 1 and l1entry.no_free == 0) {
+            // map over the old mapping
+            freeTable(pmem.PhysPage.new(l1entry.page_index).toPhys().toHhdm().ptr(*PageTable));
+        }
 
         l1entry.* = entry;
     }

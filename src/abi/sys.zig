@@ -17,6 +17,10 @@ pub const Id = enum(usize) {
     /// wake waiters on physical memory
     futex_wake = 0x4,
 
+    /// mark the pages as lazy allocated again,
+    /// effectively zeroing out the memory and freeing the physical allocation
+    lazy_zero = 0x5,
+
     /// create new io ring
     ring_setup = 0x801,
 
@@ -92,6 +96,10 @@ pub fn decode(v: usize) Error!usize {
 
 //
 
+pub const Page = struct { v: [0x1000]u8 align(0x1000) };
+
+//
+
 pub fn log(s: []const u8) void {
     _ = call(.log, .{ @intFromPtr(s.ptr), s.len }) catch unreachable;
 }
@@ -110,6 +118,12 @@ pub fn futex_wait(value: *const usize, expected: usize) void {
 /// wake up `n` tasks sleeping on `[value]`
 pub fn futex_wake(value: *const usize, n: usize) void {
     _ = call(.futex_wake, .{ @intFromPtr(value), n }) catch unreachable;
+}
+
+/// mark the pages as lazy allocated again,
+/// effectively zeroing out the memory and freeing the physical allocation
+pub fn lazy_zero(pages: []Page) void {
+    _ = call(.lazy_zero, .{ @intFromPtr(pages.ptr), pages.len }) catch unreachable; // the only error would be a segfault
 }
 
 /// create a I/O ring, the futex is used to wait
