@@ -349,6 +349,28 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
 
             proc.pushReady(target_pid);
         },
+        .system_rename => {
+            if (trap.arg2 >= 512) {
+                log.warn("system_rename syscall too long", .{});
+                return;
+            }
+            const name = proc.untrustedSlice(u8, trap.arg1, trap.arg2) catch |err| {
+                log.warn("user space sent a bad syscall: {}", .{err});
+                return;
+            };
+
+            log.info("rename pid: {} name: {s}", .{ trap.arg0, name });
+            const target_proc = proc.find(trap.arg0);
+            if (target_proc.name == null) {
+                target_proc.name = slab.global_allocator
+                    .allocator()
+                    .create([512:0]u8) catch
+                    std.debug.panic("OOM", .{});
+            }
+
+            target_proc.name.?.* = std.mem.zeroes([512:0]u8); // TODO: just place a zero at the end
+            std.mem.copyForwards(u8, target_proc.name.?[0..512], name);
+        },
         // else => std.debug.panic("TODO", .{}),
     }
 }

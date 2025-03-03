@@ -16,6 +16,7 @@ pub var heap = std.heap.FixedBufferAllocator.init(heap_ptr[0..abi.BOOTSTRAP_HEAP
 //
 
 fn main(initfs: []const u8) !void {
+    abi.sys.system_rename(0, "bootstrap");
     log.info("hello from bootstrap {}", .{@sizeOf(abi.sys.SubmissionEntry)});
 
     try initfsd.init(initfs);

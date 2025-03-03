@@ -13,6 +13,7 @@ var heap = std.heap.FixedBufferAllocator.init(heap_ptr[0..abi.BOOTSTRAP_HEAP_SIZ
 //
 
 export fn _start() linksection(".text._start") callconv(.C) noreturn {
+    abi.sys.system_rename(0, "init");
     log.info("hello from init", .{});
 
     const io_ring = abi.IoRing.init(64, heap.allocator()) catch unreachable;

@@ -17,22 +17,26 @@ pub const std_options: std.Options = .{
 fn logFn(comptime message_level: std.log.Level, comptime scope: @TypeOf(.enum_literal), comptime format: []const u8, args: anytype) void {
     const level_txt = comptime message_level.asText();
     const scope_txt = if (scope == .default) "" else " " ++ @tagName(scope);
-    const fmt = "[ " ++ level_txt ++ scope_txt ++ " {} ]: ";
+    const fmt = "[ " ++ level_txt ++ scope_txt ++ " {s} ]: ";
 
-    var pid: usize = 0;
+    var proc_name: []const u8 = "<pre-sched>";
     if (main.all_cpus_ininitalized.load(.acquire)) {
+        proc_name = "<idle>";
         if (arch.cpu_local().current_pid) |_pid| {
-            pid = _pid;
+            proc_name = "<nameless>";
+            if (proc.find(_pid).name) |name| {
+                proc_name = std.mem.sliceTo(name, 0);
+            }
         }
     }
 
     log_lock.lock();
     defer log_lock.unlock();
 
-    uart.print(fmt, .{pid});
+    uart.print(fmt, .{proc_name});
     uart.print(format ++ "\n", args);
     if (scope != .critical) {
-        fb.print(fmt, .{pid});
+        fb.print(fmt, .{proc_name});
         fb.print(format ++ "\n", args);
     }
 }

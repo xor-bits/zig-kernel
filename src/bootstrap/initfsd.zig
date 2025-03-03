@@ -20,6 +20,8 @@ pub fn init(initfs: []const u8) !void {
 }
 
 pub fn run() noreturn {
+    abi.sys.system_rename(0, "initfsd");
+
     // io ring for sending requests elsewhere
     const io_ring = abi.IoRing.init(64, heap.allocator()) catch unreachable;
     defer io_ring.deinit();

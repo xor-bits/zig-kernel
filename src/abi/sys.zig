@@ -43,6 +43,11 @@ pub const Id = enum(usize) {
     ///
     /// only system processes can use this
     system_exec = 0x8000_0004,
+
+    /// rename the process
+    ///
+    /// only system processes can use this
+    system_rename = 0x8000_0005,
 };
 
 pub const Error = error{
@@ -248,6 +253,11 @@ pub fn system_map(pid: usize, new_maps: []const Map) void {
 // system processes only
 pub fn system_exec(pid: usize, ip: usize, sp: usize) void {
     _ = call(.system_exec, .{ pid, ip, sp }) catch unreachable;
+}
+
+// system processes only
+pub fn system_rename(pid: usize, name: []const u8) void {
+    _ = call(.system_rename, .{ pid, @intFromPtr(name.ptr), name.len }) catch unreachable;
 }
 
 //

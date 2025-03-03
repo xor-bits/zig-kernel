@@ -33,6 +33,8 @@ pub const Context = struct {
     trap: arch.SyscallRegs = .{},
     is_system: bool = false,
 
+    name: ?*[512:0]u8 = null,
+
     /// futex uses this field to make a linked list
     /// if multiple processes are waiting on the same address
     futex_next: ?usize = null,
