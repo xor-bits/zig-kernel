@@ -50,9 +50,8 @@ pub const Context = struct {
         futex: pmem.PhysAddr,
     } = undefined,
 
-    fd_map_lock: spin.Mutex = .{},
-    //
-    fd_map: [16]u64 = .{},
+    // fd_map_lock: spin.Mutex = .{},
+    // fd_map: [16]u64 = .{},
 
     const Self = @This();
 
@@ -560,7 +559,7 @@ pub fn find(pid: usize) *Context {
 }
 
 pub fn currentPid() ?usize {
-    return cpu_table[arch.cpu_id()].current_pid;
+    return arch.cpu_local().current_pid;
 }
 
 pub fn current() *Context {
@@ -572,9 +571,9 @@ pub fn current() *Context {
 /// WARNING: assumes that the current process lock **IS** held, and then **RELEASES** it
 /// set the current process to be ready and switch away from it
 pub fn unlockAndYield(trap: *arch.SyscallRegs) void {
-    const cpu = &cpu_table[arch.cpu_id()];
-    if (cpu.current_pid != std.math.maxInt(usize)) {
-        cpu.current_pid = std.math.maxInt(usize);
+    const cpu = arch.cpu_local();
+    if (cpu.current_pid) |prev| {
+        cpu.current_pid = null;
 
         const proc = &proc_table[prev];
         proc.status = .ready;
@@ -594,7 +593,7 @@ pub fn lockAndSwitchTo(pid: usize, trap: *arch.SyscallRegs) void {
     proc.lock.lock();
     proc.status = .running;
 
-    cpu_table[arch.cpu_id()].current_pid = pid;
+    arch.cpu_local().current_pid = pid;
     proc.addr_space.?.switchTo();
     trap.* = proc.trap;
 }
@@ -604,12 +603,6 @@ pub fn returnEarly(pid: usize) noreturn {
 }
 
 //
-
-pub const Cpu = struct {
-    current_pid: usize,
-};
-
-var cpu_table: [256]Cpu = undefined;
 
 var ready_r_lock: spin.Mutex = .{};
 var ready_w_lock: spin.Mutex = .{};

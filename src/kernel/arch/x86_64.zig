@@ -20,6 +20,33 @@ pub const KERNELGS_BASE = 0xC0000102;
 
 //
 
+pub fn init_cpu(id: u32) !void {
+    const tls = try pmem.page_allocator.create(main.CpuLocalStorage);
+    tls.* = .{
+        .self_ptr = tls,
+        .cpu_config = undefined,
+        .id = id,
+    };
+
+    CpuConfig.init(&tls.cpu_config);
+
+    wrmsr(GS_BASE, @intFromPtr(tls));
+    wrmsr(KERNELGS_BASE, 0);
+}
+
+pub fn cpu_local() *main.CpuLocalStorage {
+    return asm volatile (
+        \\ movq %gs:0, %[cls] 
+        : [cls] "={rax}" (-> *main.CpuLocalStorage),
+    );
+}
+
+pub fn swapgs() void {
+    asm volatile (
+        \\ swapgs
+    );
+}
+
 pub const ints = struct {
     pub inline fn disable() void {
         asm volatile (
@@ -651,6 +678,9 @@ pub const Idt = extern struct {
                 const pfec: PageFaultError = @bitCast(ec);
                 const target_addr = Cr2.read().page_fault_addr;
 
+                if (pfec.user_mode) swapgs();
+                defer if (pfec.user_mode) swapgs();
+
                 vmem.AddressSpace.current().pageFault(
                     pmem.VirtAddr.new(target_addr),
                     pfec.user_mode,
@@ -766,6 +796,10 @@ pub const Idt = extern struct {
         }).asInt();
         entries[apic.IRQ_TIMER] = Entry.generate(struct {
             fn handler(interrupt_stack_frame: *const InterruptStackFrame) void {
+                const is_user = interrupt_stack_frame.code_segment == @as(u16, GdtDescriptor.user_code_selector);
+                if (is_user) swapgs();
+                defer if (is_user) swapgs();
+
                 apic.timer(interrupt_stack_frame);
             }
         }).asInt();
@@ -823,7 +857,7 @@ pub const CpuConfig = struct {
     tss: Tss,
     idt: Idt,
 
-    pub fn init(self: *@This(), this_cpu_id: u32) void {
+    pub fn init(self: *@This()) void {
         self.tss = Tss.new();
         self.gdt = Gdt.new(&self.tss);
         self.idt = Idt.new();
@@ -847,14 +881,12 @@ pub const CpuConfig = struct {
         cr4.osxmmexcpt = 1;
         cr4.write();
 
-        // initialize CPU identification for scheduling purposes
-        wrmsr(IA32_TCS_AUX, this_cpu_id);
-        log.info("CPU ID set: {d}", .{cpu_id()});
+        // // initialize CPU identification for scheduling purposes
+        // wrmsr(IA32_TCS_AUX, this_cpu_id);
+        // log.info("CPU ID set: {d}", .{cpu_id()});
 
         self.rsp_kernel = self.tss.privilege_stacks[0];
         self.rsp_user = 0;
-        wrmsr(KERNELGS_BASE, @intFromPtr(self));
-        wrmsr(GS_BASE, 0);
 
         // initialize syscall and sysret instructions
         wrmsr(
@@ -1067,7 +1099,6 @@ const syscall_enter = std.fmt.comptimePrint(
     \\ movq %rsp, %gs:{0d}
     \\ movq %gs:{1d}, %rsp
     \\ pushq %gs:{0d}
-    \\ swapgs
 
     // save all (lol thats a lie) registers
     \\ push %rax
@@ -1109,7 +1140,6 @@ const sysret_instr = std.fmt.comptimePrint(
 
     // load the user stack by temporarily storing
     // the user RSP in the kernel GS structure
-    \\ swapgs
     \\ popq %gs:{0d}
     \\ movq %gs:{0d}, %rsp
     \\ swapgs

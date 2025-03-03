@@ -52,7 +52,7 @@ pub fn register(
     name: *const [16]u8,
     handler: Handler,
 ) abi.sys.Error!*Protocol {
-    log.debug("creating proto: `{s}`", .{name});
+    log.debug("creating proto: `{s}`", .{std.mem.sliceTo(name, 0)});
 
     var proto: *Protocol = undefined;
 

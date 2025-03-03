@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const abi = @import("abi");
 const limine = @import("limine");
 
@@ -27,6 +28,16 @@ pub export var base_revision: limine.BaseRevision = .{ .revision = 2 };
 pub export var hhdm: limine.HhdmRequest = .{};
 
 pub var hhdm_offset = std.atomic.Value(usize).init(undefined);
+
+pub const CpuLocalStorage = struct {
+    // used to read the pointer to this struct through GS
+    self_ptr: *CpuLocalStorage,
+
+    cpu_config: arch.CpuConfig,
+
+    current_pid: ?usize = null,
+    id: u32,
+};
 
 //
 
@@ -78,8 +89,9 @@ fn main() noreturn {
     });
 
     // set up arch specific things: GDT, TSS, IDT, syscalls, ...
-    arch.init() catch |err| {
-        std.debug.panic("failed to initialize CPU: {any}", .{err});
+    const id = arch.next_cpu_id();
+    arch.init_cpu(id) catch |err| {
+        std.debug.panic("failed to initialize CPU-{}: {any}", .{ id, err });
     };
     // arch.x86_64.ints.int3();
 

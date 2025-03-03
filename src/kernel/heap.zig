@@ -19,8 +19,8 @@ pub const Heap = struct {
     }
 };
 
-const vtable = std.mem.Allocator.VTable{
-    .alloc = &_alloc,
-    .resize = &_resize,
-    .free = &_free,
-};
+// const vtable = std.mem.Allocator.VTable{
+//     .alloc = &_alloc,
+//     .resize = &_resize,
+//     .free = &_free,
+// };

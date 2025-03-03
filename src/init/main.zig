@@ -10,13 +10,6 @@ pub const panic = abi.panic;
 const heap_ptr: [*]u8 = @ptrFromInt(abi.BOOTSTRAP_HEAP);
 var heap = std.heap.FixedBufferAllocator.init(heap_ptr[0..abi.BOOTSTRAP_HEAP_SIZE]);
 
-pub const CpuLocalStorage = struct {
-    // used to read the pointer to this struct through GS
-    self_ptr: *CpuLocalStorage,
-
-    current_pid: ?usize,
-};
-
 //
 
 export fn _start() linksection(".text._start") callconv(.C) noreturn {
