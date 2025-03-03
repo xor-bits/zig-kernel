@@ -145,6 +145,7 @@ pub const SlabAllocator = struct {
         const global_as = vmem.AddressSpace.current();
         global_as.map(page_bottom, .{ .lazy = real_size }, .{
             .writeable = 1,
+            .no_execute = 1,
         });
 
         return page_bottom.ptr([*]u8);
@@ -229,6 +230,7 @@ const FreeList = struct {
         const global_as = vmem.AddressSpace.current();
         global_as.map(page_bottom, .{ .prealloc = 1 }, .{
             .writeable = 1,
+            .no_execute = 1,
         });
 
         const slab: [*]u8 = page_bottom.ptr([*]u8);
