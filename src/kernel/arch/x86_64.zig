@@ -21,6 +21,8 @@ pub const KERNELGS_BASE = 0xC0000102;
 //
 
 pub fn init_cpu(id: u32) !void {
+    log.info("CpuLocalStorage size={}", .{@sizeOf(main.CpuLocalStorage)});
+
     const tls = try pmem.page_allocator.create(main.CpuLocalStorage);
     tls.* = .{
         .self_ptr = tls,
@@ -35,8 +37,9 @@ pub fn init_cpu(id: u32) !void {
 }
 
 pub fn cpu_local() *main.CpuLocalStorage {
-    return asm volatile (
-        \\ movq %gs:0, %[cls] 
+    return asm volatile (std.fmt.comptimePrint(
+            \\ movq %gs:{d}, %[cls]
+        , .{@offsetOf(main.CpuLocalStorage, "self_ptr")})
         : [cls] "={rax}" (-> *main.CpuLocalStorage),
     );
 }
