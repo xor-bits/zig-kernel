@@ -29,20 +29,8 @@ export fn _start() linksection(".text._start") callconv(.C) noreturn {
         .buffer_len = path.len,
         .offset = 0,
     }) catch unreachable;
-    io_ring.submit(.{
-        .user_data = 0,
-        .opcode = .open,
-        .flags = 0,
-        .fd = 0,
-        .buffer = @constCast(@ptrCast(path)),
-        .buffer_len = path.len,
-        .offset = 0,
-    }) catch unreachable;
 
-    var r = io_ring.wait_completion();
-    log.info("result={any}", .{abi.sys.decode(r.result)});
-    log.info("{any}", .{r});
-    r = io_ring.wait_completion();
+    const r = io_ring.wait_completion();
     log.info("result={any}", .{abi.sys.decode(r.result)});
     log.info("{any}", .{r});
 

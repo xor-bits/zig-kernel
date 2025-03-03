@@ -422,7 +422,6 @@ fn open(proc: *Context, ring_id: usize, req: abi.sys.SubmissionEntry) abi.sys.Er
 
     // write the buffer data to the target process
     // handler.buffers is already verified to be usable
-    log.info("buffer_size = {}", .{handler.buffer_size});
     const per_submission_buffer: [*]u8 = @ptrCast(&handler.buffers[slot.first * handler.buffer_size]);
     proc.addr_space.?.readBytes(
         per_submission_buffer[0..path.len],
@@ -435,13 +434,6 @@ fn open(proc: *Context, ring_id: usize, req: abi.sys.SubmissionEntry) abi.sys.Er
     //     .user,
     // ) catch unreachable; // FIXME: segfault
     // FIXME: untrusted pointer
-    log.info("writing to pid={} slot={} sq={*} sq_storage={*} sq_slot={*}", .{
-        target_proc.pidOf(),
-        slot.first,
-        handler.submission_queue,
-        handler.submission_queue.storage,
-        &handler.submission_queue.storage[slot.first],
-    });
     handler.submission_queue.storage[slot.first] = .{
         .user_data = user_data,
         .offset = req.offset,
