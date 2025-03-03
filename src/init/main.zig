@@ -6,21 +6,12 @@ const abi = @import("abi");
 const log = std.log.scoped(.init);
 pub const std_options = abi.std_options;
 pub const panic = abi.panic;
+// pub const _start = abi.rt._start;
 
 const heap_ptr: [*]u8 = @ptrFromInt(abi.BOOTSTRAP_HEAP);
 var heap = std.heap.FixedBufferAllocator.init(heap_ptr[0..abi.BOOTSTRAP_HEAP_SIZE]);
 
 //
-
-export fn _start() linksection(".text._start") callconv(.C) noreturn {
-    main() catch |err| {
-        log.err("{err}", .{err});
-    };
-
-    while (true) {
-        abi.sys.yield();
-    }
-}
 
 pub fn main() !void {
     abi.sys.system_rename(0, "init");
@@ -38,4 +29,8 @@ pub fn main() !void {
     };
 
     log.info("file opened, fd={}", .{fd});
+}
+
+comptime {
+    abi.rt.install_rt();
 }

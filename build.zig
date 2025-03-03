@@ -28,7 +28,7 @@ pub fn build(b: *std.Build) !void {
 
     const optimize = b.standardOptimizeOption(.{});
 
-    const abi = createAbi(b);
+    const abi = createAbi(b, target, optimize);
 
     // build the bootstrap.bin
     const bootstrap_bin = createBootstrapBin(b, target, optimize, abi);
@@ -249,11 +249,11 @@ fn createBootstrapBin(
 }
 
 // create the shared ABI library
-fn createAbi(b: *std.Build) *std.Build.Module {
+fn createAbi(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Module {
     return b.createModule(.{
         .root_source_file = b.path("./src/abi/lib.zig"),
-        // .target = target,
-        // .optimize = optimize,
+        .target = target,
+        .optimize = optimize,
     });
 }
 

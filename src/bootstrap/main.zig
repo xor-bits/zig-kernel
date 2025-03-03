@@ -15,7 +15,7 @@ pub var heap = std.heap.FixedBufferAllocator.init(heap_ptr[0..abi.BOOTSTRAP_HEAP
 
 //
 
-fn main(initfs: []const u8) !void {
+pub fn main(initfs: []const u8) !void {
     abi.sys.system_rename(0, "bootstrap");
     log.info("hello from bootstrap {}", .{@sizeOf(abi.sys.SubmissionEntry)});
 
@@ -114,7 +114,7 @@ fn exec_elf(path: []const u8) !void {
     abi.sys.system_exec(1, header.entry, 0x7FFF_FFF4_0000);
 }
 
-export fn _start(initfs_ptr: [*]const u8, initfs_len: usize) linksection(".text._start") callconv(.C) noreturn {
+pub export fn _start(initfs_ptr: [*]const u8, initfs_len: usize) linksection(".text._start") callconv(.C) noreturn {
     main(initfs_ptr[0..initfs_len]) catch |err| {
         std.debug.panic("{}", .{err});
     };
