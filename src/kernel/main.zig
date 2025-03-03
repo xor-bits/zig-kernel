@@ -26,6 +26,9 @@ pub const panic = logs.panic;
 
 pub export var base_revision: limine.BaseRevision = .{ .revision = 2 };
 pub export var hhdm: limine.HhdmRequest = .{};
+pub export var smp: limine.SmpRequest = .{};
+pub var cpus_initialized: std.atomic.Value(usize) = .{ .raw = 0 };
+pub var all_cpus_ininitalized: std.atomic.Value(bool) = .{ .raw = false };
 
 pub var hhdm_offset = std.atomic.Value(usize).init(undefined);
 
@@ -93,6 +96,15 @@ fn main() noreturn {
     arch.init_cpu(id) catch |err| {
         std.debug.panic("failed to initialize CPU-{}: {any}", .{ id, err });
     };
+    _ = cpus_initialized.fetchAdd(1, .release);
+    const cpu_count = if (smp.response) |smp_response|
+        @as(usize, smp_response.cpu_count)
+    else
+        @as(usize, 1);
+    if (cpus_initialized.load(.acquire) == cpu_count) {
+        all_cpus_ininitalized.store(true, .release);
+    }
+
     // arch.x86_64.ints.int3();
 
     // initialize ACPI specific things: APIC, HPET, ...
@@ -199,7 +211,7 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
                 if (line.len == 0) {
                     continue;
                 }
-                log.info("[ pid={d} ]: {s}", .{ current_pid, line });
+                _ = log.info("{s}", .{line});
             }
         },
         .yield => {

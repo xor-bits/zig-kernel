@@ -23,7 +23,7 @@ pub const SlabAllocator = struct {
     heap_bottom: pmem.VirtAddr,
     heap_top: pmem.VirtAddr,
 
-    lists: [9]FreeList,
+    lists: [11]FreeList,
 
     const Self = @This();
 
@@ -32,6 +32,8 @@ pub const SlabAllocator = struct {
             .heap_bottom = heap_bottom,
             .heap_top = heap_top,
             .lists = .{
+                FreeList.init(),
+                FreeList.init(),
                 FreeList.init(),
                 FreeList.init(),
                 FreeList.init(),
@@ -69,7 +71,7 @@ pub const SlabAllocator = struct {
         const obj_size = std.math.ceilPowerOfTwo(usize, size) catch return null;
         const idx = std.math.log2_int(usize, obj_size);
 
-        if (idx >= 9) {
+        if (idx > self.lists.len) {
             return null;
         }
 
