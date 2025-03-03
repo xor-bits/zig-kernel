@@ -8,6 +8,10 @@ const log = std.log.scoped(.vmem);
 
 //
 
+pub const KERNEL_BOTTOM = pmem.VirtAddr.fromParts(0, .{ 0, 0, 510, 511 });
+pub const KERNEL_HEAP_BOTTOM = pmem.VirtAddr.fromParts(0, .{ 0, 0, 0, 510 });
+pub const KERNEL_HEAP_TOP = pmem.VirtAddr.fromParts(0, .{ 0, 0, 0, 511 });
+
 // lvl4 entries from [256..]
 var global_higher_half = lazy.Lazy([256]Entry).new();
 
@@ -23,7 +27,18 @@ pub fn init() void {
         pub fn init() [256]Entry {
             const current = AddressSpace.current();
             var to_table: [256]Entry = undefined;
-            const from_table: *const PageTable = physPageAsPageTable(current.cr3);
+            const from_table: *PageTable = physPageAsPageTable(current.cr3);
+
+            // allocate the heap pml4 if the heap has not been used yet
+            const heap_entry = &from_table[KERNEL_HEAP_BOTTOM.levels()[3]];
+            if (heap_entry.present != 1) {
+                const allocated = pmem.HhdmAddr.new(allocZeroedTable()).toPhys().toPage();
+                heap_entry.page_index = allocated.page_index;
+                heap_entry.present = 1;
+                heap_entry.writeable = 1;
+                heap_entry.no_execute = 1;
+                heap_entry.user_accessible = 0;
+            }
 
             for (0..256) |i| {
                 deepClone(&from_table[i + 256], &to_table[i], 3);

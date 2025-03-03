@@ -2,13 +2,17 @@ pub const std = @import("std");
 
 pub const spin = @import("spin.zig");
 pub const pmem = @import("pmem.zig");
+pub const vmem = @import("vmem.zig");
 pub const util = @import("util.zig");
 
 const log = std.log.scoped(.slab);
 
 //
 
-pub var global_allocator: SlabAllocator = SlabAllocator.init();
+pub var global_allocator: SlabAllocator = SlabAllocator.init(
+    vmem.KERNEL_HEAP_BOTTOM,
+    vmem.KERNEL_HEAP_TOP,
+);
 
 //
 
@@ -16,16 +20,17 @@ pub const SlabAllocator = struct {
     // TODO: keep track of allocated slabs and the allocated object counts in them
     // so that slabs can be freed back into some cache of slabs, or back to the pmem alloc
 
-    /// page allocation counter
-    counter: std.atomic.Value(usize),
+    heap_bottom: pmem.VirtAddr,
+    heap_top: pmem.VirtAddr,
 
     lists: [9]FreeList,
 
     const Self = @This();
 
-    pub fn init() Self {
+    pub fn init(heap_bottom: pmem.VirtAddr, heap_top: pmem.VirtAddr) Self {
         return .{
-            .counter = std.atomic.Value(usize).init(0),
+            .heap_bottom = heap_bottom,
+            .heap_top = heap_top,
             .lists = .{
                 FreeList.init(),
                 FreeList.init(),
@@ -102,15 +107,15 @@ pub const SlabAllocator = struct {
 
     pub fn alloc(self: *Self, size: usize, ptr_align: usize) ?[*]u8 {
         const correct_list: List = self.list(@max(size, ptr_align)) orelse {
-            std.debug.panic("TODO: big allocs", .{});
+            return self.bigAlloc(size);
         };
 
-        return correct_list.list.pop(correct_list.size, &self.counter);
+        return correct_list.list.pop(correct_list.size, self);
     }
 
     pub fn resize(self: *Self, old_size: usize, new_size: usize, ptr_align: usize) bool {
         const correct_list: List = self.list(@max(old_size, ptr_align)) orelse {
-            std.debug.panic("TODO: big allocs", .{});
+            return self.bigResize(old_size, new_size);
         };
 
         return correct_list.size >= new_size;
@@ -122,6 +127,47 @@ pub const SlabAllocator = struct {
         };
 
         correct_list.list.push(ptr);
+    }
+
+    fn bigAlloc(self: *Self, size: usize) ?[*]u8 {
+        const real_size = std.mem.alignForward(usize, size, 0x1000);
+
+        const page_top = pmem.VirtAddr.new(@atomicRmw(usize, &self.heap_top.raw, .Sub, real_size, .monotonic));
+        const page_bottom = pmem.VirtAddr.new(page_top.raw - real_size);
+
+        if (page_bottom.raw < self.heap_bottom.raw) {
+            log.err("heap out of virtual memory", .{});
+            return null;
+        }
+
+        const global_as = vmem.AddressSpace.current();
+        global_as.map(page_bottom, .{ .lazy = real_size }, .{
+            .writeable = 1,
+        });
+
+        return page_bottom.ptr([*]u8);
+    }
+
+    fn bigResize(self: *Self, old_size: usize, new_size: usize) bool {
+        _ = self;
+        const real_size = std.mem.alignForward(usize, old_size, 0x1000);
+        return new_size <= real_size;
+    }
+
+    fn bigFree(self: *Self, ptr: [*]u8, size: usize) void {
+        const real_size = std.mem.alignForward(usize, size, 0x1000);
+
+        const page_bottom = pmem.VirtAddr.new(@intFromPtr(ptr));
+
+        // FIXME: leaks virtual memory
+        const heap_top = @atomicLoad(usize, &self.heap_top.raw, .acquire);
+        @cmpxchgStrong(usize, &self.heap_top.raw, heap_top, heap_top + real_size, .seq_cst, .monotonic);
+
+        // remap as lazy to free the physical pages
+        const global_as = vmem.AddressSpace.current();
+        global_as.map(page_bottom, .{ .lazy = real_size }, .{
+            .writeable = 1,
+        });
     }
 };
 
@@ -160,7 +206,7 @@ const FreeList = struct {
         }
     }
 
-    pub fn pop(self: *Self, obj_size: usize, counter: *std.atomic.Value(usize)) ?[*]u8 {
+    pub fn pop(self: *Self, obj_size: usize, base: *SlabAllocator) ?[*]u8 {
         if (self.try_pop()) |next| {
             return next;
         }
@@ -171,9 +217,20 @@ const FreeList = struct {
             std.debug.panic("object size larger than node size", .{});
         }
 
-        const slab: [*]u8 = @ptrCast(pmem.page_allocator.create(pmem.Page) catch return null);
+        const page_top = pmem.VirtAddr.new(@atomicRmw(usize, &base.heap_top.raw, .Sub, 0x1000, .monotonic));
+        const page_bottom = pmem.VirtAddr.new(page_top.raw - 0x1000);
+
+        if (page_bottom.raw < base.heap_bottom.raw) {
+            return null;
+        }
+
+        const global_as = vmem.AddressSpace.current();
+        global_as.map(page_bottom, .{ .prealloc = 1 }, .{
+            .writeable = 1,
+        });
+
+        const slab: [*]u8 = page_bottom.ptr([*]u8);
         const obj_count: usize = @sizeOf(pmem.Page) / obj_size;
-        _ = counter.fetchAdd(1, .monotonic);
 
         self.mutex.lock();
         defer self.mutex.unlock();
