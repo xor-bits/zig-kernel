@@ -200,6 +200,14 @@ fn createKernelElf(
     abi: *std.Build.Module,
     bootstrap_bin: *std.Build.Module,
 ) std.Build.LazyPath {
+    const git_rev_run = b.addSystemCommand(&.{ "git", "rev-parse", "HEAD" });
+    const git_rev = git_rev_run.captureStdOut();
+    const git_rev_mod = b.createModule(.{
+        .root_source_file = git_rev,
+    });
+
+    b.getInstallStep().dependOn(&b.addInstallFileWithDir(git_rev, .prefix, "git-rev").step);
+
     const kernel_elf_step = b.addExecutable(.{
         .name = "kernel.elf",
         .root_source_file = b.path("src/kernel/main.zig"),
@@ -213,6 +221,7 @@ fn createKernelElf(
     kernel_elf_step.root_module.addImport("abi", abi);
     kernel_elf_step.root_module.addImport("font", createFont(b));
     kernel_elf_step.root_module.addImport("bootstrap", bootstrap_bin);
+    kernel_elf_step.root_module.addImport("git-rev", git_rev_mod);
 
     b.installArtifact(kernel_elf_step);
 

@@ -75,6 +75,10 @@ fn main() noreturn {
 
     log.info("kernel main", .{});
 
+    log.info("zig version: {s}", .{builtin.zig_version_string});
+    log.info("kernel version: 0.0.1", .{});
+    log.info("kernel git revision: {s}", .{@embedFile("git-rev")});
+
     const kernel_args = args.parse() catch |err| {
         std.debug.panic("invalid kernel cmdline: {any}", .{err});
     };
