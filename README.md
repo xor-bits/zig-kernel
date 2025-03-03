@@ -49,17 +49,17 @@ Every path is a URI, where the protocol part (proto://) tells the kernel, which 
   - [ ] figure out userland interrupts (ps2 keyboard, ..)
   - [x] syscalls:
     - [x] syscall to exec a binary (based on a provided mem map)
-    - [ ] syscall to create a vfs proto
-    - [ ] syscall to accept a vfs proto cmd
-    - [ ] syscall to return a vfs proto cmd result
+    - [x] syscall to create a vfs proto
+    - [x] syscall to accept a vfs proto cmd
+    - [x] syscall to return a vfs proto cmd result
     - [ ] syscalls for unix sockets
 
 - [x] bootstrap/initfsd process
   - [x] decompress initfs.tar.gz
-  - [ ] create initfs:// vfs proto
+  - [x] create initfs:// vfs proto
   - [x] exec initfs:///sbin/initd
   - [ ] rename to initfsd
-  - [ ] start processing vfs proto cmds
+  - [x] start processing vfs proto cmds
 
 - [x] initfs:///sbin/initd process
   - [ ] launch initfs:///sbin/rngd
