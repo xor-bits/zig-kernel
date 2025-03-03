@@ -103,3 +103,6 @@ Every path is a URI, where the protocol part (proto://) tells the kernel, which 
   - [ ] connect to the /sbin/vfsd process using a unix socket
   - [ ] register a fat32 filesystem
   - [ ] start processing cmds
+     
+![zig-kernel](https://github.com/user-attachments/assets/e508b174-1ccd-4830-aa00-68ec27faba77)
+
