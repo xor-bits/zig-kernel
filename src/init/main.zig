@@ -13,6 +13,16 @@ var heap = std.heap.FixedBufferAllocator.init(heap_ptr[0..abi.BOOTSTRAP_HEAP_SIZ
 //
 
 export fn _start() linksection(".text._start") callconv(.C) noreturn {
+    main() catch |err| {
+        log.err("{err}", .{err});
+    };
+
+    while (true) {
+        abi.sys.yield();
+    }
+}
+
+pub fn main() !void {
     abi.sys.system_rename(0, "init");
     log.info("hello from init", .{});
 
@@ -20,22 +30,12 @@ export fn _start() linksection(".text._start") callconv(.C) noreturn {
     defer io_ring.deinit();
     io_ring.setup() catch unreachable;
 
-    const path = "initfs:///sbin/init";
-    io_ring.submit(.{
-        .user_data = 0,
-        .opcode = .open,
-        .flags = 0,
-        .fd = 0,
-        .buffer = @constCast(@ptrCast(path)),
-        .buffer_len = path.len,
-        .offset = 0,
-    }) catch unreachable;
+    var open = abi.io.Open.new("initfs:///sbin/init");
+    open.submit(&io_ring);
+    const fd = open.wait() catch |err| {
+        log.err("failed to open file: {}", .{err});
+        unreachable;
+    };
 
-    const r = io_ring.wait_completion();
-    log.info("result={any}", .{abi.sys.decode(r.result)});
-    log.info("{any}", .{r});
-
-    while (true) {
-        abi.sys.yield();
-    }
+    log.info("file opened, fd={}", .{fd});
 }

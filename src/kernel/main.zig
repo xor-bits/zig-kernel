@@ -361,15 +361,19 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
 
             log.info("rename pid: {} name: {s}", .{ trap.arg0, name });
             const target_proc = proc.find(trap.arg0);
-            if (target_proc.name == null) {
-                target_proc.name = slab.global_allocator
-                    .allocator()
-                    .create([512:0]u8) catch
-                    std.debug.panic("OOM", .{});
-            }
 
-            target_proc.name.?.* = std.mem.zeroes([512:0]u8); // TODO: just place a zero at the end
-            std.mem.copyForwards(u8, target_proc.name.?[0..512], name);
+            if (target_proc.name) |old| {
+                slab.global_allocator.allocator().free(old);
+            }
+            target_proc.name = null;
+
+            const new_name = slab.global_allocator.allocator().alloc(u8, name.len) catch |err| {
+                log.warn("OOM: {}", .{err});
+                return;
+            };
+
+            std.mem.copyForwards(u8, new_name, name);
+            target_proc.name = new_name;
         },
         // else => std.debug.panic("TODO", .{}),
     }

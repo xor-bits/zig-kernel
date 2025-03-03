@@ -55,8 +55,7 @@ pub const ProtoCreate = struct {
     /// memory at least until the request is complete
     pub fn submit(self: *Self, io_ring: *const abi.IoRing) void {
         self.io_ring = io_ring;
-
-        const entry = abi.sys.SubmissionEntry{
+        submit_entry(.{
             .user_data = @intFromPtr(&self.result),
             .opcode = .proto_create,
             .flags = 0,
@@ -64,32 +63,75 @@ pub const ProtoCreate = struct {
             .buffer = @ptrCast(&self.buffer),
             .buffer_len = @sizeOf(@TypeOf(self.buffer)),
             .offset = 0,
-        };
-
-        while (true) {
-            if (io_ring.submit(entry)) |_| {
-                return;
-            } else |_| {}
-
-            // FIXME: 2 futexes, one for waiting for free slots and one for waiting for returns
-            io_ring_process(io_ring);
-        }
+        }, io_ring);
     }
 
     pub fn wait(self: *Self) Return {
         const io_ring = self.io_ring orelse std.debug.panic("request not submitted", .{});
-
-        while (true) {
-            if (self.result.done) {
-                break;
-            }
-
-            io_ring_process(io_ring);
-        }
+        wait_entry(io_ring, &self.result);
 
         _ = try abi.sys.decode(self.result.result);
     }
 };
+
+pub const Open = struct {
+    path: []const u8,
+    result: Result = .{},
+    io_ring: ?*const abi.IoRing = null,
+
+    pub const Return = abi.sys.Error!u32;
+
+    const Self = @This();
+
+    pub fn new(comptime path: []const u8) Self {
+        return .{
+            .path = path,
+        };
+    }
+
+    /// the data behind the `self` pointer has to be pinned in
+    /// memory at least until the request is complete
+    pub fn submit(self: *Self, io_ring: *const abi.IoRing) void {
+        self.io_ring = io_ring;
+        submit_entry(.{
+            .user_data = @intFromPtr(&self.result),
+            .opcode = .open,
+            .flags = 0,
+            .fd = 0,
+            .buffer = @constCast(@ptrCast(self.path.ptr)),
+            .buffer_len = @truncate(self.path.len),
+            .offset = 0,
+        }, io_ring);
+    }
+
+    pub fn wait(self: *Self) Return {
+        const io_ring = self.io_ring orelse std.debug.panic("request not submitted", .{});
+        wait_entry(io_ring, &self.result);
+
+        return @truncate(try abi.sys.decode(self.result.result));
+    }
+};
+
+pub fn submit_entry(entry: abi.sys.SubmissionEntry, io_ring: *const abi.IoRing) void {
+    while (true) {
+        if (io_ring.submit(entry)) |_| {
+            return;
+        } else |_| {}
+
+        // FIXME: 2 futexes, one for waiting for free slots and one for waiting for returns
+        io_ring_process(io_ring);
+    }
+}
+
+pub fn wait_entry(io_ring: *const abi.IoRing, result: *const Result) void {
+    while (true) {
+        if (result.done) {
+            break;
+        }
+
+        io_ring_process(io_ring);
+    }
+}
 
 pub fn io_ring_process(io_ring: *const abi.IoRing) void {
     const next = io_ring.wait_completion();

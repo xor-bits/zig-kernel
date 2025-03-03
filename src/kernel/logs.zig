@@ -25,7 +25,7 @@ fn logFn(comptime message_level: std.log.Level, comptime scope: @TypeOf(.enum_li
         if (arch.cpu_local().current_pid) |_pid| {
             proc_name = "<nameless>";
             if (proc.find(_pid).name) |name| {
-                proc_name = std.mem.sliceTo(name, 0);
+                proc_name = name;
             }
         }
     }
