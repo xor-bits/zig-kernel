@@ -22,7 +22,10 @@ pub const ProtoCreate = struct {
         submission_queue: *abi.sys.SubmissionQueue,
         completion_queue: *abi.sys.CompletionQueue,
         futex: *std.atomic.Value(usize),
+        /// all buffers
         buffers: [*]u8,
+        /// size of one of the buffers,
+        /// there are as many as there are submission slots
         buffer_size: usize,
     };
 
@@ -38,7 +41,7 @@ pub const ProtoCreate = struct {
             .completion_queue = &proto_ring.inner.completions,
             .futex = &proto_ring.inner.futex,
             .buffers = buffers.ptr,
-            .buffer_size = buffers.len,
+            .buffer_size = buffers.len / proto_ring.inner.submissions.marker.capacity,
         });
     }
 
