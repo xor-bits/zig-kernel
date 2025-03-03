@@ -40,6 +40,7 @@ pub const Source = struct {
     process_id: usize,
     queue_id: usize,
     user_data: u64,
+    is_open: bool,
 };
 
 fn order(a: u64, b: u64) std.math.Order {

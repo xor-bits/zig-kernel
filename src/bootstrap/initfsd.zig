@@ -58,6 +58,8 @@ fn handle_request(req: *const abi.sys.SubmissionEntry, proto_io_ring: *const abi
         else => 0,
     };
 
+    log.info("returning {any}", .{result});
+
     proto_io_ring.complete(.{
         .user_data = req.user_data,
         .result = abi.sys.encode(result),

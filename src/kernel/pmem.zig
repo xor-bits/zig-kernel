@@ -421,7 +421,7 @@ fn _alloc(_: *anyopaque, len: usize, ptr_align: u8, ret_addr: usize) ?[*]u8 {
 
 fn _resize(_: *anyopaque, buf: []u8, buf_align: u8, new_len: usize, ret_addr: usize) bool {
     _ = .{ buf, buf_align, new_len, ret_addr };
-    log.err("FIXME: resize", .{});
+    // log.err("FIXME: resize", .{});
     // TODO:
     return false;
 }

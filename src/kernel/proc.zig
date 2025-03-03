@@ -50,14 +50,23 @@ pub const Context = struct {
         futex: pmem.PhysAddr,
     } = undefined,
 
-    // fd_map_lock: spin.Mutex = .{},
-    // fd_map: [16]u64 = .{},
+    fd_map_lock: spin.Mutex = .{},
+    fd_map: std.ArrayList(*FileDescriptor) = std.ArrayList(*FileDescriptor).init(slab.global_allocator.allocator()),
 
     const Self = @This();
 
     fn pidOf(self: *Self) usize {
         return (@intFromPtr(self) - @intFromPtr(&proc_table)) / @sizeOf(Self);
     }
+};
+
+var fd_alloc_lock: spin.Mutex = .{};
+var fd_alloc: std.heap.MemoryPool(FileDescriptor) = std.heap.MemoryPool(FileDescriptor).init(slab.global_allocator.allocator());
+
+pub const FileDescriptor = struct {
+    protocol: *proto.Protocol,
+    real_fd: u32,
+    refcnt: std.atomic.Value(u32),
 };
 
 // TODO: lazy page allocation for a table that can grow
@@ -67,29 +76,6 @@ var proc_table: [256]Context = blk: {
         c.* = Context{};
     }
     break :blk arr;
-};
-
-const FdTable = std.MultiArrayList(FileDescriptor);
-var vd_table_lock: spin.Mutex = spin.Mutex.newLocked();
-var fd_table: FdTable = .{};
-
-pub fn init_fd_table() !void {
-    const FD_TABLE_BOTTOM = 0xffff_9000_0000_0000;
-    // 1B file descriptors across all processes
-    const FD_TABLE_TOP = 0xffff_9003_0000_0000;
-    const FD_VIRT_SPACE = heap.Heap{
-        .bottom = FD_TABLE_BOTTOM,
-        .top = FD_TABLE_TOP,
-    };
-
-    try fd_table.setCapacity(FD_VIRT_SPACE.allocator(), 1_0000_0000);
-
-    vd_table_lock.unlock();
-}
-
-pub const FileDescriptor = struct {
-    protocol: *proto.Protocol,
-    real_fd: u32,
 };
 
 const PidList = std.DoublyLinkedList(usize);
@@ -269,7 +255,7 @@ pub fn ioJobs(proc: *Context) void {
         const handler = &protocol.handler.?;
 
         // FIXME: validate the queue memory and slots instead of just trusting it
-        const completion: abi.sys.CompletionEntry = if (handler.unhandled) |unhandled|
+        var completion: abi.sys.CompletionEntry = if (handler.unhandled) |unhandled|
             unhandled
         else
             protocol.handler.?.completion_queue.pop() orelse continue;
@@ -288,6 +274,38 @@ pub fn ioJobs(proc: *Context) void {
             // FIXME: use the queue without switching page maps
             source_proc.addr_space.?.switchTo();
             defer proc.addr_space.?.switchTo();
+
+            if (source_node_copy.value.is_open) {
+                if (abi.sys.decode(completion.result) catch null) |real_fd| {
+                    var fd: *FileDescriptor = undefined;
+                    {
+                        fd_alloc_lock.lock();
+                        defer fd_alloc_lock.unlock();
+                        fd = fd_alloc.create() catch |err| {
+                            log.err("could not allocate FileDescriptor: {}", .{err});
+                            break;
+                        };
+                    }
+
+                    fd.protocol = protocol;
+                    fd.real_fd = @truncate(real_fd);
+                    fd.refcnt = .{ .raw = 1 };
+
+                    const fake_fd = source_proc.fd_map.items.len;
+                    {
+                        source_proc.fd_map_lock.lock();
+                        defer source_proc.fd_map_lock.unlock();
+
+                        source_proc.fd_map.append(fd) catch |err| {
+                            log.err("could not allocate FileDescriptor: {}", .{err});
+                            break;
+                        };
+                    }
+
+                    completion.result = abi.sys.encode(fake_fd);
+                }
+            }
+
             // the user process is responsible for not submitting too much crap
             // without collecting the results
             //
@@ -395,6 +413,7 @@ fn open(proc: *Context, ring_id: usize, req: abi.sys.SubmissionEntry) abi.sys.Er
         .process_id = proc.pidOf(),
         .queue_id = ring_id,
         .user_data = req.user_data,
+        .is_open = true,
     };
     if (!handler.sources.insert(source_node)) {
         // FIXME: IDs wrapped
@@ -403,6 +422,7 @@ fn open(proc: *Context, ring_id: usize, req: abi.sys.SubmissionEntry) abi.sys.Er
 
     // write the buffer data to the target process
     // handler.buffers is already verified to be usable
+    log.info("buffer_size = {}", .{handler.buffer_size});
     const per_submission_buffer: [*]u8 = @ptrCast(&handler.buffers[slot.first * handler.buffer_size]);
     proc.addr_space.?.readBytes(
         per_submission_buffer[0..path.len],
@@ -415,6 +435,13 @@ fn open(proc: *Context, ring_id: usize, req: abi.sys.SubmissionEntry) abi.sys.Er
     //     .user,
     // ) catch unreachable; // FIXME: segfault
     // FIXME: untrusted pointer
+    log.info("writing to pid={} slot={} sq={*} sq_storage={*} sq_slot={*}", .{
+        target_proc.pidOf(),
+        slot.first,
+        handler.submission_queue,
+        handler.submission_queue.storage,
+        &handler.submission_queue.storage[slot.first],
+    });
     handler.submission_queue.storage[slot.first] = .{
         .user_data = user_data,
         .offset = req.offset,
