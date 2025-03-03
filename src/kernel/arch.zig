@@ -2,10 +2,13 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 const pmem = @import("pmem.zig");
+const main = @import("main.zig");
 
 pub const x86_64 = @import("arch/x86_64.zig");
 
 //
+
+usingnamespace x86_64;
 
 /// Halt and Catch Fire
 pub inline fn hcf() noreturn {
@@ -24,6 +27,8 @@ pub inline fn init() error{OutOfMemory}!void {
     }
 }
 var cpu_id_next = std.atomic.Value(u32).init(0);
+
+pub inline fn local_storage() *main.CpuLocalStorage {}
 
 pub inline fn cpu_id() u32 {
     if (builtin.cpu.arch == .x86_64) {

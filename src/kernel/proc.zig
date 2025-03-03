@@ -13,6 +13,7 @@ pub const vmem = @import("vmem.zig");
 pub const util = @import("util.zig");
 pub const slab = @import("slab.zig");
 pub const proto = @import("proto.zig");
+pub const heap = @import("heap.zig");
 
 //
 
@@ -36,12 +37,7 @@ pub const Context = struct {
     /// if multiple processes are waiting on the same address
     futex_next: ?usize = null,
 
-    previous_job: union(enum) {
-        yield: void,
-        futex: void,
-    } = .yield,
-
-    // linked list of protocols owned by this
+    /// linked list of protocols owned by this
     protos: ?*proto.Protocol = null,
 
     queues_n: usize = 0,
@@ -54,7 +50,9 @@ pub const Context = struct {
         futex: pmem.PhysAddr,
     } = undefined,
 
-    // TODO: fd map
+    fd_map_lock: spin.Mutex = .{},
+    //
+    fd_map: [16]u64 = .{},
 
     const Self = @This();
 
@@ -63,8 +61,36 @@ pub const Context = struct {
     }
 };
 
-pub const Cpu = struct {
-    current_pid: ?usize,
+// TODO: lazy page allocation for a table that can grow
+var proc_table: [256]Context = blk: {
+    var arr: [256]Context = undefined;
+    for (&arr) |*c| {
+        c.* = Context{};
+    }
+    break :blk arr;
+};
+
+const FdTable = std.MultiArrayList(FileDescriptor);
+var vd_table_lock: spin.Mutex = spin.Mutex.newLocked();
+var fd_table: FdTable = .{};
+
+pub fn init_fd_table() !void {
+    const FD_TABLE_BOTTOM = 0xffff_9000_0000_0000;
+    // 1B file descriptors across all processes
+    const FD_TABLE_TOP = 0xffff_9003_0000_0000;
+    const FD_VIRT_SPACE = heap.Heap{
+        .bottom = FD_TABLE_BOTTOM,
+        .top = FD_TABLE_TOP,
+    };
+
+    try fd_table.setCapacity(FD_VIRT_SPACE.allocator(), 1_0000_0000);
+
+    vd_table_lock.unlock();
+}
+
+pub const FileDescriptor = struct {
+    protocol: *proto.Protocol,
+    real_fd: u32,
 };
 
 const PidList = std.DoublyLinkedList(usize);
@@ -454,7 +480,6 @@ pub fn futex_wait(value: *std.atomic.Value(usize), expected: usize, trap: *arch.
         },
     }
 
-    this.previous_job = .{ .futex = void{} };
     unlockAndYield(trap);
 
     const next_pid = popWait();
@@ -495,8 +520,6 @@ pub fn yield(now_pid: usize, trap: *arch.SyscallRegs) void {
         return;
     };
     pushReady(now_pid);
-
-    find(now_pid).previous_job = .{ .yield = void{} };
 
     // save the previous process
     unlockAndYield(trap);
@@ -550,8 +573,8 @@ pub fn current() *Context {
 /// set the current process to be ready and switch away from it
 pub fn unlockAndYield(trap: *arch.SyscallRegs) void {
     const cpu = &cpu_table[arch.cpu_id()];
-    if (cpu.current_pid) |prev| {
-        cpu.current_pid = null;
+    if (cpu.current_pid != std.math.maxInt(usize)) {
+        cpu.current_pid = std.math.maxInt(usize);
 
         const proc = &proc_table[prev];
         proc.status = .ready;
@@ -582,17 +605,11 @@ pub fn returnEarly(pid: usize) noreturn {
 
 //
 
-// TODO: lazy page allocation for a table that can grow
-var proc_table: [256]Context = blk: {
-    var arr: [256]Context = undefined;
-    for (&arr) |*c| {
-        c.* = Context{};
-    }
-    break :blk arr;
+pub const Cpu = struct {
+    current_pid: usize,
 };
 
-// TODO: same lazy page allocation for a page that can grow
-var cpu_table: [32]Cpu = undefined;
+var cpu_table: [256]Cpu = undefined;
 
 var ready_r_lock: spin.Mutex = .{};
 var ready_w_lock: spin.Mutex = .{};
@@ -634,4 +651,12 @@ pub fn untrustedSlice(comptime T: type, bottom: usize, length: usize) abi.sys.Er
 pub fn untrustedPtr(comptime T: type, ptr: usize) abi.sys.Error!*T {
     const slice = try untrustedSlice(T, ptr, 1);
     return &slice[0];
+}
+
+fn fillWith(comptime n: usize, comptime val: anytype) [n]@TypeOf(val) {
+    var arr = [n]@TypeOf(val);
+    for (&arr) |*v| {
+        v.* = val;
+    }
+    return arr;
 }
