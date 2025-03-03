@@ -298,6 +298,7 @@ pub const AddressSpace = struct {
         const flags = Entry{
             .lazy_alloc = 1,
             .writeable = _flags.writeable,
+            .no_execute = _flags.no_execute,
             .user_accessible = _flags.user_accessible,
         };
 
@@ -317,6 +318,7 @@ pub const AddressSpace = struct {
         var flags = Entry{
             .present = 1,
             .writeable = _flags.writeable,
+            .no_execute = _flags.no_execute,
             .user_accessible = _flags.user_accessible,
         };
 
