@@ -17,18 +17,20 @@ pub fn main() !void {
     abi.sys.system_rename(0, "init");
     log.info("hello from init", .{});
 
-    const io_ring = abi.IoRing.init(64, heap.allocator()) catch unreachable;
+    const io_ring = try abi.IoRing.init(64, heap.allocator());
     defer io_ring.deinit();
-    io_ring.setup() catch unreachable;
+    try io_ring.setup();
 
     var open = abi.io.Open.new("initfs:///sbin/init");
     open.submit(&io_ring);
-    const fd = open.wait() catch |err| {
-        log.err("failed to open file: {}", .{err});
-        unreachable;
-    };
+    const fd = try open.wait();
 
     log.info("file opened, fd={}", .{fd});
+
+    var buffer: [0x2000]u8 = undefined;
+    var read = abi.io.Read.new(fd, buffer[0..]);
+    read.submit(&io_ring);
+    const bytes = try read.wait();
 }
 
 comptime {
