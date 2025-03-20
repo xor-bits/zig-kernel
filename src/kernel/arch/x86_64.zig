@@ -21,9 +21,7 @@ pub const KERNELGS_BASE = 0xC0000102;
 //
 
 pub fn init_cpu(id: u32) !void {
-    log.info("CpuLocalStorage size={}", .{@sizeOf(main.CpuLocalStorage)});
-
-    const tls_mem = try init.alloc(std.math.divCeil(usize, @sizeOf(main.CpuLocalStorage), 0x1000));
+    const tls_mem = try init.alloc(try std.math.divCeil(usize, @sizeOf(main.CpuLocalStorage), 0x1000));
     const tls = tls_mem.toHhdm().toPtr(*main.CpuLocalStorage);
     tls.* = .{
         .self_ptr = tls,
@@ -31,7 +29,7 @@ pub fn init_cpu(id: u32) !void {
         .id = id,
     };
 
-    CpuConfig.init(&tls.cpu_config);
+    try CpuConfig.init(&tls.cpu_config);
 
     wrmsr(GS_BASE, @intFromPtr(tls));
     wrmsr(KERNELGS_BASE, 0);
@@ -848,8 +846,8 @@ pub const CpuConfig = struct {
     tss: Tss,
     idt: Idt,
 
-    pub fn init(self: *@This()) void {
-        self.tss = Tss.new();
+    pub fn init(self: *@This()) !void {
+        self.tss = try Tss.new();
         self.gdt = Gdt.new(&self.tss);
         self.idt = Idt.new();
 
@@ -962,7 +960,7 @@ pub const Cr3 = packed struct {
     // page_Level_write_through: u1,
     // page_level_cache_disable: u1,
     // reserved1: u7,
-    pcid: u12,
+    pcid: u12 = 0,
     pml4_phys_base: u52,
 
     const Self = @This();

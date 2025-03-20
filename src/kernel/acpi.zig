@@ -43,6 +43,7 @@ pub fn init() !void {
 fn acpiv1(rsdp: *const Rsdp) !void {
     log.info("ACPI v1", .{});
 
+    // FIXME: this is unaligned most of the time, but zig doesnt like that
     const rsdt: *const Rsdt = addr.Phys.fromInt(rsdp.rsdt_addr).toHhdm().toPtr(*const Rsdt);
     if (!isChecksumValid(Rsdt, rsdt)) {
         return error.InvalidRsdtChecksum;
@@ -62,7 +63,7 @@ fn acpiv2(rsdp: *const Rsdp) !void {
         return error.InvalidRsdpChecksum;
     }
 
-    const xsdt: *const Xsdt = addr.Phys.fromInt(xsdp.xsdt_addr).toHhdm().ptr(*const Xsdt);
+    const xsdt: *const Xsdt = addr.Phys.fromInt(xsdp.xsdt_addr).toHhdm().toPtr(*const Xsdt);
     if (!isChecksumValid(Xsdt, xsdt)) {
         return error.InvalidXsdtChecksum;
     }
@@ -79,7 +80,7 @@ fn walkTables(comptime T: type, pointers: []align(1) const T) !void {
 
     log.info("SDT Headers:", .{});
     for (pointers) |sdt_ptr| {
-        const sdt: *const SdtHeader = addr.Phys.fromInt(sdt_ptr).toHhdm().ptr(*const SdtHeader);
+        const sdt: *const SdtHeader = addr.Phys.fromInt(sdt_ptr).toHhdm().toPtr(*const SdtHeader);
         if (!isChecksumValid(SdtHeader, sdt)) {
             log.warn("skipping invalid SDT: {s}", .{sdt.signature});
             continue;

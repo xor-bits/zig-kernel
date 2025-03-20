@@ -9,6 +9,7 @@ pub const rt = @import("rt.zig");
 //
 
 pub const BOOTSTRAP_EXE = 0x200_0000;
+
 pub const BOOTSTRAP_HEAP = 0x1000_0000;
 pub const BOOTSTRAP_HEAP_SIZE = 0x1000_0000;
 pub const BOOTSTRAP_STACK = 0x3000_0000;

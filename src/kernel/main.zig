@@ -80,16 +80,24 @@ fn main() noreturn {
     caps.debug_type(caps.Thread);
     caps.debug_type(caps.Frame);
 
-    init.init() catch |err| {
+    // set up arch specific things: GDT, TSS, IDT, syscalls, ...
+    log.info("initializing CPU", .{});
+    const id = arch.next_cpu_id();
+    arch.init_cpu(id) catch |err| {
+        std.debug.panic("failed to initialize CPU-{}: {}", .{ id, err });
+    };
+
+    // initialize ACPI specific things: APIC, HPET, ...
+    log.info("initializing ACPI", .{});
+    acpi.init() catch |err| {
+        std.debug.panic("failed to initialize ACPI: {any}", .{err});
+    };
+
+    // initialize and execute the bootstrap process
+    log.info("initializing bootstrap", .{});
+    init.exec() catch |err| {
         std.debug.panic("failed to set up init process: {}", .{err});
     };
-
-    const kernel_args = args.parse() catch |err| {
-        std.debug.panic("invalid kernel cmdline: {}", .{err});
-    };
-    _ = kernel_args;
-
-    while (true) {}
 }
 
 pub fn syscall(trap: *arch.SyscallRegs) void {

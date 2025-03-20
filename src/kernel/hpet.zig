@@ -13,9 +13,10 @@ pub fn init(hpet: *const Hpet) !void {
     log.info("found HPET addr: 0x{x}", .{hpet.address});
 
     hpet_regs = addr.Phys.fromInt(hpet.address).toHhdm().toPtr(*volatile HpetRegs);
+    const regs = hpet_regs.?;
 
-    hpet_regs.?.config.enable_config = 1;
-    log.info("HPET speed: 1ms = {d} ticks", .{1_000_000_000_000 / @as(u64, hpet_regs.caps_and_id.counter_period_femtoseconds)});
+    regs.config.enable_config = 1;
+    log.info("HPET speed: 1ms = {d} ticks", .{1_000_000_000_000 / @as(u64, regs.caps_and_id.counter_period_femtoseconds)});
 }
 
 pub fn hpet_spin_wait(micros: u32, just_before: anytype) void {

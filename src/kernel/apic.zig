@@ -94,7 +94,7 @@ pub fn init(madt: *const Madt) !void {
     }
 
     log.info("found Local APIC addr: 0x{x}", .{lapic_addr});
-    const lapic: *volatile LocalApicRegs = addr.Phys.fromInt(lapic_addr).toHhdm().ptr(*volatile LocalApicRegs);
+    const lapic: *volatile LocalApicRegs = addr.Phys.fromInt(lapic_addr).toHhdm().toPtr(*volatile LocalApicRegs);
 
     apic_base.initNow(lapic);
     @fence(.seq_cst); // init is release, not acquire
