@@ -11,6 +11,7 @@ const logs = @import("logs.zig");
 const spin = @import("spin.zig");
 const util = @import("util.zig");
 const init = @import("init.zig");
+const caps = @import("caps.zig");
 
 //
 
@@ -36,70 +37,6 @@ pub const CpuLocalStorage = struct {
     current_pid: ?usize = null,
     id: u32,
 };
-
-/// forms a tree of capabilities
-pub const Capabilities = struct {
-    // N capabilities based on how many can fit in a page
-    caps: [0x1000 / @sizeOf(Object)]Object,
-};
-
-pub const BootInfo = struct {};
-
-/// raw physical memory that can be used to allocate
-/// things like more `CapabilityNode`s or things
-pub const Memory = struct {};
-
-/// thread information
-pub const Thread = struct {
-    trap: arch.SyscallRegs,
-    caps: Capability(Capabilities),
-    vmem: Capability(PageTableLevel4),
-    priority: u2,
-};
-
-/// a `Thread` points to this
-pub const PageTableLevel4 = struct {};
-/// a `PageTableLevel4` points to multiple of these
-pub const PageTableLevel3 = struct {};
-/// a `PageTableLevel3` points to multiple of these
-pub const PageTableLevel2 = struct {};
-/// a `PageTableLevel2` points to multiple of these
-pub const PageTableLevel1 = struct {};
-/// a `PageTableLevel1` points to multiple of these
-///
-/// raw physical memory again, but now mappable
-/// (and can't be used to allocate things)
-pub const Frame = struct {};
-
-pub fn Capability(comptime T: type) type {
-    return struct {
-        paddr: usize,
-
-        pub fn ptr(self: @This()) *T {
-            // recursive mapping instead of HHDM later (maybe)
-            self.paddr;
-        }
-    };
-}
-
-pub const Object = struct {
-    paddr: usize,
-    type: enum {
-        capabilities,
-        boot_info,
-        memory,
-        thread,
-        page_table_level_4,
-        page_table_level_3,
-        page_table_level_2,
-        page_table_level_1,
-        frame,
-    },
-};
-
-fn debug_type(comptime T: type) void {
-    std.log.info("{s}: size={} align={}", .{ @typeName(T), @sizeOf(T), @alignOf(T) });
-}
 
 //
 
@@ -137,11 +74,11 @@ fn main() noreturn {
     log.info("kernel version: 0.0.2", .{});
     log.info("kernel git revision: {s}", .{std.mem.trimRight(u8, @embedFile("git-rev"), "\n\r")});
 
-    debug_type(Object);
-    debug_type(Capabilities);
-    std.log.info("Capabilities: len={}", .{@as(Capabilities, undefined).caps.len});
-    debug_type(Thread);
-    debug_type(Frame);
+    caps.debug_type(caps.Object);
+    caps.debug_type(caps.Capabilities);
+    std.log.info("Capabilities: len={}", .{@as(caps.Capabilities, undefined).caps.len});
+    caps.debug_type(caps.Thread);
+    caps.debug_type(caps.Frame);
 
     init.init() catch |err| {
         std.debug.panic("failed to set up init process: {}", .{err});
