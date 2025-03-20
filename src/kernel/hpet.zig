@@ -1,8 +1,8 @@
 const std = @import("std");
 
 const arch = @import("arch.zig");
+const addr = @import("addr.zig");
 const acpi = @import("acpi.zig");
-const pmem = @import("pmem.zig");
 const lazy = @import("lazy.zig");
 
 const log = std.log.scoped(.hpet);
@@ -12,42 +12,42 @@ const log = std.log.scoped(.hpet);
 pub fn init(hpet: *const Hpet) !void {
     log.info("found HPET addr: 0x{x}", .{hpet.address});
 
-    const hpet_regs = pmem.PhysAddr.new(hpet.address).toHhdm().ptr(*volatile HpetRegs);
-    hpet_regs_lazy.initNow(hpet_regs);
+    hpet_regs = addr.Phys.fromInt(hpet.address).toHhdm().toPtr(*volatile HpetRegs);
 
-    hpet_regs.config.enable_config = 1;
+    hpet_regs.?.config.enable_config = 1;
     log.info("HPET speed: 1ms = {d} ticks", .{1_000_000_000_000 / @as(u64, hpet_regs.caps_and_id.counter_period_femtoseconds)});
 }
 
 pub fn hpet_spin_wait(micros: u32, just_before: anytype) void {
-    const hpet_regs = hpet_regs_lazy.get().?.*;
-    const ticks = (@as(u64, micros) * 1_000_000_000) / hpet_regs.caps_and_id.counter_period_femtoseconds;
+    const regs = hpet_regs.?;
+
+    const ticks = (@as(u64, micros) * 1_000_000_000) / regs.caps_and_id.counter_period_femtoseconds;
 
     just_before.run();
-    const deadline = hpet_regs.main_counter_value + ticks;
-    while (hpet_regs.main_counter_value <= deadline) {
+    const deadline = regs.main_counter_value + ticks;
+    while (regs.main_counter_value <= deadline) {
         std.atomic.spinLoopHint();
     }
 }
 
 pub fn now() u64 {
-    const regs = hpet_regs_lazy.get().?.*;
+    const regs = hpet_regs.?;
     return regs.main_counter_value;
 }
 
 pub fn asNanos(t: u64) u128 {
-    const regs = hpet_regs_lazy.get().?.*;
+    const regs = hpet_regs.?;
     return @as(u128, t) * regs.caps_and_id.counter_period_femtoseconds / 1_000_000;
 }
 
 pub fn elapsedNanos(from_then: u64) u128 {
-    const regs = hpet_regs_lazy.get().?.*;
+    const regs = hpet_regs.?;
     return @as(u128, regs.main_counter_value - from_then) * regs.caps_and_id.counter_period_femtoseconds / 1_000_000;
 }
 
 //
 
-var hpet_regs_lazy = lazy.Lazy(*volatile HpetRegs).new();
+var hpet_regs: ?*volatile HpetRegs = null;
 
 //
 

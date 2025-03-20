@@ -1,9 +1,9 @@
 const std = @import("std");
 
 const apic = @import("../apic.zig");
+const addr = @import("../addr.zig");
 const main = @import("../main.zig");
-const pmem = @import("../pmem.zig");
-const vmem = @import("../vmem.zig");
+const init = @import("../init.zig");
 
 const log = std.log.scoped(.arch);
 
@@ -23,7 +23,8 @@ pub const KERNELGS_BASE = 0xC0000102;
 pub fn init_cpu(id: u32) !void {
     log.info("CpuLocalStorage size={}", .{@sizeOf(main.CpuLocalStorage)});
 
-    const tls = try pmem.page_allocator.create(main.CpuLocalStorage);
+    const tls_mem = try init.alloc(std.math.divCeil(usize, @sizeOf(main.CpuLocalStorage), 0x1000));
+    const tls = tls_mem.toHhdm().toPtr(*main.CpuLocalStorage);
     tls.* = .{
         .self_ptr = tls,
         .cpu_config = undefined,
@@ -294,11 +295,11 @@ pub fn flush_tlb() void {
     wrcr3(rdcr3());
 }
 
-pub fn flush_tlb_addr(addr: usize) void {
+pub fn flush_tlb_addr(vaddr: usize) void {
     asm volatile (
         \\ invlpg (%[v])
         :
-        : [v] "r" (addr),
+        : [v] "r" (vaddr),
         : "memory"
     );
 }
@@ -457,19 +458,15 @@ pub const Tss = extern struct {
     reserved3: u16 = 0,
     iomap_base: u16 = @sizeOf(@This()), // no iomap base
 
-    fn new() @This() {
+    fn new() !@This() {
         const Stack = [8 * 0x1000]u8;
 
         var res = @This(){};
 
-        res.privilege_stacks[0] =
-            @sizeOf(Stack) + @intFromPtr(pmem.page_allocator.create(Stack) catch {
-            std.debug.panic("not enough memory for a privilege stack", .{});
-        });
-        res.interrupt_stacks[0] =
-            @sizeOf(Stack) + @intFromPtr(pmem.page_allocator.create(Stack) catch {
-            std.debug.panic("not enough memory for an interrupt stack", .{});
-        });
+        var stack: addr.Phys = try init.alloc(8);
+        res.privilege_stacks[0] = @sizeOf(Stack) + @intFromPtr(stack.toHhdm().toPtr(*Stack));
+        stack = try init.alloc(8);
+        res.interrupt_stacks[0] = @sizeOf(Stack) + @intFromPtr(stack.toHhdm().toPtr(*Stack));
 
         return res;
     }
@@ -683,15 +680,6 @@ pub const Idt = extern struct {
 
                 if (pfec.user_mode) swapgs();
                 defer if (pfec.user_mode) swapgs();
-
-                vmem.AddressSpace.current().pageFault(
-                    pmem.VirtAddr.new(target_addr),
-                    pfec.user_mode,
-                    pfec.caused_by_write,
-                ) catch {
-                    flush_tlb_addr(target_addr);
-                    return;
-                };
 
                 log.err(
                     \\page fault 0x{x}

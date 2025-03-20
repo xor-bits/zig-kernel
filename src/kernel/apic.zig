@@ -2,11 +2,10 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 const acpi = @import("acpi.zig");
+const addr = @import("addr.zig");
 const arch = @import("arch.zig");
-const hpet = @import("hpet.zig");
 const lazy = @import("lazy.zig");
-const pmem = @import("pmem.zig");
-const proc = @import("proc.zig");
+const hpet = @import("hpet.zig");
 
 const log = std.log.scoped(.apic);
 
@@ -95,7 +94,7 @@ pub fn init(madt: *const Madt) !void {
     }
 
     log.info("found Local APIC addr: 0x{x}", .{lapic_addr});
-    const lapic: *volatile LocalApicRegs = pmem.PhysAddr.new(lapic_addr).toHhdm().ptr(*volatile LocalApicRegs);
+    const lapic: *volatile LocalApicRegs = addr.Phys.fromInt(lapic_addr).toHhdm().ptr(*volatile LocalApicRegs);
 
     apic_base.initNow(lapic);
     @fence(.seq_cst); // init is release, not acquire
@@ -160,7 +159,6 @@ pub fn spurious(_: *const anyopaque) void {
 
 pub fn timer(_: *const anyopaque) void {
     eoi();
-    proc.tick();
 }
 
 fn eoi() void {

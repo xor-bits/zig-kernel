@@ -1,8 +1,8 @@
 const std = @import("std");
 const limine = @import("limine");
 
-const pmem = @import("pmem.zig");
 const apic = @import("apic.zig");
+const addr = @import("addr.zig");
 const hpet = @import("hpet.zig");
 
 const log = std.log.scoped(.acpi);
@@ -21,7 +21,7 @@ pub fn init() !void {
     };
 
     const rsdp: *const Rsdp = if (rsdp_resp.revision >= 3)
-        pmem.PhysAddr.new(@intFromPtr(rsdp_resp.address)).toHhdm().ptr(*const Rsdp)
+        addr.Phys.fromInt(@intFromPtr(rsdp_resp.address)).toHhdm().toPtr(*const Rsdp)
     else
         @ptrCast(rsdp_resp.address);
     if (!isChecksumValid(Rsdp, rsdp)) {
@@ -43,7 +43,7 @@ pub fn init() !void {
 fn acpiv1(rsdp: *const Rsdp) !void {
     log.info("ACPI v1", .{});
 
-    const rsdt: *const Rsdt = pmem.PhysAddr.new(rsdp.rsdt_addr).toHhdm().ptr(*const Rsdt);
+    const rsdt: *const Rsdt = addr.Phys.fromInt(rsdp.rsdt_addr).toHhdm().toPtr(*const Rsdt);
     if (!isChecksumValid(Rsdt, rsdt)) {
         return error.InvalidRsdtChecksum;
     }
@@ -62,7 +62,7 @@ fn acpiv2(rsdp: *const Rsdp) !void {
         return error.InvalidRsdpChecksum;
     }
 
-    const xsdt: *const Xsdt = pmem.PhysAddr.new(xsdp.xsdt_addr).toHhdm().ptr(*const Xsdt);
+    const xsdt: *const Xsdt = addr.Phys.fromInt(xsdp.xsdt_addr).toHhdm().ptr(*const Xsdt);
     if (!isChecksumValid(Xsdt, xsdt)) {
         return error.InvalidXsdtChecksum;
     }
@@ -79,7 +79,7 @@ fn walkTables(comptime T: type, pointers: []align(1) const T) !void {
 
     log.info("SDT Headers:", .{});
     for (pointers) |sdt_ptr| {
-        const sdt: *const SdtHeader = pmem.PhysAddr.new(sdt_ptr).toHhdm().ptr(*const SdtHeader);
+        const sdt: *const SdtHeader = addr.Phys.fromInt(sdt_ptr).toHhdm().ptr(*const SdtHeader);
         if (!isChecksumValid(SdtHeader, sdt)) {
             log.warn("skipping invalid SDT: {s}", .{sdt.signature});
             continue;

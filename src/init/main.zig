@@ -26,11 +26,6 @@ pub fn main() !void {
     const fd = try open.wait();
 
     log.info("file opened, fd={}", .{fd});
-
-    var buffer: [0x2000]u8 = undefined;
-    var read = abi.io.Read.new(fd, buffer[0..]);
-    read.submit(&io_ring);
-    const bytes = try read.wait();
 }
 
 comptime {

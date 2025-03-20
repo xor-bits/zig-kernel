@@ -1,7 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const pmem = @import("pmem.zig");
 const main = @import("main.zig");
 
 pub const x86_64 = @import("arch/x86_64.zig");

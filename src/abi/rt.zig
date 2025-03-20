@@ -14,7 +14,7 @@ pub fn install_rt() void {
 
 fn _start() callconv(.C) noreturn {
     root.main() catch |err| {
-        std.debug.panic("{err}", .{err});
+        std.debug.panic("{}", .{err});
     };
 
     while (true) {
