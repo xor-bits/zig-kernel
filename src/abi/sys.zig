@@ -8,46 +8,41 @@ pub const Id = enum(usize) {
     /// print debug logs to serial output
     log = 0x1,
 
+    send = 0x2,
+
+    recv = 0x3,
+
     /// give up the CPU for other tasks
-    yield = 0x2,
+    yield = 0x8,
+};
 
-    /// wait on physical memory, depending on the value
-    futex_wait = 0x3,
+pub const IdPageMap = enum(usize) {
+    /// map an entry
+    map = 0x1,
+    /// unmap an entry
+    unmap = 0x2,
+};
 
-    /// wake waiters on physical memory
-    futex_wake = 0x4,
+pub const Rights = extern struct {
+    readable: bool = true,
+    writable: bool = false,
+    executable: bool = false,
 
-    /// mark the pages as lazy allocated again,
-    /// effectively zeroing out the memory and freeing the physical allocation
-    lazy_zero = 0x5,
+    pub fn intersection(self: Rights, other: Rights) Rights {
+        return Rights{
+            .readable = self.readable and other.readable,
+            .writable = self.writable and other.writable,
+            .executable = self.executable and other.executable,
+        };
+    }
+};
 
-    /// create new io ring
-    ring_setup = 0x801,
-
-    /// fork the virtual address space, making both copy on write
-    ///
-    /// only system processes can use this
-    system_fork = 0x8000_0001,
-
-    /// make a ref counted copy of the virtual address space, this is for threads
-    ///
-    /// only system processes can use this
-    system_spawn = 0x8000_0002,
-
-    /// map memory to virtual address space
-    ///
-    /// only system processes can use this
-    system_map = 0x8000_0003,
-
-    /// mark process as ready to run again
-    ///
-    /// only system processes can use this
-    system_exec = 0x8000_0004,
-
-    /// rename the process
-    ///
-    /// only system processes can use this
-    system_rename = 0x8000_0005,
+pub const MapFlags = extern struct {
+    write_through: bool = false,
+    cache_disable: bool = false,
+    huge_page: bool = false,
+    global: bool = false,
+    protection_key: u8 = 0,
 };
 
 pub const Error = error{
@@ -192,243 +187,75 @@ pub fn log(s: []const u8) void {
     _ = call(.log, .{ @intFromPtr(s.ptr), s.len }) catch unreachable;
 }
 
+pub const Args = struct {
+    arg0: usize = 0,
+    arg1: usize = 0,
+    arg2: usize = 0,
+    arg3: usize = 0,
+    arg4: usize = 0,
+};
+
+pub fn send(cap_ptr: usize, args: Args) !void {
+    _ = try call(.send, .{
+        cap_ptr,
+        args.arg0,
+        args.arg1,
+        args.arg2,
+        args.arg3,
+        args.arg4,
+    });
+}
+
+pub fn recv(cap_ptr: usize) !Args {
+    const res, const args = call6rw(@intFromEnum(Id.recv), .{
+        cap_ptr,
+        0,
+        0,
+        0,
+        0,
+        0,
+    });
+
+    _ = try decode(res);
+
+    return .{
+        .arg0 = args[0],
+        .arg1 = args[1],
+        .arg2 = args[2],
+        .arg3 = args[3],
+        .arg4 = args[4],
+    };
+}
+
 pub fn yield() void {
     _ = call(.yield, .{}) catch unreachable;
 }
 
-/// goes to sleep if the `[value]` is `expected`
-pub fn futex_wait(value: *const usize, expected: usize) void {
-    // the only possible error is using an invalid address,
-    // which either page faults or GP faults anyways
-    _ = call(.futex_wait, .{ @intFromPtr(value), expected }) catch unreachable;
-}
-
-/// wake up `n` tasks sleeping on `[value]`
-pub fn futex_wake(value: *const usize, n: usize) void {
-    _ = call(.futex_wake, .{ @intFromPtr(value), n }) catch unreachable;
-}
-
-/// mark the pages as lazy allocated again,
-/// effectively zeroing out the memory and freeing the physical allocation
-pub fn lazy_zero(pages: []Page) void {
-    _ = call(.lazy_zero, .{ @intFromPtr(pages.ptr), pages.len }) catch unreachable; // the only error would be a segfault
-}
-
-/// create a I/O ring, the futex is used to wait
-pub fn ringSetup(
-    submission_queue: *SubmissionQueue,
-    completion_queue: *CompletionQueue,
-    futex: *std.atomic.Value(usize),
-) Error!void {
-    _ = try call(.ring_setup, .{ @intFromPtr(submission_queue), @intFromPtr(completion_queue), @intFromPtr(futex) });
-}
-
-pub fn ringWait() Error!void {
-    _ = try call(.ring_wait, .{});
-}
-
-pub fn vfs_proto_create(name: []const u8) Error!usize {
-    return try call(.vfs_proto_create, .{ @intFromPtr(name.ptr), name.len });
-}
-
-pub fn vfs_proto_next(
-    proto_handle: usize,
-    request: *ProtocolRequest,
-    path_buf: *[4096]u8,
-) Error!void {
-    _ = try call(.vfs_proto_next, .{ proto_handle, @intFromPtr(request), @intFromPtr(path_buf) });
-    // return try
-}
-
-// // system processes only
-// pub fn system_fork(from_pid: usize, to_pid: usize) void {
-//     _ = call2(@intFromEnum(Id.system_fork), from_pid, to_pid);
-// }
-
-// system processes only
-pub fn system_map(pid: usize, new_maps: []const Map) void {
-    _ = call(.system_map, .{ pid, @intFromPtr(new_maps.ptr), new_maps.len }) catch unreachable;
-}
-
-// system processes only
-pub fn system_exec(pid: usize, ip: usize, sp: usize) void {
-    _ = call(.system_exec, .{ pid, ip, sp }) catch unreachable;
-}
-
-// system processes only
-pub fn system_rename(pid: usize, name: []const u8) void {
-    _ = call(.system_rename, .{ pid, @intFromPtr(name.ptr), name.len }) catch unreachable;
-}
-
 //
 
-// /// zig doesn't support `extern union(enum)` yet
-// pub fn externify(comptime U: type) type {
-//     var info = @typeInfo(U);
-//     switch (info) {
-//         .Union => |*info_union| {
-//             const Tag = comptime info_union.tag_type.?;
-//             info_union.tag_type = null;
-//             info_union.layout = .@"extern";
-//             const Data = comptime @Type(info);
-//             return extern struct {
-//                 tag: Tag,
-//                 data: Data,
-//             };
-//         },
-//         else => @compileError("tagged unions only"),
-//     }
-// }
-
-pub const Fd = u16;
-
-pub const SubmissionQueue = ring.AtomicRing(SubmissionEntry, [*]SubmissionEntry);
-
-/// io operation
-pub const SubmissionEntry = extern struct {
-    user_data: u64 = 0,
-    offset: usize,
-    buffer: [*]u8,
-    buffer_len: u32,
-    fd: Fd,
-    opcode: enum(u8) {
-        proto_create,
-        open,
-        _,
-    },
-    flags: u8,
-};
-
-pub const CompletionQueue = ring.AtomicRing(CompletionEntry, [*]CompletionEntry);
-
-/// io operation result
-pub const CompletionEntry = extern struct {
-    user_data: u64 = 0,
-    result: usize,
-};
-
-pub const ProtocolRequest = extern struct {
-    /// TODO: this is for concurrency later
-    id: usize,
-
-    data: Data,
-    ty: Tag,
-
-    pub const Tag = enum(u8) {
-        open,
-        close,
-    };
-
-    pub const Data = extern union {
-        open: Open,
-        close: Close,
-    };
-
-    pub const Open = extern struct {
-        path_len: usize, // path is stored in a 4096 buffer provided separately
-        flags: usize,
-        mode: usize,
-    };
-
-    pub const Close = extern struct {
-        /// the client fd is not known to a vfs proto handler
-        local_fd: usize,
-    };
-};
-
-pub const ProtocolResponse = extern struct {
-    id: usize,
-
-    data: Data,
-    ty: Tag,
-
-    pub const Tag = enum(u8) {
-        open,
-        close,
-    };
-
-    pub const Data = extern union {
-        open: Open,
-        close: Close,
-    };
-
-    pub const Open = extern struct {
-        result: usize,
-    };
-
-    pub const Close = extern struct {};
-};
-
-pub const Map = extern struct {
-    dst: usize,
-    src: MapSource,
+pub const MapArgs = extern struct {
+    target: usize,
+    vmem: usize,
+    vaddr: usize,
+    rights: Rights,
     flags: MapFlags,
+    _pad: usize = 0,
 };
 
-pub const MapSource = extern struct {
-    tag: enum(u8) {
-        bytes,
-        lazy,
-    },
-
-    data: extern union {
-        /// allocate pages immediately, and write bytes into them
-        ///
-        /// whole pages are filled with zeroes before writing
-        bytes: extern struct {
-            first: [*]const u8,
-            len: usize,
-        },
-
-        /// allocate (n divceil 0x1000) pages lazily (overcommit)
-        lazy: usize,
-    },
-
-    const Self = @This();
-
-    pub fn newBytes(b: []const u8) Self {
-        return Self{
-            .tag = .bytes,
-            .data = .{ .bytes = .{ .first = b.ptr, .len = b.len } },
-        };
-    }
-
-    pub fn asBytes(self: Self) ?[]const u8 {
-        if (self.tag != .bytes) {
-            return null;
-        }
-
-        return self.data.bytes.first[0..self.data.bytes.len];
-    }
-
-    pub fn newLazy(len: usize) Self {
-        return Self{
-            .tag = .lazy,
-            .data = .{ .lazy = len },
-        };
-    }
-
-    pub fn asLazy(self: Self) ?usize {
-        if (self.tag != .lazy) {
-            return null;
-        }
-
-        return self.data.lazy;
-    }
-
-    pub fn length(self: Self) usize {
-        switch (self.tag) {
-            .bytes => return self.data.bytes.len,
-            .lazy => return self.data.lazy,
-        }
-    }
-};
-
-pub const MapFlags = packed struct {
-    write: bool,
-    execute: bool,
-    _p: u6 = 0,
-};
+pub fn map_level3(
+    target: usize,
+    vmem: usize,
+    vaddr: usize,
+    rights: Rights,
+    flags: MapFlags,
+) Error!void {
+    send(target, .{
+        .arg0 = vmem,
+        .arg1 = vaddr,
+        .arg2 = @bitCast(rights),
+        .arg3 = @bitCast(flags),
+    });
+}
 
 //
 
@@ -476,7 +303,16 @@ pub fn call(id: Id, args: anytype) Error!usize {
             @field(args, fields[3].name),
             @field(args, fields[4].name),
         ),
-        else => @compileError("expected 5 or less syscall arguments, found " ++ fields.len),
+        6 => call6(
+            syscall_id,
+            @field(args, fields[0].name),
+            @field(args, fields[1].name),
+            @field(args, fields[2].name),
+            @field(args, fields[3].name),
+            @field(args, fields[4].name),
+            @field(args, fields[5].name),
+        ),
+        else => @compileError("expected 6 or less syscall arguments, found " ++ fields.len),
     };
 
     return try decode(result);
@@ -544,4 +380,50 @@ pub fn call5(id: usize, arg1: usize, arg2: usize, arg3: usize, arg4: usize, arg5
           [arg5] "{r9}" (arg5),
         : "rcx", "r11" // rcx becomes rip and r11 becomes rflags
     );
+}
+
+pub fn call6(id: usize, arg1: usize, arg2: usize, arg3: usize, arg4: usize, arg5: usize, arg6: usize) usize {
+    return asm volatile ("syscall"
+        : [ret] "={rax}" (-> usize),
+        : [id] "{rax}" (id),
+          [arg1] "{rdi}" (arg1),
+          [arg2] "{rsi}" (arg2),
+          [arg3] "{rdx}" (arg3),
+          [arg4] "{r8}" (arg4),
+          [arg5] "{r9}" (arg5),
+          [arg6] "{r10}" (arg6),
+        : "rcx", "r11" // rcx becomes rip and r11 becomes rflags
+    );
+}
+
+pub fn call6rw(id: usize, args: [6]usize) struct { usize, [6]usize } {
+    var arg0: usize = undefined; // arrays dont work on outputs for whatever reason
+    var arg1: usize = undefined;
+    var arg2: usize = undefined;
+    var arg3: usize = undefined;
+    var arg4: usize = undefined;
+    var arg5: usize = undefined;
+
+    const res = asm volatile ("syscall"
+        : [ret] "={rax}" (-> usize),
+          [arg0out] "={rdi}" (arg0),
+          [arg1out] "={rsi}" (arg1),
+          [arg2out] "={rdx}" (arg2),
+          [arg3out] "={r8}" (arg3),
+          [arg4out] "={r9}" (arg4),
+          [arg5out] "={r10}" (arg5),
+        : [id] "{rax}" (id),
+          [arg0in] "{rdi}" (args[0]),
+          [arg1in] "{rsi}" (args[1]),
+          [arg2in] "{rdx}" (args[2]),
+          [arg3in] "{r8}" (args[3]),
+          [arg4in] "{r9}" (args[4]),
+          [arg5in] "{r10}" (args[5]),
+        : "rcx", "r11" // rcx becomes rip and r11 becomes rflags
+    );
+
+    return .{
+        res,
+        .{ arg0, arg1, arg2, arg3, arg4, arg5 },
+    };
 }

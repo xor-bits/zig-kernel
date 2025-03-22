@@ -1065,7 +1065,7 @@ pub const SyscallRegs = extern struct {
     _r13: u64 = 0,
     _r12: u64 = 0,
     rflags: u64 = @bitCast(Rflags{ .interrupt_enable = 1 }), // r11
-    _r10: u64 = 0,
+    arg5: u64 = 0, // r10
     arg4: u64 = 0, // r9
     arg3: u64 = 0, // r8
     _rbp: u64 = 0,

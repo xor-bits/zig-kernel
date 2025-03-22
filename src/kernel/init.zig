@@ -14,108 +14,24 @@ pub export var memory: limine.MemoryMapRequest = .{};
 
 /// load and exec the bootstrap process
 pub fn exec() !noreturn {
-    try caps.init_page_tables();
-
-    const bootstrap_binary: []const u8 = @embedFile("bootstrap");
-
-    // log.info("bootstrap start: {}", .{addr.Virt.fromInt(abi.BOOTSTRAP_EXE).toParts()});
-    // log.info("bootstrap end: {}", .{addr.Virt.fromInt(abi.BOOTSTRAP_EXE + bootstrap_binary.len).toParts()});
-
     const _vmem = try caps.Ref(caps.PageTableLevel4).alloc();
     const vmem_lvl4 = _vmem.ptr();
     vmem_lvl4.init();
 
-    const low = addr.Virt.fromInt(abi.BOOTSTRAP_EXE).toParts();
-    const high = addr.Virt.fromInt(abi.BOOTSTRAP_EXE + bootstrap_binary.len).toParts();
-
-    log.info("mapping", .{});
-
-    for (low.level4..high.level4 + 1) |_level4| {
-        log.info("mapping l3", .{});
-        const level4: u9 = @truncate(_level4);
-        try vmem_lvl4.map_level3(
-            try alloc(1),
-            addr.Virt.fromParts(.{
-                .level4 = level4,
-            }),
-            .{
-                .readable = true,
-                .writable = true,
-                .executable = true,
-            },
-            .{},
-        );
-
-        for (low.level3..high.level3 + 1) |_level3| {
-            log.info("mapping l2", .{});
-            const level3: u9 = @truncate(_level3);
-            try vmem_lvl4.map_level2(
-                try alloc(1),
-                addr.Virt.fromParts(.{
-                    .level4 = level4,
-                    .level3 = level3,
-                }),
-                .{
-                    .readable = true,
-                    .writable = true,
-                    .executable = true,
-                },
-                .{},
-            );
-
-            for (low.level2..high.level2 + 1) |_level2| {
-                log.info("mapping l1", .{});
-                const level2: u9 = @truncate(_level2);
-                try vmem_lvl4.map_level1(
-                    try alloc(1),
-                    addr.Virt.fromParts(.{
-                        .level4 = level4,
-                        .level3 = level3,
-                        .level2 = level2,
-                    }),
-                    .{
-                        .readable = true,
-                        .writable = true,
-                        .executable = true,
-                    },
-                    .{},
-                );
-
-                for (low.level1..high.level1 + 1) |_level1| {
-                    log.info("mapping frame", .{});
-                    const level1: u9 = @truncate(_level1);
-                    try vmem_lvl4.map_frame(
-                        try alloc(1),
-                        addr.Virt.fromParts(.{
-                            .level4 = level4,
-                            .level3 = level3,
-                            .level2 = level2,
-                            .level1 = level1,
-                        }),
-                        .{
-                            .readable = true,
-                            .writable = true,
-                            .executable = true,
-                        },
-                        .{},
-                    );
-                }
-            }
-        }
-    }
-
     (arch.Cr3{
         .pml4_phys_base = _vmem.paddr.toParts().page,
     }).write();
+    try map_bootstrap(vmem_lvl4);
 
-    log.info("copying bootstrap", .{});
-    const bootstrap_addr = @as([*]u8, @ptrFromInt(abi.BOOTSTRAP_EXE))[0..bootstrap_binary.len];
-    std.mem.copyForwards(u8, bootstrap_addr, bootstrap_binary);
+    // const boot_info = try caps.Ref(caps.BootInfo).alloc();
 
     const _caps = try caps.Ref(caps.Capabilities).alloc();
 
     const init_thread = try caps.Ref(caps.Thread).alloc();
     init_thread.ptr().* = .{
+        .trap = .{
+            .user_instr_ptr = abi.BOOTSTRAP_EXE,
+        },
         .caps = _caps,
         .vmem = _vmem,
     };
@@ -125,7 +41,86 @@ pub fn exec() !noreturn {
 
     log.info("kernel init done, entering user-space", .{});
 
+    arch.cpu_local().current_thread = init_thread.ptr();
     arch.sysret(&init_thread.ptr().trap);
+}
+
+fn map_bootstrap(vmem_lvl4: *caps.PageTableLevel4) !void {
+    const bootstrap_binary: []const u8 = @embedFile("bootstrap");
+
+    const low = addr.Virt.fromInt(abi.BOOTSTRAP_EXE);
+    const high = addr.Virt.fromInt(abi.BOOTSTRAP_EXE + bootstrap_binary.len);
+
+    log.info("bootstrap binary size: 0x{x}", .{bootstrap_binary.len});
+    log.info("mapping user-space [ 0x{x:0>16}..0x{x:0>16} ]", .{ low.raw, high.raw });
+
+    var current = low;
+    while (current.raw < high.raw) : (current.raw += addr.Virt.fromParts(.{ .level4 = 1 }).raw) {
+        // log.info("mapping level 4 entry", .{});
+
+        try vmem_lvl4.map_level3(
+            try alloc(1),
+            current,
+            .{
+                .readable = true,
+                .writable = true,
+                .executable = true,
+            },
+            .{},
+        );
+    }
+
+    current = low;
+    while (current.raw < high.raw) : (current.raw += addr.Virt.fromParts(.{ .level3 = 1 }).raw) {
+        // log.info("mapping level 3 entry", .{});
+
+        try vmem_lvl4.map_level2(
+            try alloc(1),
+            current,
+            .{
+                .readable = true,
+                .writable = true,
+                .executable = true,
+            },
+            .{},
+        );
+    }
+
+    current = low;
+    while (current.raw < high.raw) : (current.raw += addr.Virt.fromParts(.{ .level2 = 1 }).raw) {
+        // log.info("mapping level 2 entry", .{});
+
+        try vmem_lvl4.map_level1(
+            try alloc(1),
+            current,
+            .{
+                .readable = true,
+                .writable = true,
+                .executable = true,
+            },
+            .{},
+        );
+    }
+
+    current = low;
+    while (current.raw < high.raw) : (current.raw += addr.Virt.fromParts(.{ .level1 = 1 }).raw) {
+        // log.info("mapping level 1 entry", .{});
+
+        try vmem_lvl4.map_frame(
+            try alloc(1),
+            current,
+            .{
+                .readable = true,
+                .writable = true,
+                .executable = true,
+            },
+            .{},
+        );
+    }
+
+    log.info("copying bootstrap", .{});
+    const bootstrap_addr = @as([*]u8, @ptrFromInt(abi.BOOTSTRAP_EXE))[0..bootstrap_binary.len];
+    std.mem.copyForwards(u8, bootstrap_addr, bootstrap_binary);
 }
 
 pub fn alloc(pages: usize) !addr.Phys {

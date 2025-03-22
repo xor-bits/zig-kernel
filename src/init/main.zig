@@ -13,20 +13,7 @@ var heap = std.heap.FixedBufferAllocator.init(heap_ptr[0..abi.BOOTSTRAP_HEAP_SIZ
 
 //
 
-pub fn main() !void {
-    abi.sys.system_rename(0, "init");
-    log.info("hello from init", .{});
-
-    const io_ring = try abi.IoRing.init(64, heap.allocator());
-    defer io_ring.deinit();
-    try io_ring.setup();
-
-    var open = abi.io.Open.new("initfs:///sbin/init");
-    open.submit(&io_ring);
-    const fd = try open.wait();
-
-    log.info("file opened, fd={}", .{fd});
-}
+pub fn main() !void {}
 
 comptime {
     abi.rt.install_rt();

@@ -15,16 +15,7 @@ pub var heap = std.heap.FixedBufferAllocator.init(heap_ptr[0..abi.BOOTSTRAP_HEAP
 
 //
 
-pub fn main(initfs: []const u8) !void {
-    abi.sys.system_rename(0, "bootstrap");
-    log.info("hello from bootstrap {}", .{@sizeOf(abi.sys.SubmissionEntry)});
-
-    try initfsd.init(initfs);
-
-    try exec_elf("/sbin/init");
-
-    initfsd.run();
-}
+pub fn main() !void {}
 
 fn exec_elf(path: []const u8) !void {
     const elf_file = initfsd.openFile(path).?;
@@ -114,9 +105,64 @@ fn exec_elf(path: []const u8) !void {
     abi.sys.system_exec(1, header.entry, 0x7FFF_FFF4_0000);
 }
 
-pub export fn _start(initfs_ptr: [*]const u8, initfs_len: usize) linksection(".text._start") callconv(.C) noreturn {
-    main(initfs_ptr[0..initfs_len]) catch |err| {
-        std.debug.panic("{}", .{err});
-    };
+pub export var initial_stack: [0x1000]u8 align(16) linksection(".stack") = @as([0x1000]u8, undefined);
+
+pub export fn _start() linksection(".text._start") callconv(.Naked) noreturn {
+    asm volatile (
+        \\ movq %[sp], %%rsp
+        \\ leaq 0x1, %%rax
+        \\ jmp zig_main
+        :
+        : [sp] "rN" (&initial_stack),
+    );
+}
+
+export fn zig_main() noreturn {
+    // const empty = struct { start: usize }{
+    //     .start = 10,
+    // };
+    // abi.sys.allocate(abi.sys.CapInitMemory, .{
+    //     .ty = .page_table_level3,
+    //     .dst = abi.sys.CapInitCaps,
+    //     .offset = empty.start,
+    //     .count = 1,
+    // });
+    // abi.sys.allocate(abi.sys.CapInitMemory, .{
+    //     .ty = .page_table_level2,
+    //     .dst = abi.sys.CapInitCaps,
+    //     .offset = empty.start + 1,
+    //     .count = 1,
+    // });
+    // abi.sys.allocate(abi.sys.CapInitMemory, .{
+    //     .ty = .page_table_level1,
+    //     .dst = abi.sys.CapInitCaps,
+    //     .offset = empty.start + 2,
+    //     .count = 1,
+    // });
+    // abi.sys.allocate(abi.sys.CapInitMemory, .{
+    //     .ty = .frame,
+    //     .dst = abi.sys.CapInitCaps,
+    //     .offset = empty.start + 3,
+    //     .count = 1,
+    // });
+
+    // abi.sys.map_level3(abi.sys.CapInitVmem, empty.start + 0, 0x7F8000000000);
+    // abi.sys.map_level2(abi.sys.CapInitVmem, empty.start + 1, 0x7FFFC0000000);
+    // abi.sys.map_level1(abi.sys.CapInitVmem, empty.start + 2, 0x7FFFFFE00000);
+    // abi.sys.map_frame(abi.sys.CapInitVmem, empty.start + 3, 0x7FFFFFFFF000);
+
+    abi.sys.log("hello");
+    _ = abi.sys.send(0, .{}) catch unreachable;
+    _ = abi.sys.recv(0) catch unreachable;
+    // main("") catch |err| {
+    //     std.debug.panic("{}", .{err});
+    // };
     while (true) {}
 }
+
+// pub export fn _start(initfs_ptr: [*]const u8, initfs_len: usize) linksection(".text._start") callconv(.C) noreturn {
+//     main(initfs_ptr[0..initfs_len]) catch |err| {
+//         std.debug.panic("{}", .{err});
+//     };
+//     while (true) {}
+// }

@@ -1,42 +1,12 @@
 const std = @import("std");
+const abi = @import("abi");
 
 const arch = @import("arch.zig");
 const addr = @import("addr.zig");
-const init = @import("init.zig");
+
+const log = std.log.scoped(.caps);
 
 //
-
-pub const Rights = struct {
-    readable: bool = true,
-    writable: bool = false,
-    executable: bool = false,
-
-    pub fn intersection(self: Rights, other: Rights) Rights {
-        return Rights{
-            .readable = self.readable and other.readable,
-            .writable = self.writable and other.writable,
-            .executable = self.executable and other.executable,
-        };
-    }
-
-    pub fn asEntry(self: Rights, frame: addr.Phys, flags: Flags) Entry {
-        std.debug.assert(frame.toParts().reserved0 == 0);
-        std.debug.assert(frame.toParts().reserved1 == 0);
-
-        return Entry{
-            .present = 1,
-            .writable = @intFromBool(self.writable),
-            .user_accessible = 1,
-            .write_through = @intFromBool(flags.write_through),
-            .cache_disable = @intFromBool(flags.cache_disable),
-            .huge_page = @intFromBool(flags.huge_page),
-            .global = @intFromBool(flags.global),
-            .page_index = frame.toParts().page,
-            .protection_key = flags.protection_key,
-            .no_execute = @intFromBool(!self.executable),
-        };
-    }
-};
 
 // just x86_64 rn
 pub const Entry = packed struct {
@@ -62,14 +32,24 @@ pub const Entry = packed struct {
 
     protection_key: u4 = 0,
     no_execute: u1 = 0,
-};
 
-pub const Flags = struct {
-    write_through: bool = false,
-    cache_disable: bool = false,
-    huge_page: bool = false,
-    global: bool = false,
-    protection_key: u4 = 0,
+    pub fn fromParts(rights: abi.sys.Rights, frame: addr.Phys, flags: abi.sys.MapFlags) Entry {
+        std.debug.assert(frame.toParts().reserved0 == 0);
+        std.debug.assert(frame.toParts().reserved1 == 0);
+
+        return Entry{
+            .present = 1,
+            .writable = @intFromBool(rights.writable),
+            .user_accessible = 1,
+            .write_through = @intFromBool(flags.write_through),
+            .cache_disable = @intFromBool(flags.cache_disable),
+            .huge_page = @intFromBool(flags.huge_page),
+            .global = @intFromBool(flags.global),
+            .page_index = frame.toParts().page,
+            .protection_key = @truncate(flags.protection_key),
+            .no_execute = @intFromBool(!rights.executable),
+        };
+    }
 };
 
 // kernel objects \/
@@ -89,8 +69,8 @@ pub const Memory = struct {};
 /// thread information
 pub const Thread = struct {
     trap: arch.SyscallRegs = .{},
-    caps: ?Ref(Capabilities) = null,
-    vmem: ?Ref(PageTableLevel4) = null,
+    caps: Ref(Capabilities),
+    vmem: Ref(PageTableLevel4),
     priority: u2 = 1,
 };
 
@@ -100,7 +80,13 @@ fn nextLevel(current: *[512]Entry, i: u9) !addr.Phys {
     return addr.Phys.fromParts(.{ .page = current[i].page_index });
 }
 
-pub fn init_page_tables() !void {
+pub fn init() !void {
+    debug_type(Object);
+    debug_type(Capabilities);
+    std.log.info("Capabilities: len={}", .{@as(Capabilities, undefined).caps.len});
+    debug_type(Thread);
+    debug_type(Frame);
+
     const cr3 = arch.Cr3.read();
     const level4 = addr.Phys.fromInt(cr3.pml4_phys_base << 12)
         .toHhdm().toPtr(*PageTableLevel4);
@@ -111,106 +97,162 @@ var kernel_table: [256]Entry = undefined;
 
 /// a `Thread` points to this
 pub const PageTableLevel4 = struct {
-    entries: [512]Entry align(0x1000),
+    entries: [512]Entry align(0x1000) = std.mem.zeroes([512]Entry),
 
     pub fn init(self: *@This()) void {
         std.mem.copyForwards(Entry, self.entries[256..], kernel_table[0..]);
     }
 
-    pub fn map(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: Rights, flags: Flags) !void {
-        self.entries[vaddr.toParts().level4] = rights.asEntry(paddr, flags);
+    // pub fn call(self: *@This(), arg0: usize, arg1: usize, arg2: usize, arg3: usize, arg4: usize) abi.sys.Error!void {
+    //     const id = std.meta.intToEnum(abi.sys.IdPageMap, arg0) catch {
+    //         log.warn("invalid PageTableLevel4 call: {x}", .{arg0});
+    //         return abi.sys.Error.InvalidArgument;
+    //     };
+
+    //     const capability = ;
+
+    //     const vaddr = addr.Virt.fromInt(arg2);
+    //     const rights = @as(abi.sys.Rights, @bitCast(arg3));
+    //     const flags = @as(abi.sys.MapFlags, @bitCast(arg4));
+
+    //     Entry.fromParts(rights, frame: addr.Phys, flags);
+
+    //     switch (id) {
+    //         .map => {},
+    //         .unmap => {},
+    //     }
+    // }
+
+    pub fn map(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
+        self.entries[vaddr.toParts().level4] = Entry.fromParts(rights, paddr, flags);
     }
 
-    pub fn map_level3(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: Rights, flags: Flags) !void {
+    pub fn map_level3(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
         try self.map(paddr, vaddr, rights, flags);
     }
 
-    pub fn map_level2(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: Rights, flags: Flags) !void {
+    pub fn map_level2(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
         const next = (try nextLevel(&self.entries, vaddr.toParts().level4)).toHhdm().toPtr(*PageTableLevel3);
         try next.map_level2(paddr, vaddr, rights, flags);
     }
 
-    pub fn map_level1(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: Rights, flags: Flags) !void {
+    pub fn map_level1(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
         const next = (try nextLevel(&self.entries, vaddr.toParts().level4)).toHhdm().toPtr(*PageTableLevel3);
         try next.map_level1(paddr, vaddr, rights, flags);
     }
 
-    pub fn map_giant_frame(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: Rights, flags: Flags) !void {
+    pub fn map_giant_frame(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
         const next = (try nextLevel(&self.entries, vaddr.toParts().level4)).toHhdm().toPtr(*PageTableLevel3);
         try next.map_giant_frame(paddr, vaddr, rights, flags);
     }
 
-    pub fn map_huge_frame(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: Rights, flags: Flags) !void {
+    pub fn map_huge_frame(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
         const next = (try nextLevel(&self.entries, vaddr.toParts().level4)).toHhdm().toPtr(*PageTableLevel3);
         try next.map_huge_frame(paddr, vaddr, rights, flags);
     }
 
-    pub fn map_frame(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: Rights, flags: Flags) !void {
+    pub fn map_frame(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
         const next = (try nextLevel(&self.entries, vaddr.toParts().level4)).toHhdm().toPtr(*PageTableLevel3);
         try next.map_frame(paddr, vaddr, rights, flags);
     }
 };
 /// a `PageTableLevel4` points to multiple of these
 pub const PageTableLevel3 = struct {
-    entries: [512]Entry align(0x1000),
+    entries: [512]Entry align(0x1000) = std.mem.zeroes([512]Entry),
 
-    pub fn map(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: Rights, flags: Flags) void {
-        self.entries[vaddr.toParts().level3] = rights.asEntry(paddr, flags);
+    pub fn call(
+        paddr: addr.Phys,
+        thread: *Thread,
+        arg0: usize,
+        arg1: usize,
+        arg2: usize,
+        arg3: usize,
+        arg4: usize,
+    ) abi.sys.Error!void {
+        const id = std.meta.intToEnum(abi.sys.IdPageMap, arg0) catch {
+            log.warn("invalid PageTableLevel4 call: {x}", .{arg0});
+            return abi.sys.Error.InvalidArgument;
+        };
+
+        const caps = &thread.caps.ptr().caps;
+        if (arg1 >= caps.len) return abi.sys.Error.NotFound;
+
+        if (caps[arg1].type != .page_table_level_4) return abi.sys.Error.InvalidType;
+        const vmem = caps[arg1].paddr.toHhdm().toPtr(*PageTableLevel4);
+
+        // const capability = arg1;
+
+        const vaddr = addr.Virt.fromInt(arg2);
+        const rights = @as(abi.sys.Rights, @bitCast(@as(u24, @truncate(arg3))));
+        const flags = @as(abi.sys.MapFlags, @bitCast(@as(u40, @truncate(arg4))));
+
+        try vmem.map_level3(paddr, vaddr, rights, flags);
+
+        // Entry.fromParts(rights, frame: addr.Phys, flags);
+
+        switch (id) {
+            .map => {},
+            .unmap => {},
+        }
     }
 
-    pub fn map_level2(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: Rights, flags: Flags) !void {
+    pub fn map(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) void {
+        self.entries[vaddr.toParts().level3] = Entry.fromParts(rights, paddr, flags);
+    }
+
+    pub fn map_level2(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
         self.map(paddr, vaddr, rights, flags);
     }
 
-    pub fn map_level1(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: Rights, flags: Flags) !void {
+    pub fn map_level1(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
         const next = (try nextLevel(&self.entries, vaddr.toParts().level3)).toHhdm().toPtr(*PageTableLevel2);
         try next.map_level1(paddr, vaddr, rights, flags);
     }
 
-    pub fn map_giant_frame(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: Rights, flags: Flags) !void {
+    pub fn map_giant_frame(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
         self.map(paddr, vaddr, rights, flags);
     }
 
-    pub fn map_huge_frame(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: Rights, flags: Flags) !void {
+    pub fn map_huge_frame(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
         const next = (try nextLevel(&self.entries, vaddr.toParts().level3)).toHhdm().toPtr(*PageTableLevel2);
         try next.map_huge_frame(paddr, vaddr, rights, flags);
     }
 
-    pub fn map_frame(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: Rights, flags: Flags) !void {
+    pub fn map_frame(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
         const next = (try nextLevel(&self.entries, vaddr.toParts().level3)).toHhdm().toPtr(*PageTableLevel2);
         try next.map_frame(paddr, vaddr, rights, flags);
     }
 };
 /// a `PageTableLevel3` points to multiple of these
 pub const PageTableLevel2 = struct {
-    entries: [512]Entry align(0x1000),
+    entries: [512]Entry align(0x1000) = std.mem.zeroes([512]Entry),
 
-    pub fn map(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: Rights, flags: Flags) void {
-        self.entries[vaddr.toParts().level2] = rights.asEntry(paddr, flags);
+    pub fn map(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) void {
+        self.entries[vaddr.toParts().level2] = Entry.fromParts(rights, paddr, flags);
     }
 
-    pub fn map_level1(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: Rights, flags: Flags) !void {
+    pub fn map_level1(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
         self.map(paddr, vaddr, rights, flags);
     }
 
-    pub fn map_huge_frame(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: Rights, flags: Flags) !void {
+    pub fn map_huge_frame(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
         self.map(paddr, vaddr, rights, flags);
     }
 
-    pub fn map_frame(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: Rights, flags: Flags) !void {
+    pub fn map_frame(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
         const next = (try nextLevel(&self.entries, vaddr.toParts().level2)).toHhdm().toPtr(*PageTableLevel1);
         try next.map_frame(paddr, vaddr, rights, flags);
     }
 };
 /// a `PageTableLevel2` points to multiple of these
 pub const PageTableLevel1 = struct {
-    entries: [512]Entry align(0x1000),
+    entries: [512]Entry align(0x1000) = std.mem.zeroes([512]Entry),
 
-    pub fn map(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: Rights, flags: Flags) void {
-        self.entries[vaddr.toParts().level1] = rights.asEntry(paddr, flags);
+    pub fn map(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) void {
+        self.entries[vaddr.toParts().level1] = Entry.fromParts(rights, paddr, flags);
     }
 
-    pub fn map_frame(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: Rights, flags: Flags) !void {
+    pub fn map_frame(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
         self.map(paddr, vaddr, rights, flags);
     }
 };
@@ -219,7 +261,7 @@ pub const PageTableLevel1 = struct {
 /// raw physical memory again, but now mappable
 /// (and can't be used to allocate things)
 pub const Frame = struct {
-    data: [512]u64 align(0x1000),
+    data: [512]u64 align(0x1000) = std.mem.zeroes([512]u64),
 };
 
 pub fn Ref(comptime T: type) type {
@@ -231,7 +273,7 @@ pub fn Ref(comptime T: type) type {
         pub fn alloc() !Self {
             std.debug.assert(std.mem.isAligned(0x1000, @alignOf(T)));
 
-            const paddr = try init.alloc(try std.math.divCeil(usize, @sizeOf(T), 0x1000));
+            const paddr = try @import("init.zig").alloc(try std.math.divCeil(usize, @sizeOf(T), 0x1000));
             return Self{ .paddr = paddr };
         }
 
@@ -266,6 +308,39 @@ pub fn Ref(comptime T: type) type {
 pub const Object = struct {
     paddr: addr.Phys = .{ .raw = 0 },
     type: ObjectType = .null,
+
+    pub fn call(
+        self: @This(),
+        thread: *Thread,
+        arg0: usize,
+        arg1: usize,
+        arg2: usize,
+        arg3: usize,
+        arg4: usize,
+    ) abi.sys.Error!void {
+        switch (self.type) {
+            .capabilities => {},
+            .boot_info => {},
+            .memory => {},
+            .thread => {},
+            .page_table_level_4 => {},
+            .page_table_level_3 => {
+                try PageTableLevel3.call(
+                    self.paddr,
+                    thread,
+                    arg0,
+                    arg1,
+                    arg2,
+                    arg3,
+                    arg4,
+                );
+            },
+            .page_table_level_2 => {},
+            .page_table_level_1 => {},
+            .frame => {},
+            .null => {},
+        }
+    }
 };
 
 pub const ObjectType = enum {
@@ -281,6 +356,6 @@ pub const ObjectType = enum {
     null,
 };
 
-pub fn debug_type(comptime T: type) void {
+fn debug_type(comptime T: type) void {
     std.log.info("{s}: size={} align={}", .{ @typeName(T), @sizeOf(T), @alignOf(T) });
 }

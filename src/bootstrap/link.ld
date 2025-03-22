@@ -15,6 +15,10 @@ SECTIONS {
     *(.rodata .rodata.*)
   } :rodata
 
+  .stack : {
+    *(.stack)
+  } :stack
+
   .data : {
     *(.data .data.*)
   } :data

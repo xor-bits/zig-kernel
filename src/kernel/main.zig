@@ -34,7 +34,7 @@ pub const CpuLocalStorage = struct {
 
     cpu_config: arch.CpuConfig,
 
-    current_pid: ?usize = null,
+    current_thread: ?*caps.Thread = null,
     id: u32,
 };
 
@@ -74,12 +74,6 @@ fn main() noreturn {
     log.info("kernel version: 0.0.2", .{});
     log.info("kernel git revision: {s}", .{std.mem.trimRight(u8, @embedFile("git-rev"), "\n\r")});
 
-    caps.debug_type(caps.Object);
-    caps.debug_type(caps.Capabilities);
-    std.log.info("Capabilities: len={}", .{@as(caps.Capabilities, undefined).caps.len});
-    caps.debug_type(caps.Thread);
-    caps.debug_type(caps.Frame);
-
     // set up arch specific things: GDT, TSS, IDT, syscalls, ...
     log.info("initializing CPU", .{});
     const id = arch.next_cpu_id();
@@ -91,6 +85,11 @@ fn main() noreturn {
     log.info("initializing ACPI", .{});
     acpi.init() catch |err| {
         std.debug.panic("failed to initialize ACPI: {any}", .{err});
+    };
+
+    // set things (like the global kernel address space) up for the capability system
+    caps.init() catch |err| {
+        std.debug.panic("failed to initialize CPU-{}: {}", .{ id, err });
     };
 
     // initialize and execute the bootstrap process
@@ -137,6 +136,12 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
                 return;
             }
 
+            if (trap.arg0 == 0) {
+                log.warn("log syscall string from nullptr", .{});
+                trap.syscall_id = abi.sys.encode(abi.sys.Error.InvalidAddress);
+                return;
+            }
+
             const msg = @as([*]const u8, @ptrFromInt(trap.arg0))[0..trap.arg1];
 
             var lines = std.mem.splitAny(u8, msg, "\n\r");
@@ -147,9 +152,30 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
                 _ = log.info("{s}", .{line});
             }
         },
+        .send => {
+            const cap_ptr = trap.arg0;
+
+            const locals = arch.cpu_local();
+            const thread = locals.current_thread.?;
+
+            thread.caps.ptr().caps[cap_ptr].call(
+                thread,
+                trap.arg1,
+                trap.arg2,
+                trap.arg3,
+                trap.arg4,
+                trap.arg5,
+            ) catch |err| {
+                trap.syscall_id = abi.sys.encode(err);
+                return;
+            };
+
+            trap.syscall_id = abi.sys.encode(0);
+        },
+        .recv => {},
         .yield => {
             // proc.yield(current_pid, trap);
         },
-        else => std.debug.panic("TODO", .{}),
+        // else => std.debug.panic("TODO: syscall {s}", .{@tagName(id)}),
     }
 }
