@@ -64,7 +64,15 @@ pub const BootInfo = struct {};
 
 /// raw physical memory that can be used to allocate
 /// things like more `CapabilityNode`s or things
-pub const Memory = struct {};
+pub const Memory = struct {
+    pub fn call(
+        _: addr.Phys,
+        thread: *Thread,
+        args: abi.sys.Args,
+    ) abi.sys.Error!void {
+        @import("init.zig").alloc();
+    }
+};
 
 /// thread information
 pub const Thread = struct {
@@ -163,28 +171,24 @@ pub const PageTableLevel3 = struct {
     pub fn call(
         paddr: addr.Phys,
         thread: *Thread,
-        arg0: usize,
-        arg1: usize,
-        arg2: usize,
-        arg3: usize,
-        arg4: usize,
+        args: abi.sys.Args,
     ) abi.sys.Error!void {
-        const id = std.meta.intToEnum(abi.sys.IdPageMap, arg0) catch {
-            log.warn("invalid PageTableLevel4 call: {x}", .{arg0});
+        const id = std.meta.intToEnum(abi.sys.IdPageMap, args.arg0) catch {
+            log.warn("invalid PageTableLevel4 call: {x}", .{args.arg0});
             return abi.sys.Error.InvalidArgument;
         };
 
         const caps = &thread.caps.ptr().caps;
-        if (arg1 >= caps.len) return abi.sys.Error.NotFound;
+        if (args.arg1 >= caps.len) return abi.sys.Error.NotFound;
 
-        if (caps[arg1].type != .page_table_level_4) return abi.sys.Error.InvalidType;
-        const vmem = caps[arg1].paddr.toHhdm().toPtr(*PageTableLevel4);
+        if (caps[args.arg1].type != .page_table_level_4) return abi.sys.Error.InvalidType;
+        const vmem = caps[args.arg1].paddr.toHhdm().toPtr(*PageTableLevel4);
 
         // const capability = arg1;
 
-        const vaddr = addr.Virt.fromInt(arg2);
-        const rights = @as(abi.sys.Rights, @bitCast(@as(u24, @truncate(arg3))));
-        const flags = @as(abi.sys.MapFlags, @bitCast(@as(u40, @truncate(arg4))));
+        const vaddr = addr.Virt.fromInt(args.arg2);
+        const rights = @as(abi.sys.Rights, @bitCast(@as(u24, @truncate(args.arg3))));
+        const flags = @as(abi.sys.MapFlags, @bitCast(@as(u40, @truncate(args.arg4))));
 
         try vmem.map_level3(paddr, vaddr, rights, flags);
 
@@ -310,29 +314,27 @@ pub const Object = struct {
     type: ObjectType = .null,
 
     pub fn call(
-        self: @This(),
+        self: *@This(),
         thread: *Thread,
-        arg0: usize,
-        arg1: usize,
-        arg2: usize,
-        arg3: usize,
-        arg4: usize,
+        args: abi.sys.Args,
     ) abi.sys.Error!void {
         switch (self.type) {
             .capabilities => {},
             .boot_info => {},
-            .memory => {},
+            .memory => {
+                try Memory.call(
+                    self.paddr,
+                    thread,
+                    args,
+                );
+            },
             .thread => {},
             .page_table_level_4 => {},
             .page_table_level_3 => {
                 try PageTableLevel3.call(
                     self.paddr,
                     thread,
-                    arg0,
-                    arg1,
-                    arg2,
-                    arg3,
-                    arg4,
+                    args,
                 );
             },
             .page_table_level_2 => {},
