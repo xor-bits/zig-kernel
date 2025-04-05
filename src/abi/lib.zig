@@ -5,6 +5,7 @@ pub const sys = @import("sys.zig");
 pub const ring = @import("ring.zig");
 pub const io = @import("io.zig");
 pub const rt = @import("rt.zig");
+pub const btree = @import("btree.zig");
 
 //
 
