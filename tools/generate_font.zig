@@ -116,9 +116,9 @@ pub const Parser = struct {
 
     pub fn read(self: *Parser, comptime T: type) !T {
         switch (@typeInfo(T)) {
-            .Int => return try self.readInt(T),
-            .Array => return try self.readArray(T),
-            .Struct => return try self.readStruct(T),
+            .int => return try self.readInt(T),
+            .array => return try self.readArray(T),
+            .@"struct" => return try self.readStruct(T),
             else => @compileError("unsupported type"),
         }
     }
@@ -140,7 +140,7 @@ pub const Parser = struct {
             return error.UnexpectedEof;
         }
 
-        const array = @typeInfo(T).Array;
+        const array = @typeInfo(T).array;
 
         var instance: [array.len]array.child = undefined;
 
@@ -156,7 +156,7 @@ pub const Parser = struct {
             return error.UnexpectedEof;
         }
 
-        const fields = @typeInfo(T).Struct.fields;
+        const fields = @typeInfo(T).@"struct".fields;
 
         var instance: T = undefined;
 

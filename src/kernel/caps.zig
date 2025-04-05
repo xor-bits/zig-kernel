@@ -70,7 +70,8 @@ pub const Memory = struct {
         thread: *Thread,
         args: abi.sys.Args,
     ) abi.sys.Error!void {
-        @import("init.zig").alloc();
+        _ = .{ thread, args };
+        // @import("init.zig").alloc();
     }
 };
 

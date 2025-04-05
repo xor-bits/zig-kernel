@@ -97,8 +97,6 @@ pub fn init(madt: *const Madt) !void {
     const lapic: *volatile LocalApicRegs = addr.Phys.fromInt(lapic_addr).toHhdm().toPtr(*volatile LocalApicRegs);
 
     apic_base.initNow(lapic);
-    @fence(.seq_cst); // init is release, not acquire
-
 }
 
 pub fn enable() void {

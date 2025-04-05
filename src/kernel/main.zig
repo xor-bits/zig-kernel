@@ -61,7 +61,6 @@ export fn _start() callconv(.C) noreturn {
         arch.hcf();
     };
     hhdm_offset.store(hhdm_response.offset, .seq_cst);
-    @fence(.seq_cst);
 
     main();
 }
@@ -160,11 +159,13 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
 
             thread.caps.ptr().caps[cap_ptr].call(
                 thread,
-                trap.arg1,
-                trap.arg2,
-                trap.arg3,
-                trap.arg4,
-                trap.arg5,
+                .{
+                    .arg0 = trap.arg1,
+                    .arg1 = trap.arg2,
+                    .arg2 = trap.arg3,
+                    .arg3 = trap.arg4,
+                    .arg4 = trap.arg5,
+                },
             ) catch |err| {
                 trap.syscall_id = abi.sys.encode(err);
                 return;

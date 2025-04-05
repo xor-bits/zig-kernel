@@ -119,7 +119,7 @@ pub const SdtType = enum {
     unknown,
 
     fn fromSignature(signature: [4]u8) @This() {
-        const this = @typeInfo(@This()).Enum;
+        const this = @typeInfo(@This()).@"enum";
 
         inline for (this.fields) |f| {
             if (strToU32(f.name) == signToU32(signature)) {

@@ -6,7 +6,7 @@ const sys = @import("sys.zig");
 //
 
 pub fn install_rt() void {
-    @export(_start, .{
+    @export(&_start, .{
         .name = "_start",
         .linkage = .strong,
     });

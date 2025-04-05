@@ -37,16 +37,16 @@ pub fn Lazy(comptime T: type) type {
         pub fn waitOrInit(self: *Self, init: anytype) *T {
             if (self.getOrInit(init)) |v| {
                 return v;
+            } else {
+                @branchHint(.cold);
+                self.wait();
+                return &self.val;
             }
-
-            @setCold(true);
-            self.wait();
-            return &self.val;
         }
 
         pub fn get(self: *Self) ?*T {
             if (!self.isInitialized()) {
-                @setCold(true);
+                @branchHint(.cold);
                 return null;
             }
 
@@ -56,12 +56,12 @@ pub fn Lazy(comptime T: type) type {
         pub fn getOrInit(self: *Self, init: anytype) ?*T {
             if (!self.isInitialized()) {
                 // very low chance to not be initialized (only the first time)
-                @setCold(true);
+                @branchHint(.cold);
 
                 self.startInit() catch {
                     // super low chance to not be initialized and currently initializing
                     // (only when one thread accesses it for the first time and the current thread just a short time later)
-                    @setCold(true);
+                    @branchHint(.cold);
                     return null;
                 };
 

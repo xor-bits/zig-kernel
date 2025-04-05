@@ -177,7 +177,7 @@ fn spin(
 }
 
 fn yield_cold() void {
-    @setCold(true);
+    @branchHint(.cold);
     sys.yield();
 }
 
@@ -197,6 +197,6 @@ fn wait(
 }
 
 fn futex_wait_cold(value: *const usize, expected: usize) void {
-    @setCold(true);
+    @branchHint(.cold);
     sys.futex_wait(value, expected);
 }

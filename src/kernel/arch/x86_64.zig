@@ -317,7 +317,7 @@ pub fn cpu_id() u32 {
         .rdtscp => return rdtscp().pid,
         .rdmsr => return @intCast(rdmsr(IA32_TCS_AUX)),
         .lazy => {
-            @setCold(true);
+            @branchHint(.cold);
 
             if (cpuid(0x7, 0).ecx & (1 << 22) != 0) {
                 log.info("RDPID support", .{});

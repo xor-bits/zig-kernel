@@ -262,11 +262,11 @@ pub fn map_level3(
 pub fn call(id: Id, args: anytype) Error!usize {
     const ArgsType = @TypeOf(args);
     const args_type_info = @typeInfo(ArgsType);
-    if (args_type_info != .Struct or !args_type_info.Struct.is_tuple) {
+    if (args_type_info != .@"struct" or !args_type_info.@"struct".is_tuple) {
         @compileError("expected tuple argument, found " ++ @typeName(ArgsType));
     }
 
-    const fields = args_type_info.Struct.fields;
+    const fields = args_type_info.@"struct".fields;
 
     const syscall_id = @intFromEnum(id);
     const result: usize = switch (fields.len) {

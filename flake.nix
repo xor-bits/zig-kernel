@@ -19,6 +19,7 @@
           buildInputs = with pkgs; [
             pkg-config
             zig
+            zls
             qemu_full
           ];
 
