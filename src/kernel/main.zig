@@ -12,6 +12,7 @@ const spin = @import("spin.zig");
 const util = @import("util.zig");
 const init = @import("init.zig");
 const caps = @import("caps.zig");
+const pmem = @import("pmem.zig");
 
 //
 
@@ -26,7 +27,7 @@ pub export var smp: limine.SmpRequest = .{};
 pub var cpus_initialized: std.atomic.Value(usize) = .{ .raw = 0 };
 pub var all_cpus_ininitalized: std.atomic.Value(bool) = .{ .raw = false };
 
-pub var hhdm_offset = std.atomic.Value(usize).init(undefined);
+pub var hhdm_offset: usize = 0xFFFF_8000_0000_0000;
 
 pub const CpuLocalStorage = struct {
     // used to read the pointer to this struct through GS
@@ -60,7 +61,7 @@ export fn _start() callconv(.C) noreturn {
         log.err("no HHDM", .{});
         arch.hcf();
     };
-    hhdm_offset.store(hhdm_response.offset, .seq_cst);
+    hhdm_offset = hhdm_response.offset;
 
     main();
 }
@@ -72,6 +73,9 @@ fn main() noreturn {
     log.info("zig version: {s}", .{builtin.zig_version_string});
     log.info("kernel version: 0.0.2", .{});
     log.info("kernel git revision: {s}", .{std.mem.trimRight(u8, @embedFile("git-rev"), "\n\r")});
+
+    log.info("initializing physical memory allocator", .{});
+    pmem.init();
 
     // set up arch specific things: GDT, TSS, IDT, syscalls, ...
     log.info("initializing CPU", .{});
@@ -156,6 +160,33 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
 
             const locals = arch.cpu_local();
             const thread = locals.current_thread.?;
+
+            const Map = abi.btree.BTreeMap(usize, usize, .{
+                .node_size = 0x40,
+                .search = .linear,
+            });
+
+            log.info("{}..={}", .{ Map.LeafNode.MIN, Map.LeafNode.MAX });
+
+            var v: Map = .{};
+            _ = v.insert(pmem.page_allocator, 5, 50) catch unreachable;
+            _ = v.insert(pmem.page_allocator, 6, 60) catch unreachable;
+            _ = v.insert(pmem.page_allocator, 7, 70) catch unreachable;
+            _ = v.insert(pmem.page_allocator, 8, 80) catch unreachable;
+            _ = v.insert(pmem.page_allocator, 9, 90) catch unreachable;
+            _ = v.insert(pmem.page_allocator, 10, 100) catch unreachable;
+            v.debug();
+
+            log.info("4 = {any}", .{v.get(4)});
+            log.info("5 = {any}", .{v.get(5)});
+            log.info("6 = {any}", .{v.get(6)});
+            log.info("7 = {any}", .{v.get(7)});
+            log.info("8 = {any}", .{v.get(8)});
+            log.info("9 = {any}", .{v.get(9)});
+            log.info("10 = {any}", .{v.get(10)});
+            log.info("11 = {any}", .{v.get(11)});
+
+            log.info("{}", .{v});
 
             thread.caps.ptr().caps[cap_ptr].call(
                 thread,

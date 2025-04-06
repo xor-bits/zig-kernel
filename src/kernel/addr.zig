@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const main = @import("main.zig");
+
 //
 
 pub const Phys = struct {
@@ -20,7 +22,7 @@ pub const Phys = struct {
 
     pub fn toHhdm(self: Phys) Virt {
         return Virt{
-            .raw = self.raw + 0xffff800000000000,
+            .raw = self.raw + main.hhdm_offset,
         };
     }
 
@@ -54,6 +56,13 @@ pub const Virt = struct {
     pub fn fromPtr(ptr: anytype) Virt {
         return Virt{
             .raw = @intFromPtr(ptr),
+        };
+    }
+
+    pub fn hhdmToPhys(self: Virt) Phys {
+        std.debug.assert(self.raw >= main.hhdm_offset and self.raw < 0xFFFF_FFFF_8000_0000);
+        return Phys{
+            .raw = self.raw - main.hhdm_offset,
         };
     }
 

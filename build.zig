@@ -17,6 +17,10 @@ pub fn build(b: *std.Build) !void {
     disabled_features.addFeature(@intFromEnum(Feature.avx2));
     disabled_features.addFeature(@intFromEnum(Feature.mmx));
 
+    // b.addTest(.{
+    //     .test_runner =
+    // });
+
     const target = b.resolveTargetQuery(.{
         .cpu_arch = .x86_64,
         .os_tag = .freestanding,
