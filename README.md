@@ -37,6 +37,7 @@ Every path is a URI, where the protocol part (proto://) tells the kernel, which 
   - [x] VMM
   - [x] GDT, TSS, IDT
   - [x] ACPI, APIC
+  - [ ] SMP
   - [x] user space
   - [ ] HPET
   - [x] scheduler
