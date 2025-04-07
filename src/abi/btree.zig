@@ -40,6 +40,50 @@ pub fn BTreeMap(comptime K: type, comptime V: type, comptime cfg: Config) type {
             pub const MIN: usize = MAX / 2;
         };
 
+        const Node = struct {
+            ptr: usize,
+            used: *usize,
+            keys: []K,
+            vals: []V,
+            ptrs: []usize,
+            max: usize,
+            min: usize,
+
+            fn fromLeaf(node: *LeafNode) Node {
+                return .{
+                    .ptr = @intFromPtr(node),
+                    .used = &node.used,
+                    .keys = node.keys[0..],
+                    .vals = node.vals[0..],
+                    .ptrs = ([0]usize{})[0..],
+                    .max = LeafNode.MAX,
+                    .min = LeafNode.MIN,
+                };
+            }
+
+            fn fromBranch(node: *BranchNode) Node {
+                return .{
+                    .ptr = @intFromPtr(node),
+                    .used = &node.used,
+                    .keys = node.keys[0..],
+                    .vals = node.vals[0..],
+                    .ptrs = node.ptrs[0..],
+                    .max = BranchNode.MAX,
+                    .min = BranchNode.MIN,
+                };
+            }
+        };
+
+        fn getNode(node_ptr: usize, depth: usize) ?Node {
+            if (depth == 0) {
+                const node: *LeafNode = @as(?*LeafNode, @ptrFromInt(node_ptr)) orelse return null;
+                return Node.fromLeaf(node);
+            } else {
+                const node: *BranchNode = @as(?*BranchNode, @ptrFromInt(node_ptr)) orelse return null;
+                return Node.fromBranch(node);
+            }
+        }
+
         fn insert_arr(comptime T: type, arr: []T, len: usize, i: usize, val: T) void {
             std.debug.assert(i <= len and len <= arr.len);
 
@@ -90,8 +134,9 @@ pub fn BTreeMap(comptime K: type, comptime V: type, comptime cfg: Config) type {
 
         /// insert `val` at `key`, returning the old value
         pub fn insert(self: *@This(), alloc: std.mem.Allocator, key: K, val: V) Error!?V {
+            // lazy init, happens only once
             if (self.root == 0) {
-                @branchHint(.cold); // lazy init, happens only once
+                @branchHint(.cold);
                 const node: *LeafNode = try alloc.create(LeafNode);
                 node.* = .{};
 
@@ -103,13 +148,9 @@ pub fn BTreeMap(comptime K: type, comptime V: type, comptime cfg: Config) type {
                 return null;
             }
 
-            if (self.depth == 0) {
-                const root: *LeafNode = @as(?*LeafNode, @ptrFromInt(self.root)) orelse return null;
-                if (root.used == LeafNode.MAX) try self.split_root(alloc);
-            } else if (self.depth == 1) {
-                const root: *BranchNode = @as(?*BranchNode, @ptrFromInt(self.root)) orelse return null;
-                if (root.used == BranchNode.MAX) try self.split_root(alloc);
-            }
+            // split full nodes pre-emptitively
+            const root = getNode(self.root, self.depth) orelse unreachable;
+            if (root.used.* == root.max) try self.split_root(alloc);
 
             return insert_recurse(alloc, key, val, self.root, self.depth);
         }
@@ -121,44 +162,34 @@ pub fn BTreeMap(comptime K: type, comptime V: type, comptime cfg: Config) type {
             root: usize,
             depth: usize,
         ) Error!?V {
+            const node = getNode(root, depth) orelse unreachable;
+            std.debug.assert(node.used.* != node.max);
+
+            // replace if the slot is already in use
+            var i = switch (indexOf(key, node.keys[0..node.used.*])) {
+                .found => |i| {
+                    const old = node.vals[i];
+                    node.vals[i] = val;
+                    return old;
+                },
+                .not_found => |i| i,
+            };
+
+            // if its a leaf node: insert
+            // if its a branch node: continue
             if (depth == 0) {
-                const node: *LeafNode = @as(?*LeafNode, @ptrFromInt(root)) orelse return null;
-                std.debug.assert(node.used != LeafNode.MAX);
-
-                switch (indexOf(key, node.keys[0..node.used])) {
-                    .found => |i| {
-                        const old = node.vals[i];
-                        node.vals[i] = val;
-                        return old;
-                    },
-                    .not_found => |i| {
-                        insert_arr(K, node.keys[0..], node.used, i, key);
-                        insert_arr(V, node.vals[0..], node.used, i, val);
-                        node.used += 1;
-                        return null;
-                    },
-                }
+                insert_arr(K, node.keys[0..], node.used.*, i, key);
+                insert_arr(V, node.vals[0..], node.used.*, i, val);
+                node.used.* += 1;
+                return null;
             } else {
-                const node: *BranchNode = @as(?*BranchNode, @ptrFromInt(root)) orelse return null;
-                std.debug.assert(node.used != BranchNode.MAX);
-
-                switch (indexOf(key, node.keys[0..node.used])) {
-                    .found => |i| {
-                        const old = node.vals[i];
-                        node.vals[i] = val;
-                        return old;
-                    },
-                    .not_found => |_i| {
-                        var i = _i;
-
-                        if (isFull(node.ptrs[i], depth - 1)) {
-                            try splitNthChild(alloc, root, depth, i);
-                            if (key > node.keys[i]) i += 1;
-                        }
-
-                        return insert_recurse(alloc, key, val, node.ptrs[i], depth - 1);
-                    },
+                // split full nodes pre-emptitively
+                if (isFull(node.ptrs[i], depth - 1)) {
+                    try splitNthChild(alloc, root, depth, i);
+                    if (key > node.keys[i]) i += 1;
                 }
+
+                return insert_recurse(alloc, key, val, node.ptrs[i], depth - 1);
             }
         }
 
@@ -168,24 +199,20 @@ pub fn BTreeMap(comptime K: type, comptime V: type, comptime cfg: Config) type {
         }
 
         fn debug_recurse(root: usize, depth: usize) void {
+            const node = getNode(root, depth) orelse return;
+
             if (depth == 0) {
-                const node: *LeafNode = @as(?*LeafNode, @ptrFromInt(root)) orelse return;
-
                 log.info("---------\\/\\/ leaf depth={}", .{depth});
-                for (node.keys[0..node.used]) |key| {
-                    log.info("{}", .{key});
-                }
-                log.info("---------", .{});
             } else {
-                const node: *BranchNode = @as(?*BranchNode, @ptrFromInt(root)) orelse return;
-
                 log.info("---------\\/\\/ branch depth={}", .{depth});
-                for (node.keys[0..node.used]) |key| {
-                    log.info("{}", .{key});
-                }
-                log.info("---------", .{});
+            }
+            for (node.keys[0..node.used.*]) |key| {
+                log.info("{}", .{key});
+            }
+            log.info("---------", .{});
 
-                for (node.ptrs[0 .. node.used + 1]) |next| {
+            if (depth != 0) {
+                for (node.ptrs[0 .. node.used.* + 1]) |next| {
                     debug_recurse(next, depth - 1);
                 }
             }
@@ -205,32 +232,23 @@ pub fn BTreeMap(comptime K: type, comptime V: type, comptime cfg: Config) type {
         }
 
         fn get_recurse(key: K, root: usize, depth: usize) ?*V {
+            const node = getNode(root, depth) orelse return null;
+
+            const i = switch (indexOf(key, node.keys[0..node.used.*])) {
+                .found => |i| return &node.vals[i],
+                .not_found => |i| i,
+            };
+
             if (depth == 0) {
-                const node: *LeafNode = @as(?*LeafNode, @ptrFromInt(root)) orelse return null;
-
-                switch (indexOf(key, node.keys[0..node.used])) {
-                    .found => |i| return &node.vals[i],
-                    .not_found => return null,
-                }
+                return null;
             } else {
-                const node: *BranchNode = @as(?*BranchNode, @ptrFromInt(root)) orelse return null;
-
-                switch (indexOf(key, node.keys[0..node.used])) {
-                    .found => |i| return &node.vals[i],
-                    .not_found => |i| return get_recurse(key, node.ptrs[i], depth - 1),
-                }
+                return get_recurse(key, node.ptrs[i], depth - 1);
             }
         }
 
         fn isFull(root: usize, depth: usize) bool {
-            // log.info("isFull(root={}, depth={})", .{ root, depth });
-            if (depth == 0) {
-                const node: *LeafNode = @as(?*LeafNode, @ptrFromInt(root)) orelse unreachable;
-                return node.used == LeafNode.MAX;
-            } else {
-                const node: *BranchNode = @as(?*BranchNode, @ptrFromInt(root)) orelse unreachable;
-                return node.used == BranchNode.MAX;
-            }
+            const node = getNode(root, depth) orelse unreachable;
+            return node.used.* == node.max;
         }
 
         fn splitNthChild(alloc: std.mem.Allocator, root: usize, depth: usize, n: usize) Error!void {
@@ -240,46 +258,34 @@ pub fn BTreeMap(comptime K: type, comptime V: type, comptime cfg: Config) type {
             const parent: *BranchNode = @as(?*BranchNode, @ptrFromInt(root)) orelse unreachable;
             std.debug.assert(parent.used != BranchNode.MAX);
 
+            const full_node = getNode(parent.ptrs[n], depth - 1) orelse unreachable;
+            std.debug.assert(full_node.used.* == full_node.max);
+
+            var new_node: Node = undefined;
             if (depth == 1) {
-                const full_node: *LeafNode = @as(?*LeafNode, @ptrFromInt(parent.ptrs[n])) orelse unreachable;
-                std.debug.assert(full_node.used == LeafNode.MAX);
-
-                const new_node = try alloc.create(LeafNode);
-                new_node.* = .{};
-
-                // copy the right half (maybe less than the minimum, so it becomes invalid) to the new node
-                std.mem.copyForwards(K, new_node.keys[0..], full_node.keys[LeafNode.MIN + 1 ..]);
-                std.mem.copyForwards(V, new_node.vals[0..], full_node.vals[LeafNode.MIN + 1 ..]);
-                // move the first one from the right half to the parent
-                insert_arr(K, parent.keys[0..], parent.used, n, full_node.keys[LeafNode.MIN]);
-                insert_arr(V, parent.vals[0..], parent.used, n, full_node.vals[LeafNode.MIN]);
-                // add the new child
-                insert_arr(V, parent.ptrs[0..], parent.used + 1, n + 1, @intFromPtr(new_node));
-
-                full_node.used = LeafNode.MIN;
-                new_node.used = LeafNode.MAX - LeafNode.MIN - 1;
-                parent.used += 1;
+                const node = try alloc.create(LeafNode);
+                node.* = .{};
+                new_node = Node.fromLeaf(node);
             } else {
-                const full_node: *BranchNode = @as(?*BranchNode, @ptrFromInt(parent.ptrs[n])) orelse unreachable;
-                std.debug.assert(full_node.used == BranchNode.MAX);
-
-                const new_node = try alloc.create(BranchNode);
-                new_node.* = .{};
-
-                // copy the right half (maybe less than the minimum, so it becomes invalid) to the new node
-                std.mem.copyForwards(K, new_node.keys[0..], full_node.keys[BranchNode.MIN + 1 ..]);
-                std.mem.copyForwards(V, new_node.vals[0..], full_node.vals[BranchNode.MIN + 1 ..]);
-                std.mem.copyForwards(usize, new_node.ptrs[0..], full_node.ptrs[BranchNode.MIN + 2 ..]);
-                // move the first one from the right half to the parent
-                insert_arr(K, parent.keys[0..], parent.used, n, full_node.keys[BranchNode.MIN]);
-                insert_arr(V, parent.vals[0..], parent.used, n, full_node.vals[BranchNode.MIN]);
-                // add the new child
-                insert_arr(V, parent.ptrs[0..], parent.used + 1, n + 1, @intFromPtr(new_node));
-
-                full_node.used = BranchNode.MIN;
-                new_node.used = BranchNode.MAX - BranchNode.MIN - 1;
-                parent.used += 1;
+                const node = try alloc.create(BranchNode);
+                node.* = .{};
+                new_node = Node.fromBranch(node);
             }
+
+            // copy the right half (maybe less than the minimum, so it becomes invalid) to the new node
+            std.mem.copyForwards(K, new_node.keys[0..], full_node.keys[full_node.min + 1 ..]);
+            std.mem.copyForwards(V, new_node.vals[0..], full_node.vals[full_node.min + 1 ..]);
+            if (depth != 1) // move the children also if its a branch node
+                std.mem.copyForwards(usize, new_node.ptrs[0..], full_node.ptrs[full_node.min + 2 ..]);
+            // move the first one from the right half to the parent
+            insert_arr(K, parent.keys[0..], parent.used, n, full_node.keys[full_node.min]);
+            insert_arr(V, parent.vals[0..], parent.used, n, full_node.vals[full_node.min]);
+            // add the new child
+            insert_arr(V, parent.ptrs[0..], parent.used + 1, n + 1, new_node.ptr);
+
+            full_node.used.* = full_node.min;
+            new_node.used.* = full_node.max - full_node.min - 1;
+            parent.used += 1;
         }
 
         fn split_root(self: *@This(), alloc: std.mem.Allocator) Error!void {
