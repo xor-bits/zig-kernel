@@ -86,10 +86,15 @@ pub fn BTreeMap(comptime K: type, comptime V: type, comptime cfg: Config) type {
 
         fn insert_arr(comptime T: type, arr: []T, len: usize, i: usize, val: T) void {
             std.debug.assert(i <= len and len <= arr.len);
-
             arr[len] = val;
             std.mem.rotate(T, arr[0 .. len + 1][i..], 1);
-            // len.* += 1;
+        }
+
+        fn remove_arr(comptime T: type, arr: []T, len: usize, i: usize) T {
+            std.debug.assert(i < len and len <= arr.len);
+            const val = arr[i];
+            std.mem.copyForwards(T, arr[i .. len - 1], arr[i + 1 .. len]);
+            return val;
         }
 
         comptime {
