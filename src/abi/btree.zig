@@ -22,7 +22,9 @@ pub fn BTreeMap(comptime K: type, comptime V: type, comptime cfg: Config) type {
             keys: [MAX]K = undefined,
             vals: [MAX]V = undefined,
 
-            pub const MAX: usize = (cfg.node_size - @sizeOf(usize)) / (@sizeOf(K) + @sizeOf(V));
+            pub const _MAX: usize = (cfg.node_size - @sizeOf(usize)) / (@sizeOf(K) + @sizeOf(V)) / 2 * 2;
+
+            pub const MAX: usize = _MAX - 1;
             pub const MIN: usize = MAX / 2;
         };
 
@@ -32,7 +34,9 @@ pub fn BTreeMap(comptime K: type, comptime V: type, comptime cfg: Config) type {
             vals: [MAX]V = undefined,
             ptrs: [MAX + 1]usize = undefined,
 
-            pub const MAX: usize = (cfg.node_size - @sizeOf(usize) * 2) / (@sizeOf(K) + @sizeOf(V) + @sizeOf(usize));
+            pub const _MAX: usize = (cfg.node_size - @sizeOf(usize) * 2) / (@sizeOf(K) + @sizeOf(V) + @sizeOf(usize)) / 2 * 2;
+
+            pub const MAX: usize = _MAX - 1;
             pub const MIN: usize = MAX / 2;
         };
 
@@ -48,8 +52,7 @@ pub fn BTreeMap(comptime K: type, comptime V: type, comptime cfg: Config) type {
             std.debug.assert(@sizeOf(LeafNode) <= cfg.node_size);
             std.debug.assert(@sizeOf(BranchNode) <= cfg.node_size);
 
-            if (LeafNode.MIN == 0 or LeafNode.MIN == LeafNode.MAX or
-                BranchNode.MIN == 0 or BranchNode.MIN == BranchNode.MAX)
+            if (LeafNode.MIN == 0 or BranchNode.MIN == 0)
                 @compileError("node_size too small");
         }
 
@@ -264,17 +267,17 @@ pub fn BTreeMap(comptime K: type, comptime V: type, comptime cfg: Config) type {
                 new_node.* = .{};
 
                 // copy the right half (maybe less than the minimum, so it becomes invalid) to the new node
-                std.mem.copyForwards(K, new_node.keys[0..], full_node.keys[LeafNode.MIN + 1 ..]);
-                std.mem.copyForwards(V, new_node.vals[0..], full_node.vals[LeafNode.MIN + 1 ..]);
-                std.mem.copyForwards(usize, new_node.ptrs[0..], full_node.ptrs[LeafNode.MIN + 2 ..]);
+                std.mem.copyForwards(K, new_node.keys[0..], full_node.keys[BranchNode.MIN + 1 ..]);
+                std.mem.copyForwards(V, new_node.vals[0..], full_node.vals[BranchNode.MIN + 1 ..]);
+                std.mem.copyForwards(usize, new_node.ptrs[0..], full_node.ptrs[BranchNode.MIN + 2 ..]);
                 // move the first one from the right half to the parent
-                insert_arr(K, parent.keys[0..], parent.used, n, full_node.keys[LeafNode.MIN]);
-                insert_arr(V, parent.vals[0..], parent.used, n, full_node.vals[LeafNode.MIN]);
+                insert_arr(K, parent.keys[0..], parent.used, n, full_node.keys[BranchNode.MIN]);
+                insert_arr(V, parent.vals[0..], parent.used, n, full_node.vals[BranchNode.MIN]);
                 // add the new child
                 insert_arr(V, parent.ptrs[0..], parent.used + 1, n + 1, @intFromPtr(new_node));
 
-                full_node.used = LeafNode.MIN;
-                new_node.used = LeafNode.MAX - LeafNode.MIN - 1;
+                full_node.used = BranchNode.MIN;
+                new_node.used = BranchNode.MAX - BranchNode.MIN - 1;
                 parent.used += 1;
             }
         }

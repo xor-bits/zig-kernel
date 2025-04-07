@@ -162,18 +162,21 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
             const thread = locals.current_thread.?;
 
             const Map = abi.btree.BTreeMap(usize, usize, .{
-                .node_size = 0x40,
+                .node_size = 0x80,
                 .search = .linear,
             });
 
-            log.info("{}..={}", .{ Map.LeafNode.MIN, Map.LeafNode.MAX });
+            log.info("{}..={} ({})", .{ Map.BranchNode.MIN, Map.BranchNode.MAX, Map.BranchNode._MAX });
 
             var v: Map = .{};
             _ = v.insert(pmem.page_allocator, 5, 50) catch unreachable;
             _ = v.insert(pmem.page_allocator, 6, 60) catch unreachable;
             _ = v.insert(pmem.page_allocator, 7, 70) catch unreachable;
+            v.debug();
             _ = v.insert(pmem.page_allocator, 8, 80) catch unreachable;
+            v.debug();
             _ = v.insert(pmem.page_allocator, 9, 90) catch unreachable;
+            v.debug();
             _ = v.insert(pmem.page_allocator, 10, 100) catch unreachable;
             v.debug();
 
