@@ -156,51 +156,22 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
             }
         },
         .send => {
-            const cap_ptr = trap.arg0;
+            const cap_id: u32 = @truncate(trap.arg0);
+            // if (cap_id == 0) {
+            //     trap.syscall_id = abi.sys.encode(abi.sys.Error.InvalidAddress);
+            //     return;
+            // }
 
             const locals = arch.cpu_local();
             const thread = locals.current_thread.?;
 
-            const Map = abi.btree.BTreeMap(usize, usize, .{
-                .node_size = 0x80,
-                .search = .linear,
-            });
-
-            log.info("{}..={} ({})", .{ Map.BranchNode.MIN, Map.BranchNode.MAX, Map.BranchNode._MAX });
-
-            var v: Map = .{};
-            _ = v.insert(pmem.page_allocator, 5, 50) catch unreachable;
-            _ = v.insert(pmem.page_allocator, 6, 60) catch unreachable;
-            _ = v.insert(pmem.page_allocator, 7, 70) catch unreachable;
-            v.debug();
-            _ = v.insert(pmem.page_allocator, 8, 80) catch unreachable;
-            v.debug();
-            _ = v.insert(pmem.page_allocator, 9, 90) catch unreachable;
-            v.debug();
-            _ = v.insert(pmem.page_allocator, 10, 100) catch unreachable;
-            v.debug();
-
-            log.info("4 = {any}", .{v.get(4)});
-            log.info("5 = {any}", .{v.get(5)});
-            log.info("6 = {any}", .{v.get(6)});
-            log.info("7 = {any}", .{v.get(7)});
-            log.info("8 = {any}", .{v.get(8)});
-            log.info("9 = {any}", .{v.get(9)});
-            log.info("10 = {any}", .{v.get(10)});
-            log.info("11 = {any}", .{v.get(11)});
-
-            log.info("{}", .{v});
-
-            thread.caps.ptr().caps[cap_ptr].call(
-                thread,
-                .{
-                    .arg0 = trap.arg1,
-                    .arg1 = trap.arg2,
-                    .arg2 = trap.arg3,
-                    .arg3 = trap.arg4,
-                    .arg4 = trap.arg5,
-                },
-            ) catch |err| {
+            caps.call(thread, cap_id, .{
+                .arg0 = trap.arg1,
+                .arg1 = trap.arg2,
+                .arg2 = trap.arg3,
+                .arg3 = trap.arg4,
+                .arg4 = trap.arg5,
+            }) catch |err| {
                 trap.syscall_id = abi.sys.encode(err);
                 return;
             };

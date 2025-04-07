@@ -27,12 +27,14 @@ pub const Rights = extern struct {
     readable: bool = true,
     writable: bool = false,
     executable: bool = false,
+    user_accessible: bool = true,
 
     pub fn intersection(self: Rights, other: Rights) Rights {
         return Rights{
             .readable = self.readable and other.readable,
             .writable = self.writable and other.writable,
             .executable = self.executable and other.executable,
+            .user_accessible = self.user_accessible and other.user_accessible,
         };
     }
 };

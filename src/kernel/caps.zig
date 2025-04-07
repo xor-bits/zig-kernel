@@ -3,8 +3,11 @@ const abi = @import("abi");
 
 const arch = @import("arch.zig");
 const addr = @import("addr.zig");
+const spin = @import("spin.zig");
+const pmem = @import("pmem.zig");
 
 const log = std.log.scoped(.caps);
+const Error = abi.sys.Error;
 
 //
 
@@ -40,7 +43,7 @@ pub const Entry = packed struct {
         return Entry{
             .present = 1,
             .writable = @intFromBool(rights.writable),
-            .user_accessible = 1,
+            .user_accessible = @intFromBool(rights.user_accessible),
             .write_through = @intFromBool(flags.write_through),
             .cache_disable = @intFromBool(flags.cache_disable),
             .huge_page = @intFromBool(flags.huge_page),
@@ -54,13 +57,160 @@ pub const Entry = packed struct {
 
 // kernel objects \/
 
-/// forms a tree of capabilities
-pub const Capabilities = struct {
-    // N capabilities based on how many can fit in a page
-    caps: [0x1000 / @sizeOf(Object)]Object,
-};
+/// pointer to the first capability in the global capability array (its a null capability)
+///
+/// it is currently `0xFFFFFFBF80000000`, right before the kernel code at `0xFFFF_FFFF_8000_0000`
+/// and capable of holding a maximum of 2^32 capabilities across all processes
+pub const CAPABILITY_ARRAY_POINTER: usize = 0xFFFF_FFFF_8000_0000 - (2 << 32) * @sizeOf(Object);
+/// the length can only grow
+pub var capability_array_len: std.atomic.Value(usize) = .init(0);
+/// a linked list of unused slots
+pub var array_grow_lock: spin.Mutex = .new();
+pub var free_list_lock: spin.Mutex = .new();
+pub var free_list: u32 = 0;
 
-pub const BootInfo = struct {};
+pub fn capability_array() []Object {
+    const len = @min(capability_array_len.load(.acquire), 2 << 32);
+    return @as([*]Object, @ptrFromInt(CAPABILITY_ARRAY_POINTER))[0..len];
+
+    // if (len >= (2 << u32)) {
+    //     @branchHint(.cold);
+    //     capability_array_len.fetchSub(1, .release)
+    // }
+}
+
+pub fn capability_array_unchecked() []Object {
+    return @as([*]Object, @ptrFromInt(CAPABILITY_ARRAY_POINTER))[0 .. 2 << 32];
+}
+
+pub fn push_capability(obj: Object) u32 {
+    const cap = allocate();
+
+    const new_object = &capability_array_unchecked()[cap];
+    new_object.* = .{
+        // keep the owner as null until everything else is written
+        .paddr = obj.paddr,
+        .type = obj.type,
+        .children = obj.children,
+        .next = obj.next,
+    };
+    new_object.owner.store(obj.owner.raw, .release);
+
+    return cap;
+}
+
+pub fn call(thread: *Thread, cap_id: u32, args: abi.sys.Args) Error!void {
+    log.info("call from {*} cap_id={} args={}", .{ thread, cap_id, args });
+
+    const caps = capability_array();
+    if (cap_id >= caps.len) return Error.InvalidAddress;
+
+    const obj = caps[cap_id];
+    if (caps[cap_id].owner.load(.seq_cst) != thread)
+        return Error.InvalidAddress;
+
+    const result = obj.call(thread, args);
+
+    return result;
+}
+
+fn allocate() u32 {
+    {
+        free_list_lock.lock();
+        defer free_list_lock.unlock();
+
+        if (free_list != 0) {
+            const head = free_list;
+            const new_head = capability_array_unchecked()[free_list];
+            free_list = new_head.next;
+            return head;
+        }
+    }
+
+    const current_len = capability_array_len.raw;
+    const new_page_addr = addr.Virt.fromPtr(&capability_array_unchecked().ptr[current_len]);
+
+    const last_byte_of_prev = new_page_addr.raw - 1;
+    const last_byte_of_next = new_page_addr.raw + @sizeOf(Object) - 1;
+    const last_page = addr.Virt.fromInt(last_byte_of_next);
+
+    const lvl3 = (nextLevelFromEntry(kernel_table[255]) catch
+        std.debug.panic("invalid kernel page table", .{})).toHhdm().toPtr(*PageTableLevel3);
+
+    const SIZE_1GIB_MASK = ~(@as(usize, 0x40000000 - 1));
+    const SIZE_2MIB_MASK = ~(@as(usize, 0x00200000 - 1));
+    const SIZE_4KIB_MASK = ~(@as(usize, 0x00001000 - 1));
+
+    const map_level2 = last_byte_of_prev & SIZE_1GIB_MASK != last_byte_of_next & SIZE_1GIB_MASK;
+    const map_level1 = last_byte_of_prev & SIZE_2MIB_MASK != last_byte_of_next & SIZE_2MIB_MASK;
+    const map_frame = last_byte_of_prev & SIZE_4KIB_MASK != last_byte_of_next & SIZE_4KIB_MASK;
+
+    if (map_level2 or map_level1 or map_level1) {
+        @branchHint(.unlikely);
+        array_grow_lock.lock();
+        defer array_grow_lock.unlock();
+
+        if (map_level2) {
+            @branchHint(.cold);
+            lvl3.map_level2(alloc_page(), last_page, .{
+                .readable = true,
+                .writable = true,
+                .user_accessible = false,
+            }, .{
+                .global = true,
+            }) catch std.debug.panic("invalid kernel page table L3", .{});
+        }
+        if (map_level1) {
+            @branchHint(.unlikely);
+            lvl3.map_level1(alloc_page(), last_page, .{
+                .readable = true,
+                .writable = true,
+                .user_accessible = false,
+            }, .{
+                .global = true,
+            }) catch std.debug.panic("invalid kernel page table L2", .{});
+        }
+        if (map_frame) {
+            lvl3.map_frame(alloc_page(), last_page, .{
+                .readable = true,
+                .writable = true,
+                .user_accessible = false,
+            }, .{
+                .global = true,
+            }) catch std.debug.panic("invalid kernel page table L1", .{});
+        }
+    }
+
+    const next = capability_array_len.fetchAdd(1, .acquire);
+    if (next > std.math.maxInt(u32)) std.debug.panic("too many capabilities", .{});
+
+    return @truncate(next);
+}
+
+fn alloc_page() addr.Phys {
+    return addr.Virt.fromPtr(pmem.alloc() orelse std.debug.panic("OOM", .{})).hhdmToPhys();
+}
+
+fn deallocate(cap: u32, expected_thread: ?*Thread) bool {
+    // FIXME: deallocation is more complicated
+
+    free_list_lock.lock();
+    defer free_list_lock.unlock();
+
+    if (free_list != 0) {
+        const new_head = &capability_array_unchecked()[cap];
+        // zero out all fields
+        // owner is zeroed first and in an atomic way,
+        // because it is used to check if the capability is partially written (in multi cpu contexts)
+        if (null != new_head.owner.cmpxchgStrong(expected_thread, null, .acquire, .monotonic))
+            return false;
+
+        new_head.* = .{ .next = free_list };
+    }
+
+    free_list = cap;
+    return true;
+}
 
 /// raw physical memory that can be used to allocate
 /// things like more `CapabilityNode`s or things
@@ -77,29 +227,34 @@ pub const Memory = struct {
 
 /// thread information
 pub const Thread = struct {
+    /// all context data
     trap: arch.SyscallRegs = .{},
-    caps: Ref(Capabilities),
+    /// virtual address space
     vmem: Ref(PageTableLevel4),
+    /// capability space lock
+    caps_lock: spin.Mutex = .new(),
+    /// scheduler priority
     priority: u2 = 1,
 };
 
 fn nextLevel(current: *[512]Entry, i: u9) !addr.Phys {
-    if (current[i].present == 0) return error.Level4EntryNotPresent;
-    if (current[i].huge_page == 1) return error.Level4EntryIsHuge;
-    return addr.Phys.fromParts(.{ .page = current[i].page_index });
+    return nextLevelFromEntry(current[i]);
+}
+
+fn nextLevelFromEntry(entry: Entry) !addr.Phys {
+    if (entry.present == 0) return error.EntryNotPresent;
+    if (entry.huge_page == 1) return error.EntryIsHuge;
+    return addr.Phys.fromParts(.{ .page = entry.page_index });
 }
 
 pub fn init() !void {
-    debug_type(Object);
-    debug_type(Capabilities);
-    std.log.info("Capabilities: len={}", .{@as(Capabilities, undefined).caps.len});
-    debug_type(Thread);
-    debug_type(Frame);
-
     const cr3 = arch.Cr3.read();
     const level4 = addr.Phys.fromInt(cr3.pml4_phys_base << 12)
         .toHhdm().toPtr(*PageTableLevel4);
     std.mem.copyForwards(Entry, kernel_table[0..], level4.entries[256..]);
+
+    // push the null capability
+    _ = push_capability(.{});
 }
 
 var kernel_table: [256]Entry = undefined;
@@ -188,7 +343,7 @@ pub const PageTableLevel3 = struct {
         // const capability = arg1;
 
         const vaddr = addr.Virt.fromInt(args.arg2);
-        const rights = @as(abi.sys.Rights, @bitCast(@as(u24, @truncate(args.arg3))));
+        const rights = @as(abi.sys.Rights, @bitCast(@as(u32, @truncate(args.arg3))));
         const flags = @as(abi.sys.MapFlags, @bitCast(@as(u40, @truncate(args.arg4))));
 
         try vmem.map_level3(paddr, vaddr, rights, flags);
@@ -290,8 +445,6 @@ pub fn Ref(comptime T: type) type {
         pub fn object(self: @This()) Object {
             var ty: ObjectType = undefined;
             switch (T) {
-                Capabilities => ty = .capabilities,
-                BootInfo => ty = .boot_info,
                 Memory => ty = .memory,
                 Thread => ty = .thread,
                 PageTableLevel4 => ty = .page_table_level_4,
@@ -313,15 +466,20 @@ pub fn Ref(comptime T: type) type {
 pub const Object = struct {
     paddr: addr.Phys = .{ .raw = 0 },
     type: ObjectType = .null,
+    // lock: spin.Mutex = .new(),
+    owner: std.atomic.Value(?*Thread) = .init(null),
+
+    /// a linked list of Objects that are derived from this one
+    children: u32 = 0,
+    /// the next element in the linked list derived from the parent
+    next: u32 = 0,
 
     pub fn call(
-        self: *@This(),
+        self: @This(),
         thread: *Thread,
         args: abi.sys.Args,
     ) abi.sys.Error!void {
         switch (self.type) {
-            .capabilities => {},
-            .boot_info => {},
             .memory => {
                 try Memory.call(
                     self.paddr,
@@ -332,11 +490,11 @@ pub const Object = struct {
             .thread => {},
             .page_table_level_4 => {},
             .page_table_level_3 => {
-                try PageTableLevel3.call(
-                    self.paddr,
-                    thread,
-                    args,
-                );
+                // try PageTableLevel3.call(
+                //     self.paddr,
+                //     thread,
+                //     args,
+                // );
             },
             .page_table_level_2 => {},
             .page_table_level_1 => {},
@@ -346,9 +504,8 @@ pub const Object = struct {
     }
 };
 
-pub const ObjectType = enum {
-    capabilities,
-    boot_info,
+pub const ObjectType = enum(u8) {
+    null = 0,
     memory,
     thread,
     page_table_level_4,
@@ -356,7 +513,6 @@ pub const ObjectType = enum {
     page_table_level_2,
     page_table_level_1,
     frame,
-    null,
 };
 
 fn debug_type(comptime T: type) void {

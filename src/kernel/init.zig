@@ -26,19 +26,16 @@ pub fn exec() !noreturn {
 
     // const boot_info = try caps.Ref(caps.BootInfo).alloc();
 
-    const _caps = try caps.Ref(caps.Capabilities).alloc();
-
     const init_thread = try caps.Ref(caps.Thread).alloc();
     init_thread.ptr().* = .{
         .trap = .{
             .user_instr_ptr = abi.BOOTSTRAP_EXE,
         },
-        .caps = _caps,
         .vmem = _vmem,
     };
 
-    _caps.ptr().caps[0] = _vmem.object();
-    _caps.ptr().caps[1] = init_thread.object();
+    _ = caps.push_capability(_vmem.object());
+    _ = caps.push_capability(init_thread.object());
 
     log.info("kernel init done, entering user-space", .{});
 
