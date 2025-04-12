@@ -433,7 +433,12 @@ pub fn Ref(comptime T: type) type {
         pub fn alloc() !Self {
             std.debug.assert(std.mem.isAligned(0x1000, @alignOf(T)));
 
-            const paddr = try @import("init.zig").alloc(try std.math.divCeil(usize, @sizeOf(T), 0x1000));
+            const paddr =
+                if (@sizeOf(T) == 0)
+                    addr.Phys.fromInt(0)
+                else
+                    try @import("init.zig").alloc(try std.math.divCeil(usize, @sizeOf(T), 0x1000));
+
             return Self{ .paddr = paddr };
         }
 
