@@ -17,6 +17,12 @@ pub const BOOTSTRAP_STACK = 0x3000_0000;
 pub const BOOTSTRAP_STACK_SIZE = 64 * 0x1000;
 pub const BOOTSTRAP_INITFS = 0x5000_0000;
 
+// some hardcoded capability handles
+
+pub const BOOTSTRAP_SELF_VMEM: u32 = 1;
+pub const BOOTSTRAP_SELF_THREAD: u32 = 2;
+pub const BOOTSTRAP_MEMORY: u32 = 3;
+
 //
 
 pub const std_options: std.Options = .{
@@ -48,6 +54,19 @@ pub fn panic(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace, ret_
 
     while (true) {}
 }
+
+//
+
+pub const ObjectType = enum(u8) {
+    null = 0,
+    memory,
+    thread,
+    page_table_level_4,
+    page_table_level_3,
+    page_table_level_2,
+    page_table_level_1,
+    frame,
+};
 
 //
 

@@ -15,12 +15,12 @@ const log = std.log.scoped(.init);
 
 /// load and exec the bootstrap process
 pub fn exec() !noreturn {
-    const _vmem = try caps.Ref(caps.PageTableLevel4).alloc();
-    const vmem_lvl4 = _vmem.ptr();
+    const vmem = try caps.Ref(caps.PageTableLevel4).alloc();
+    const vmem_lvl4 = vmem.ptr();
     vmem_lvl4.init();
 
     (arch.Cr3{
-        .pml4_phys_base = _vmem.paddr.toParts().page,
+        .pml4_phys_base = vmem.paddr.toParts().page,
     }).write();
     try map_bootstrap(vmem_lvl4);
 
@@ -31,11 +31,18 @@ pub fn exec() !noreturn {
         .trap = .{
             .user_instr_ptr = abi.BOOTSTRAP_EXE,
         },
-        .vmem = _vmem,
+        .vmem = vmem,
     };
 
-    _ = caps.push_capability(_vmem.object());
-    _ = caps.push_capability(init_thread.object());
+    const init_memory = try caps.Ref(caps.Memory).alloc();
+
+    var id: u32 = undefined;
+    id = caps.push_capability(vmem.object(init_thread.ptr()));
+    std.debug.assert(id == abi.BOOTSTRAP_SELF_VMEM);
+    id = caps.push_capability(init_thread.object(init_thread.ptr()));
+    std.debug.assert(id == abi.BOOTSTRAP_SELF_THREAD);
+    id = caps.push_capability(init_memory.object(init_thread.ptr()));
+    std.debug.assert(id == abi.BOOTSTRAP_MEMORY);
 
     log.info("kernel init done, entering user-space", .{});
 

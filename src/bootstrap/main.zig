@@ -15,7 +15,14 @@ pub var heap = std.heap.FixedBufferAllocator.init(heap_ptr[0..abi.BOOTSTRAP_HEAP
 
 //
 
-pub fn main() !void {}
+pub fn main() !void {
+    abi.sys.log("hello");
+
+    abi.sys.send(abi.BOOTSTRAP_MEMORY, .{}) catch unreachable;
+
+    _ = abi.sys.send(2, .{}) catch unreachable;
+    _ = abi.sys.recv(0) catch unreachable;
+}
 
 fn exec_elf(path: []const u8) !void {
     const elf_file = initfsd.openFile(path).?;
@@ -105,7 +112,7 @@ fn exec_elf(path: []const u8) !void {
     abi.sys.system_exec(1, header.entry, 0x7FFF_FFF4_0000);
 }
 
-pub export var initial_stack: [0x1000]u8 align(16) linksection(".stack") = @as([0x1000]u8, undefined);
+pub export var initial_stack: [0x2000]u8 align(16) linksection(".stack") = @as([0x2000]u8, undefined);
 
 pub export fn _start() linksection(".text._start") callconv(.Naked) noreturn {
     asm volatile (
@@ -151,12 +158,9 @@ export fn zig_main() noreturn {
     // abi.sys.map_level1(abi.sys.CapInitVmem, empty.start + 2, 0x7FFFFFE00000);
     // abi.sys.map_frame(abi.sys.CapInitVmem, empty.start + 3, 0x7FFFFFFFF000);
 
-    abi.sys.log("hello");
-    _ = abi.sys.send(0, .{}) catch unreachable;
-    _ = abi.sys.recv(0) catch unreachable;
-    // main("") catch |err| {
-    //     std.debug.panic("{}", .{err});
-    // };
+    main() catch |err| {
+        std.debug.panic("{}", .{err});
+    };
     while (true) {}
 }
 

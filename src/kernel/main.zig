@@ -157,21 +157,15 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
         },
         .send => {
             const cap_id: u32 = @truncate(trap.arg0);
-            // if (cap_id == 0) {
-            //     trap.syscall_id = abi.sys.encode(abi.sys.Error.InvalidAddress);
-            //     return;
-            // }
+            if (cap_id == 0) {
+                trap.syscall_id = abi.sys.encode(abi.sys.Error.InvalidAddress);
+                return;
+            }
 
             const locals = arch.cpu_local();
             const thread = locals.current_thread.?;
 
-            caps.call(thread, cap_id, .{
-                .arg0 = trap.arg1,
-                .arg1 = trap.arg2,
-                .arg2 = trap.arg3,
-                .arg3 = trap.arg4,
-                .arg4 = trap.arg5,
-            }) catch |err| {
+            caps.call(thread, cap_id, trap) catch |err| {
                 trap.syscall_id = abi.sys.encode(err);
                 return;
             };

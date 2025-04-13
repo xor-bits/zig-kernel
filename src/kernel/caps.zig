@@ -99,9 +99,7 @@ pub fn push_capability(obj: Object) u32 {
     return cap;
 }
 
-pub fn call(thread: *Thread, cap_id: u32, args: abi.sys.Args) Error!void {
-    log.info("call from {*} cap_id={} args={}", .{ thread, cap_id, args });
-
+pub fn call(thread: *Thread, cap_id: u32, trap: *arch.SyscallRegs) Error!void {
     const caps = capability_array();
     if (cap_id >= caps.len) return Error.InvalidAddress;
 
@@ -109,7 +107,7 @@ pub fn call(thread: *Thread, cap_id: u32, args: abi.sys.Args) Error!void {
     if (caps[cap_id].owner.load(.seq_cst) != thread)
         return Error.InvalidAddress;
 
-    const result = obj.call(thread, args);
+    const result = obj.call(thread, trap);
 
     return result;
 }
@@ -215,13 +213,19 @@ fn deallocate(cap: u32, expected_thread: ?*Thread) bool {
 /// raw physical memory that can be used to allocate
 /// things like more `CapabilityNode`s or things
 pub const Memory = struct {
-    pub fn call(
-        _: addr.Phys,
-        thread: *Thread,
-        args: abi.sys.Args,
-    ) abi.sys.Error!void {
-        _ = .{ thread, args };
+    pub fn call(_: addr.Phys, thread: *Thread, trap: *arch.SyscallRegs) abi.sys.Error!void {
+        _ = .{ thread, trap };
+        log.info("memory call", .{});
+
+        const call_id = std.meta.intToEnum(abi.ObjectType, trap.arg1) catch {
+            trap.syscall_id = abi.sys.encode(Error.InvalidArgument);
+            return;
+        };
+        _ = call_id;
+
         // @import("init.zig").alloc();
+
+        std.debug.panic("TODO:", .{});
     }
 };
 
@@ -447,8 +451,8 @@ pub fn Ref(comptime T: type) type {
             return self.paddr.toHhdm().toPtr(*T);
         }
 
-        pub fn object(self: @This()) Object {
-            var ty: ObjectType = undefined;
+        pub fn object(self: @This(), owner: ?*Thread) Object {
+            var ty: abi.ObjectType = undefined;
             switch (T) {
                 Memory => ty = .memory,
                 Thread => ty = .thread,
@@ -463,6 +467,7 @@ pub fn Ref(comptime T: type) type {
             return Object{
                 .paddr = self.paddr,
                 .type = ty,
+                .owner = .init(owner),
             };
         }
     };
@@ -470,7 +475,7 @@ pub fn Ref(comptime T: type) type {
 
 pub const Object = struct {
     paddr: addr.Phys = .{ .raw = 0 },
-    type: ObjectType = .null,
+    type: abi.ObjectType = .null,
     // lock: spin.Mutex = .new(),
     owner: std.atomic.Value(?*Thread) = .init(null),
 
@@ -479,19 +484,9 @@ pub const Object = struct {
     /// the next element in the linked list derived from the parent
     next: u32 = 0,
 
-    pub fn call(
-        self: @This(),
-        thread: *Thread,
-        args: abi.sys.Args,
-    ) abi.sys.Error!void {
+    pub fn call(self: @This(), thread: *Thread, trap: *arch.SyscallRegs) abi.sys.Error!void {
         switch (self.type) {
-            .memory => {
-                try Memory.call(
-                    self.paddr,
-                    thread,
-                    args,
-                );
-            },
+            .memory => try Memory.call(self.paddr, thread, trap),
             .thread => {},
             .page_table_level_4 => {},
             .page_table_level_3 => {
@@ -507,17 +502,6 @@ pub const Object = struct {
             .null => {},
         }
     }
-};
-
-pub const ObjectType = enum(u8) {
-    null = 0,
-    memory,
-    thread,
-    page_table_level_4,
-    page_table_level_3,
-    page_table_level_2,
-    page_table_level_1,
-    frame,
 };
 
 fn debug_type(comptime T: type) void {

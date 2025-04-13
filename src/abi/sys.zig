@@ -197,6 +197,11 @@ pub const Args = struct {
     arg4: usize = 0,
 };
 
+pub const MemoryCallId = enum(u8) {};
+
+// allocate a new capability using a memory capability
+// pub fn alloc(mem_cap_id: usize, ty: ) !usize {}
+
 pub fn send(cap_ptr: usize, args: Args) !void {
     _ = try call(.send, .{
         cap_ptr,
