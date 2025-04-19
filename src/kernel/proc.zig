@@ -1,4 +1,5 @@
 const std = @import("std");
+const abi = @import("abi");
 
 const addr = @import("addr.zig");
 const arch = @import("arch.zig");
@@ -6,6 +7,7 @@ const caps = @import("caps.zig");
 const spin = @import("spin.zig");
 
 const log = std.log.scoped(.proc);
+const Error = abi.sys.Error;
 
 //
 
@@ -65,13 +67,14 @@ pub fn yield(trap: *arch.SyscallRegs) void {
 
     const next_thread = next();
     local.current_thread = next_thread.ptr();
+    caps.PageTableLevel4.switchTo(local.current_thread.?.vmem.?);
     trap.* = local.current_thread.?.trap;
 }
 
 /// stop the thread and (TODO) interrupt a processor that might be running it
-pub fn stop(thread: caps.Ref(caps.Thread)) void {
+pub fn stop(thread: caps.Ref(caps.Thread)) Error!void {
     const thread_ptr = thread.ptr();
-    if (thread_ptr.stopped) return;
+    if (thread_ptr.stopped) return Error.IsStopped;
 
     thread_ptr.stopped = true;
     _ = active_threads.fetchSub(1, .release);
@@ -80,9 +83,10 @@ pub fn stop(thread: caps.Ref(caps.Thread)) void {
 }
 
 /// start the thread, if its not running
-pub fn start(thread: caps.Ref(caps.Thread)) void {
+pub fn start(thread: caps.Ref(caps.Thread)) Error!void {
     const thread_ptr = thread.ptr();
-    if (!thread_ptr.stopped) return;
+    if (!thread_ptr.stopped) return Error.NotStopped;
+    if (thread_ptr.vmem == null) return Error.NoVmem;
 
     _ = active_threads.fetchAdd(1, .acquire);
     thread_ptr.stopped = false;

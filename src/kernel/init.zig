@@ -49,7 +49,7 @@ pub fn exec() !noreturn {
     log.info("kernel init done, entering user-space", .{});
 
     var trap: arch.SyscallRegs = undefined;
-    proc.start(init_thread);
+    try proc.start(init_thread);
     proc.yield(&trap);
     arch.sysret(&trap);
 }

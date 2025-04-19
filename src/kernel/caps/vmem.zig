@@ -109,6 +109,13 @@ pub const PageTableLevel4 = struct {
         std.mem.copyForwards(Entry, self.entries[256..], kernel_table[0..]);
     }
 
+    pub fn switchTo(self: caps.Ref(@This())) void {
+        var cur = arch.Cr3.read();
+        if (cur.pml4_phys_base == self.paddr.raw) return;
+        cur.pml4_phys_base = self.paddr.toParts().page;
+        cur.write();
+    }
+
     pub fn map(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
         self.entries[vaddr.toParts().level4] = Entry.fromParts(rights, paddr, flags);
     }

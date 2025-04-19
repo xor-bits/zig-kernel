@@ -46,11 +46,11 @@ pub const Thread = struct {
 
         switch (call_id) {
             .start => {
-                proc.start(target_thread);
+                try proc.start(target_thread);
                 return 0;
             },
             .stop => {
-                proc.stop(target_thread);
+                try proc.stop(target_thread);
                 return 0;
             },
             .read_regs => {
@@ -93,6 +93,8 @@ pub const Thread = struct {
                 return @sizeOf(arch.SyscallRegs);
             },
             .set_vmem => {
+                if (!target_thread.ptr().stopped) return Error.NotStopped;
+
                 // TODO: require stopping the thread or something
                 const vmem = try (try caps.get_capability(thread, @truncate(trap.arg2))).as(caps.PageTableLevel4);
                 target_thread.ptr().vmem = vmem;
