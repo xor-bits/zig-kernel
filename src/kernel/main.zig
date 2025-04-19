@@ -9,6 +9,7 @@ const args = @import("args.zig");
 const addr = @import("addr.zig");
 const logs = @import("logs.zig");
 const spin = @import("spin.zig");
+const proc = @import("proc.zig");
 const util = @import("util.zig");
 const init = @import("init.zig");
 const caps = @import("caps.zig");
@@ -172,13 +173,12 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
             trap.syscall_id = abi.sys.encode(result);
 
             if (thread.stopped == true) {
-                // FIXME: scheduler
-                arch.hcf();
+                proc.yield(trap);
             }
         },
         .recv => {},
         .yield => {
-            // proc.yield(current_pid, trap);
+            proc.yield(trap);
         },
         // else => std.debug.panic("TODO: syscall {s}", .{@tagName(id)}),
     }

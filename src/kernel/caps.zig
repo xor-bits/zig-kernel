@@ -5,6 +5,7 @@ const arch = @import("arch.zig");
 const addr = @import("addr.zig");
 const spin = @import("spin.zig");
 const pmem = @import("pmem.zig");
+const proc = @import("proc.zig");
 
 const log = std.log.scoped(.caps);
 const Error = abi.sys.Error;
@@ -254,6 +255,10 @@ pub const Thread = struct {
     priority: u2 = 1,
     /// is the thread stopped OR running/ready/waiting
     stopped: bool = true,
+    /// scheduler linked list
+    next: ?Ref(Thread) = null,
+    /// scheduler linked list
+    prev: ?Ref(Thread) = null,
 
     pub fn init(self: *@This()) void {
         self.* = .{};
@@ -267,19 +272,14 @@ pub const Thread = struct {
             return Error.InvalidArgument;
         };
 
-        const self = (Ref(Thread){ .paddr = paddr }).ptr();
-
         switch (call_id) {
             .start => {
-                self.stopped = false;
+                proc.start(Ref(Thread){ .paddr = paddr });
                 return 0;
-                // TODO: add to ready queue
             },
             .stop => {
-                self.stopped = true;
+                proc.stop(Ref(Thread){ .paddr = paddr });
                 return 0;
-                // FIXME: IPI
-                // TODO: stop the processor and take the thread
             },
         }
     }

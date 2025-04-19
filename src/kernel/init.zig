@@ -2,10 +2,11 @@ const std = @import("std");
 const abi = @import("abi");
 const limine = @import("limine");
 
-const arch = @import("arch.zig");
-const pmem = @import("pmem.zig");
 const addr = @import("addr.zig");
+const arch = @import("arch.zig");
 const caps = @import("caps.zig");
+const pmem = @import("pmem.zig");
+const proc = @import("proc.zig");
 
 const log = std.log.scoped(.init);
 const Error = abi.sys.Error;
@@ -47,9 +48,10 @@ pub fn exec() !noreturn {
 
     log.info("kernel init done, entering user-space", .{});
 
-    init_thread.ptr().stopped = false;
-    arch.cpu_local().current_thread = init_thread.ptr();
-    arch.sysret(&init_thread.ptr().trap);
+    var trap: arch.SyscallRegs = undefined;
+    proc.start(init_thread);
+    proc.yield(&trap);
+    arch.sysret(&trap);
 }
 
 fn map_bootstrap(vmem_lvl4: *caps.PageTableLevel4) !void {
