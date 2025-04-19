@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const limine = @import("limine");
 
 const main = @import("main.zig");
 

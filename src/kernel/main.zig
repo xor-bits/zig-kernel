@@ -24,7 +24,6 @@ pub const panic = logs.panic;
 
 pub export var base_revision: limine.BaseRevision = .{ .revision = 2 };
 pub export var hhdm: limine.HhdmRequest = .{};
-pub export var smp: limine.SmpRequest = .{};
 pub var cpus_initialized: std.atomic.Value(usize) = .{ .raw = 0 };
 pub var all_cpus_ininitalized: std.atomic.Value(bool) = .{ .raw = false };
 
@@ -42,7 +41,7 @@ pub const CpuLocalStorage = struct {
 
 //
 
-export fn _start() callconv(.C) noreturn {
+pub export fn _start() callconv(.C) noreturn {
     const log = std.log.scoped(.critical);
 
     // interrupts are always disabled in the kernel
@@ -67,7 +66,7 @@ export fn _start() callconv(.C) noreturn {
     main();
 }
 
-fn main() noreturn {
+pub fn main() noreturn {
     const log = std.log.scoped(.main);
 
     log.info("kernel main", .{});
@@ -77,6 +76,9 @@ fn main() noreturn {
 
     log.info("initializing physical memory allocator", .{});
     pmem.init();
+
+    // boot up a few processors
+    // arch.smp_init();
 
     // set up arch specific things: GDT, TSS, IDT, syscalls, ...
     log.info("initializing CPU", .{});
@@ -88,19 +90,49 @@ fn main() noreturn {
     // initialize ACPI specific things: APIC, HPET, ...
     log.info("initializing ACPI", .{});
     acpi.init() catch |err| {
-        std.debug.panic("failed to initialize ACPI: {any}", .{err});
+        std.debug.panic("failed to initialize ACPI CPU-{}: {any}", .{ id, err });
     };
 
     // set things (like the global kernel address space) up for the capability system
     caps.init() catch |err| {
-        std.debug.panic("failed to initialize CPU-{}: {}", .{ id, err });
+        std.debug.panic("failed to initialize caps: {}", .{err});
     };
 
     // initialize and execute the bootstrap process
     log.info("initializing bootstrap", .{});
     init.exec() catch |err| {
-        std.debug.panic("failed to set up init process: {}", .{err});
+        std.debug.panic("failed to set up bootstrap: {}", .{err});
     };
+
+    proc_enter();
+}
+
+pub fn smpmain() noreturn {
+    const log = std.log.scoped(.main);
+
+    // boot up a few processors
+    arch.smp_init();
+
+    // set up arch specific things: GDT, TSS, IDT, syscalls, ...
+    log.info("initializing CPU", .{});
+    const id = arch.next_cpu_id();
+    arch.init_cpu(id) catch |err| {
+        std.debug.panic("failed to initialize CPU-{}: {}", .{ id, err });
+    };
+
+    // initialize ACPI specific things: APIC, HPET, ...
+    log.info("initializing ACPI", .{});
+    acpi.init() catch |err| {
+        std.debug.panic("failed to initialize ACPI CPU-{}: {any}", .{ id, err });
+    };
+
+    proc_enter();
+}
+
+fn proc_enter() noreturn {
+    var trap: arch.SyscallRegs = undefined;
+    proc.yield(&trap);
+    arch.sysret(&trap);
 }
 
 pub fn syscall(trap: *arch.SyscallRegs) void {

@@ -1,4 +1,5 @@
 const std = @import("std");
+const limine = @import("limine");
 
 const apic = @import("../apic.zig");
 const addr = @import("../addr.zig");
@@ -20,6 +21,12 @@ pub const KERNELGS_BASE = 0xC0000102;
 
 //
 
+
+pub export var smp: limine.SmpRequest = .{};
+var next: std.atomic.Value(usize) = .init(0);
+
+//
+
 pub fn init_cpu(id: u32) !void {
     const tls_mem = try init.alloc(try std.math.divCeil(usize, @sizeOf(main.CpuLocalStorage), 0x1000));
     const tls = tls_mem.toHhdm().toPtr(*main.CpuLocalStorage);
@@ -33,6 +40,28 @@ pub fn init_cpu(id: u32) !void {
 
     wrmsr(GS_BASE, @intFromPtr(tls));
     wrmsr(KERNELGS_BASE, 0);
+}
+
+// launch 2 next processors (snowball)
+pub fn smp_init() void {
+    if (smp.response) |resp| {
+        var idx = next.fetchAdd(2, .monotonic);
+        const cpus = resp.cpus();
+
+        if (idx >= cpus.len) return;
+        if (cpus[idx].lapic_id != resp.bsp_lapic_id)
+            cpus[idx].goto_address = _smpstart;
+
+        idx += 1;
+        if (idx >= resp.cpus().len) return;
+        if (cpus[idx].lapic_id != resp.bsp_lapic_id)
+            cpus[idx].goto_address = _smpstart;
+    }
+}
+
+export fn _smpstart(_: *limine.SmpInfo) callconv(.C) noreturn {
+    ints.disable();
+    main.smpmain();
 }
 
 pub fn cpu_local() *main.CpuLocalStorage {
@@ -851,12 +880,10 @@ pub const CpuConfig = struct {
         self.gdt = Gdt.new(&self.tss);
         self.idt = Idt.new();
 
-        log.info("CpuConfig size: 0x{x}", .{@sizeOf(@This())});
-
         // initialize GDT (, TSS) and IDT
-        log.info("loading new GDT", .{});
+        log.debug("loading new GDT", .{});
         self.gdt.load();
-        log.info("loading new IDT", .{});
+        log.debug("loading new IDT", .{});
         self.idt.load(null);
         // ints.enable();
 

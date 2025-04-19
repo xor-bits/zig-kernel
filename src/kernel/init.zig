@@ -16,7 +16,7 @@ const Error = abi.sys.Error;
 // pub export var memory: limine.MemoryMapRequest = .{};
 
 /// load and exec the bootstrap process
-pub fn exec() !noreturn {
+pub fn exec() !void {
     const vmem = try caps.Ref(caps.PageTableLevel4).alloc();
     const vmem_lvl4 = vmem.ptr();
     vmem_lvl4.init();
@@ -46,12 +46,7 @@ pub fn exec() !noreturn {
     id = caps.push_capability(init_memory.object(init_thread.ptr()));
     std.debug.assert(id == abi.BOOTSTRAP_MEMORY);
 
-    log.info("kernel init done, entering user-space", .{});
-
-    var trap: arch.SyscallRegs = undefined;
     try proc.start(init_thread);
-    proc.yield(&trap);
-    arch.sysret(&trap);
 }
 
 fn map_bootstrap(vmem_lvl4: *caps.PageTableLevel4) !void {
