@@ -165,12 +165,11 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
             const locals = arch.cpu_local();
             const thread = locals.current_thread.?;
 
-            caps.call(thread, cap_id, trap) catch |err| {
+            const result = caps.call(thread, cap_id, trap) catch |err| {
                 trap.syscall_id = abi.sys.encode(err);
                 return;
             };
-
-            trap.syscall_id = abi.sys.encode(0);
+            trap.syscall_id = abi.sys.encode(result);
         },
         .recv => {},
         .yield => {

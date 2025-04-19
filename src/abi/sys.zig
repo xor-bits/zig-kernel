@@ -1,5 +1,6 @@
 const std = @import("std");
 
+const abi = @import("lib.zig");
 const ring = @import("ring.zig");
 
 //
@@ -82,6 +83,8 @@ pub const Error = error{
 
     Unimplemented,
 
+    InvalidCapability,
+
     UnknownError,
 
     // pub fn decode() Self!usize {}
@@ -129,7 +132,9 @@ pub fn encodeError(err: Error) usize {
         error.IsAPipe => 24,
         error.NotASocket => 25,
 
-        error.Unimplemented => 26,
+        error.InvalidCapability => 26,
+
+        error.Unimplemented => 27,
 
         error.UnknownError => std.debug.panic("unknown error shouldn't be encoded", .{}),
     }));
@@ -173,7 +178,9 @@ pub fn decode(v: usize) Error!usize {
         24 => error.IsAPipe,
         25 => error.NotASocket,
 
-        26 => error.Unimplemented,
+        26 => error.InvalidCapability,
+
+        27 => error.Unimplemented,
 
         else => return error.UnknownError,
     };
@@ -189,6 +196,59 @@ pub fn log(s: []const u8) void {
     _ = call(.log, .{ @intFromPtr(s.ptr), s.len }) catch unreachable;
 }
 
+// MEMORY CAPABILITY CALLS
+
+pub const MemoryCallId = enum(u8) {
+    alloc,
+};
+
+// allocate a new capability using a memory capability
+pub fn alloc(mem_cap: u32, ty: abi.ObjectType) !u32 {
+    return @truncate(try call(.send, .{
+        @as(usize, mem_cap),
+        @intFromEnum(MemoryCallId.alloc),
+        @as(usize, @intFromEnum(ty)),
+    }));
+}
+
+// THREAD CAPABILITY CALLS
+
+pub const ThreadCallId = enum(u8) {};
+
+// LVL4 (VMEM) CAPABILITY CALLS
+
+pub const Lvl4CallId = enum(u8) {};
+
+// LVL3 CAPABILITY CALLS
+
+pub const Lvl3CallId = enum(u8) {};
+
+// LVL2 CAPABILITY CALLS
+
+pub const Lvl2CallId = enum(u8) {};
+
+// LVL1 CAPABILITY CALLS
+
+pub const Lvl1CallId = enum(u8) {};
+
+// FRAME CAPABILITY CALLS
+
+pub const FrameCallId = enum(u8) {
+    map,
+};
+
+pub fn map_frame(frame_cap: u32, vmem_cap: u32, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
+    _ = try call(.send, .{
+        @as(usize, frame_cap),
+        @intFromEnum(FrameCallId.map),
+        @as(usize, vmem_cap),
+        @as(usize, @as(u32, @bitCast(rights))),
+        @as(usize, @as(u40, @bitCast(flags))),
+    });
+}
+
+// SYSCALLS
+
 pub const Args = struct {
     arg0: usize = 0,
     arg1: usize = 0,
@@ -197,13 +257,8 @@ pub const Args = struct {
     arg4: usize = 0,
 };
 
-pub const MemoryCallId = enum(u8) {};
-
-// allocate a new capability using a memory capability
-// pub fn alloc(mem_cap_id: usize, ty: ) !usize {}
-
-pub fn send(cap_ptr: usize, args: Args) !void {
-    _ = try call(.send, .{
+pub fn send(cap_ptr: usize, args: Args) !usize {
+    return call(.send, .{
         cap_ptr,
         args.arg0,
         args.arg1,

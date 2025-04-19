@@ -99,7 +99,7 @@ pub fn push_capability(obj: Object) u32 {
     return cap;
 }
 
-pub fn call(thread: *Thread, cap_id: u32, trap: *arch.SyscallRegs) Error!void {
+pub fn call(thread: *Thread, cap_id: u32, trap: *arch.SyscallRegs) Error!usize {
     const caps = capability_array();
     if (cap_id >= caps.len) return Error.InvalidAddress;
 
@@ -107,9 +107,7 @@ pub fn call(thread: *Thread, cap_id: u32, trap: *arch.SyscallRegs) Error!void {
     if (caps[cap_id].owner.load(.seq_cst) != thread)
         return Error.InvalidAddress;
 
-    const result = obj.call(thread, trap);
-
-    return result;
+    return obj.call(thread, trap);
 }
 
 fn allocate() u32 {
@@ -213,19 +211,25 @@ fn deallocate(cap: u32, expected_thread: ?*Thread) bool {
 /// raw physical memory that can be used to allocate
 /// things like more `CapabilityNode`s or things
 pub const Memory = struct {
-    pub fn call(_: addr.Phys, thread: *Thread, trap: *arch.SyscallRegs) abi.sys.Error!void {
-        _ = .{ thread, trap };
-        log.info("memory call", .{});
+    pub fn call(_: addr.Phys, thread: *Thread, trap: *arch.SyscallRegs) Error!usize {
+        // log.info("memory call", .{});
 
-        const call_id = std.meta.intToEnum(abi.ObjectType, trap.arg1) catch {
-            trap.syscall_id = abi.sys.encode(Error.InvalidArgument);
-            return;
+        const call_id = std.meta.intToEnum(abi.sys.MemoryCallId, trap.arg1) catch {
+            return Error.InvalidArgument;
         };
-        _ = call_id;
 
-        // @import("init.zig").alloc();
+        switch (call_id) {
+            .alloc => {
+                const obj_ty = std.meta.intToEnum(abi.ObjectType, trap.arg2) catch {
+                    return Error.InvalidArgument;
+                };
 
-        std.debug.panic("TODO:", .{});
+                const obj = try Object.alloc(obj_ty, thread);
+                const cap = push_capability(obj);
+
+                return cap;
+            },
+        }
     }
 };
 
@@ -434,14 +438,16 @@ pub fn Ref(comptime T: type) type {
 
         const Self = @This();
 
-        pub fn alloc() !Self {
+        pub fn alloc() Error!Self {
             std.debug.assert(std.mem.isAligned(0x1000, @alignOf(T)));
+
+            const N_PAGES = comptime std.math.divCeil(usize, @sizeOf(T), 0x1000) catch unreachable;
 
             const paddr =
                 if (@sizeOf(T) == 0)
                     addr.Phys.fromInt(0)
                 else
-                    try @import("init.zig").alloc(try std.math.divCeil(usize, @sizeOf(T), 0x1000));
+                    try @import("init.zig").alloc(N_PAGES);
 
             return Self{ .paddr = paddr };
         }
@@ -484,23 +490,32 @@ pub const Object = struct {
     /// the next element in the linked list derived from the parent
     next: u32 = 0,
 
-    pub fn call(self: @This(), thread: *Thread, trap: *arch.SyscallRegs) abi.sys.Error!void {
-        switch (self.type) {
-            .memory => try Memory.call(self.paddr, thread, trap),
-            .thread => {},
-            .page_table_level_4 => {},
-            .page_table_level_3 => {
-                // try PageTableLevel3.call(
-                //     self.paddr,
-                //     thread,
-                //     args,
-                // );
-            },
-            .page_table_level_2 => {},
-            .page_table_level_1 => {},
-            .frame => {},
-            .null => {},
-        }
+    const Self = @This();
+
+    pub fn alloc(ty: abi.ObjectType, owner: *Thread) Error!Self {
+        return switch (ty) {
+            .null => Error.InvalidCapability,
+            .memory => (try Ref(Memory).alloc()).object(owner),
+            .thread => (try Ref(Thread).alloc()).object(owner),
+            .page_table_level_4 => (try Ref(PageTableLevel4).alloc()).object(owner),
+            .page_table_level_3 => (try Ref(PageTableLevel3).alloc()).object(owner),
+            .page_table_level_2 => (try Ref(PageTableLevel2).alloc()).object(owner),
+            .page_table_level_1 => (try Ref(PageTableLevel1).alloc()).object(owner),
+            .frame => (try Ref(Frame).alloc()).object(owner),
+        };
+    }
+
+    pub fn call(self: @This(), thread: *Thread, trap: *arch.SyscallRegs) Error!usize {
+        return switch (self.type) {
+            .memory => Memory.call(self.paddr, thread, trap),
+            .thread => Error.Unimplemented,
+            .page_table_level_4 => Error.Unimplemented,
+            .page_table_level_3 => Error.Unimplemented,
+            .page_table_level_2 => Error.Unimplemented,
+            .page_table_level_1 => Error.Unimplemented,
+            .frame => Error.Unimplemented,
+            .null => Error.InvalidCapability,
+        };
     }
 };
 

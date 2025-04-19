@@ -18,10 +18,16 @@ pub var heap = std.heap.FixedBufferAllocator.init(heap_ptr[0..abi.BOOTSTRAP_HEAP
 pub fn main() !void {
     abi.sys.log("hello");
 
-    abi.sys.send(abi.BOOTSTRAP_MEMORY, .{}) catch unreachable;
+    const lvl3 = try abi.sys.alloc(abi.BOOTSTRAP_MEMORY, .page_table_level_3);
+    const lvl2 = try abi.sys.alloc(abi.BOOTSTRAP_MEMORY, .page_table_level_2);
+    const lvl1 = try abi.sys.alloc(abi.BOOTSTRAP_MEMORY, .page_table_level_1);
+    const frame = try abi.sys.alloc(abi.BOOTSTRAP_MEMORY, .frame);
 
-    _ = abi.sys.send(2, .{}) catch unreachable;
-    _ = abi.sys.recv(0) catch unreachable;
+    try abi.sys.map_frame(frame, abi.BOOTSTRAP_SELF_VMEM, .{
+        .writable = true,
+    }, .{});
+
+    log.info("got lvl3={} lvl2={} lvl1={} frame={}", .{ lvl3, lvl2, lvl1, frame });
 }
 
 fn exec_elf(path: []const u8) !void {

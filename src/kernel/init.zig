@@ -8,6 +8,7 @@ const addr = @import("addr.zig");
 const caps = @import("caps.zig");
 
 const log = std.log.scoped(.init);
+const Error = abi.sys.Error;
 
 //
 
@@ -128,10 +129,10 @@ fn map_bootstrap(vmem_lvl4: *caps.PageTableLevel4) !void {
     std.mem.copyForwards(u8, bootstrap_addr, bootstrap_binary);
 }
 
-pub fn alloc(pages: usize) !addr.Phys {
+pub fn alloc(pages: usize) Error!addr.Phys {
     if (comptime false) {
         const memory = undefined;
-        const response = memory.response orelse return error.OutOfMemory;
+        const response = memory.response orelse return Error.OutOfMemory;
 
         const bytes = pages * 0x1000;
 
@@ -171,8 +172,8 @@ pub fn alloc(pages: usize) !addr.Phys {
             return paddr;
         }
 
-        return error.OutOfMemory;
+        return Error.OutOfMemory;
     } else {
-        return addr.Virt.fromPtr(pmem.alloc() orelse return error.OutOfMemory).hhdmToPhys();
+        return addr.Virt.fromPtr(pmem.alloc() orelse return Error.OutOfMemory).hhdmToPhys();
     }
 }
