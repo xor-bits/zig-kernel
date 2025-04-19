@@ -19,6 +19,8 @@ SECTIONS {
     . = ALIGN(16);
     . += 0x10000;
     PROVIDE(__stack_end = .);
+    . += 0x10000;
+    PROVIDE(__thread_stack_end = .);
   } :stack
 
   .data : {

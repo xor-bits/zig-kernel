@@ -222,6 +222,37 @@ pub fn alloc(mem_cap: u32, ty: abi.ObjectType) !u32 {
 pub const ThreadCallId = enum(u8) {
     start,
     stop,
+    read_regs,
+    write_regs,
+};
+
+pub const ThreadRegs = extern struct {
+    _r15: u64 = 0,
+    _r14: u64 = 0,
+    _r13: u64 = 0,
+    _r12: u64 = 0,
+    // RFlags, inaccessible to user-space (it is ignored on write and set to 0 on read)
+    _r11: u64 = 0,
+    /// r10
+    arg5: u64 = 0,
+    /// r9
+    arg4: u64 = 0,
+    /// r8
+    arg3: u64 = 0,
+    _rbp: u64 = 0,
+    /// rsi
+    arg1: u64 = 0,
+    /// rdi
+    arg0: u64 = 0,
+    /// rdx
+    arg2: u64 = 0,
+    /// rcx
+    user_instr_ptr: u64 = 0,
+    _rbx: u64 = 0,
+    /// rax = 0, also the return register
+    syscall_id: u64 = 0,
+    /// rsp
+    user_stack_ptr: u64 = 0,
 };
 
 pub fn thread_start(thread_cap: u32) !void {
@@ -235,6 +266,22 @@ pub fn thread_stop(thread_cap: u32) !void {
     _ = try call(.send, .{
         @as(usize, thread_cap),
         @intFromEnum(ThreadCallId.stop),
+    });
+}
+
+pub fn thread_read_regs(thread_cap: u32, regs: *ThreadRegs) !void {
+    _ = try call(.send, .{
+        @as(usize, thread_cap),
+        @intFromEnum(ThreadCallId.read_regs),
+        @intFromPtr(regs),
+    });
+}
+
+pub fn thread_write_regs(thread_cap: u32, regs: *const ThreadRegs) !void {
+    _ = try call(.send, .{
+        @as(usize, thread_cap),
+        @intFromEnum(ThreadCallId.write_regs),
+        @intFromPtr(regs),
     });
 }
 

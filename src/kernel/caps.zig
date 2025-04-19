@@ -222,11 +222,11 @@ pub const Memory = struct {
     pub fn init(_: *@This()) void {}
 
     pub fn call(_: addr.Phys, thread: *Thread, trap: *arch.SyscallRegs) Error!usize {
-        log.debug("memory call", .{});
-
         const call_id = std.meta.intToEnum(abi.sys.MemoryCallId, trap.arg1) catch {
             return Error.InvalidArgument;
         };
+
+        log.debug("memory call \"{s}\"", .{@tagName(call_id)});
 
         switch (call_id) {
             .alloc => {
@@ -265,21 +265,62 @@ pub const Thread = struct {
     }
 
     // FIXME: pass Ref(Self) instead of addr.Phys
-    pub fn call(paddr: addr.Phys, _: *Thread, trap: *arch.SyscallRegs) Error!usize {
-        log.debug("thread call", .{});
-
+    pub fn call(paddr: addr.Phys, thread: *Thread, trap: *arch.SyscallRegs) Error!usize {
         const call_id = std.meta.intToEnum(abi.sys.ThreadCallId, trap.arg1) catch {
             return Error.InvalidArgument;
         };
 
+        const target_thread = Ref(Thread){ .paddr = paddr };
+
+        log.debug("thread call \"{s}\" from {*} on {*}", .{ @tagName(call_id), thread, target_thread.ptr() });
+
         switch (call_id) {
             .start => {
-                proc.start(Ref(Thread){ .paddr = paddr });
+                proc.start(target_thread);
                 return 0;
             },
             .stop => {
-                proc.stop(Ref(Thread){ .paddr = paddr });
+                proc.stop(target_thread);
                 return 0;
+            },
+            .read_regs => {
+                if (!std.mem.isAligned(trap.arg2, @alignOf(abi.sys.ThreadRegs))) {
+                    return Error.InvalidAddress;
+                }
+
+                var tmp: arch.SyscallRegs = undefined;
+                if (target_thread.ptr() == thread) {
+                    tmp = trap.*;
+                } else {
+                    tmp = target_thread.ptr().trap;
+                }
+                tmp.rflags = 0;
+
+                comptime std.debug.assert(@sizeOf(arch.SyscallRegs) == @sizeOf(abi.sys.ThreadRegs));
+
+                // abi.sys.ThreadRegs is written as if it was arch.SyscallRegs
+                const ptr = @as(*volatile arch.SyscallRegs, @ptrFromInt(trap.arg2));
+                ptr.* = tmp;
+                return @sizeOf(arch.SyscallRegs);
+            },
+            .write_regs => {
+                if (!std.mem.isAligned(trap.arg2, @alignOf(abi.sys.ThreadRegs))) {
+                    return Error.InvalidAddress;
+                }
+
+                comptime std.debug.assert(@sizeOf(arch.SyscallRegs) == @sizeOf(abi.sys.ThreadRegs));
+
+                // abi.sys.ThreadRegs is read as if it was arch.SyscallRegs
+                const ptr = @as(*volatile arch.SyscallRegs, @ptrFromInt(trap.arg2));
+                var tmp: arch.SyscallRegs = ptr.*;
+                tmp.rflags = (arch.SyscallRegs{}).rflags;
+                if (target_thread.ptr() == thread) {
+                    trap.* = tmp;
+                } else {
+                    target_thread.ptr().trap = tmp;
+                }
+
+                return @sizeOf(arch.SyscallRegs);
             },
         }
     }
@@ -359,11 +400,11 @@ pub const PageTableLevel3 = struct {
     }
 
     pub fn call(paddr: addr.Phys, thread: *Thread, trap: *arch.SyscallRegs) Error!usize {
-        log.debug("lvl3 call", .{});
-
         const call_id = std.meta.intToEnum(abi.sys.Lvl3CallId, trap.arg1) catch {
             return Error.InvalidArgument;
         };
+
+        log.debug("lvl3 call \"{s}\"", .{@tagName(call_id)});
 
         switch (call_id) {
             .map => {
@@ -414,11 +455,11 @@ pub const PageTableLevel2 = struct {
     }
 
     pub fn call(paddr: addr.Phys, thread: *Thread, trap: *arch.SyscallRegs) Error!usize {
-        log.debug("lvl2 call", .{});
-
         const call_id = std.meta.intToEnum(abi.sys.Lvl2CallId, trap.arg1) catch {
             return Error.InvalidArgument;
         };
+
+        log.debug("lvl2 call \"{s}\"", .{@tagName(call_id)});
 
         switch (call_id) {
             .map => {
@@ -459,11 +500,11 @@ pub const PageTableLevel1 = struct {
     }
 
     pub fn call(paddr: addr.Phys, thread: *Thread, trap: *arch.SyscallRegs) Error!usize {
-        log.debug("lvl1 call", .{});
-
         const call_id = std.meta.intToEnum(abi.sys.Lvl1CallId, trap.arg1) catch {
             return Error.InvalidArgument;
         };
+
+        log.debug("lvl1 call \"{s}\"", .{@tagName(call_id)});
 
         switch (call_id) {
             .map => {
@@ -498,11 +539,11 @@ pub const Frame = struct {
     }
 
     pub fn call(paddr: addr.Phys, thread: *Thread, trap: *arch.SyscallRegs) Error!usize {
-        log.debug("frame call", .{});
-
         const call_id = std.meta.intToEnum(abi.sys.FrameCallId, trap.arg1) catch {
             return Error.InvalidArgument;
         };
+
+        log.debug("frame call \"{s}\"", .{@tagName(call_id)});
 
         switch (call_id) {
             .map => {

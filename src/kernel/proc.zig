@@ -55,9 +55,10 @@ pub fn yield(trap: *arch.SyscallRegs) void {
     const local = arch.cpu_local();
 
     if (local.current_thread) |prev_thread| {
+        local.current_thread = null;
+        prev_thread.trap = trap.*;
+
         if (!prev_thread.stopped) {
-            local.current_thread = null;
-            prev_thread.trap = trap.*;
             ready(prev_thread);
         }
     }
@@ -99,8 +100,8 @@ pub fn ready(thread: *caps.Thread) void {
 }
 
 pub fn next() caps.Ref(caps.Thread) {
-    log.debug("waiting for next thread", .{});
-    defer log.debug("waiting for next thread done", .{});
+    // log.debug("waiting for next thread", .{});
+    // defer log.debug("waiting for next thread done", .{});
 
     if (active_threads.load(.monotonic) == 0) {
         log.err("NO ACTIVE THREADS", .{});
@@ -120,7 +121,13 @@ pub fn tryNext() ?caps.Ref(caps.Thread) {
         lock.lock();
         defer lock.unlock();
 
-        if (queue.pop()) |next_thread| return next_thread;
+        if (queue.pop()) |next_thread| {
+            if (next_thread.ptr().stopped) {
+                continue;
+            } else {
+                return next_thread;
+            }
+        }
     }
 
     return null;

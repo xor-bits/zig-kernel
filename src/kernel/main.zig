@@ -105,6 +105,7 @@ fn main() noreturn {
 
 pub fn syscall(trap: *arch.SyscallRegs) void {
     const log = std.log.scoped(.syscall);
+    // log.info("syscall from cpu={} ip=0x{x} sp=0x{x}", .{ arch.cpu_local().id, trap.user_instr_ptr, trap.user_stack_ptr });
 
     // TODO: once every CPU has reached this, bootloader_reclaimable memory could be freed
     // just some few things need to be copied, but the page map(s) and stack(s) are already copied
@@ -166,11 +167,7 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
             const locals = arch.cpu_local();
             const thread = locals.current_thread.?;
 
-            const result = caps.call(thread, cap_id, trap) catch |err| {
-                trap.syscall_id = abi.sys.encode(err);
-                return;
-            };
-            trap.syscall_id = abi.sys.encode(result);
+            trap.syscall_id = abi.sys.encode(caps.call(thread, cap_id, trap));
 
             if (thread.stopped == true) {
                 proc.yield(trap);

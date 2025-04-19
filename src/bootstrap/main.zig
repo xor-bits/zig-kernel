@@ -21,14 +21,53 @@ pub fn main() !void {
 
     try map_naive(0x1000_0000_0000, .{ .writable = true }, .{});
     log.info("mapped", .{});
-
     const s = @as(*volatile u64, @ptrFromInt(0x1000_0000_0000));
     s.* = 56;
     log.info("val={}", .{s.*});
 
+    var regs: abi.sys.ThreadRegs = .{};
+    try abi.sys.thread_read_regs(abi.BOOTSTRAP_SELF_THREAD, &regs);
+    log.info("regs='{}'", .{regs});
+
+    regs = .{};
+    new_thread = try abi.sys.alloc(abi.BOOTSTRAP_MEMORY, .thread);
+    regs.user_stack_ptr = @intFromPtr(&__thread_stack_end);
+    regs.user_instr_ptr = @intFromPtr(&thread_main);
+    try abi.sys.thread_write_regs(new_thread, &regs);
+    try abi.sys.thread_start(new_thread);
+
+    try abi.sys.thread_stop(new_thread);
     try abi.sys.thread_stop(abi.BOOTSTRAP_SELF_THREAD);
     unreachable;
 }
+
+var new_thread: u32 = 0;
+
+export fn thread_main() noreturn {
+    thread() catch |err| {
+        std.debug.panic("{}", .{err});
+    };
+    while (true) {}
+}
+
+pub fn thread() !void {
+    abi.sys.log("hello from secondary thread");
+    std.debug.assert(Error.InvalidCapability == abi.sys.thread_stop(new_thread));
+    abi.sys.yield();
+    unreachable;
+}
+
+// pub export var thread_stack: [0x2000]u8 align(16) linksection(".stack") = @as([0x2000]u8, undefined);
+
+// pub export fn thread_start() linksection(".text._start") callconv(.Naked) noreturn {
+//     asm volatile (
+//         \\ movq %[sp], %%rsp
+//         \\ leaq 0x1, %%rax
+//         \\ jmp zig_main
+//         :
+//         : [sp] "rN" (&initial_stack),
+//     );
+// }
 
 fn map_naive(vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
     return map_naive_fn(abi.sys.map_frame, map_naive_lvl1, .frame, vaddr, rights, flags);
@@ -160,6 +199,7 @@ fn exec_elf(path: []const u8) !void {
 }
 
 pub extern var __stack_end: u8;
+pub extern var __thread_stack_end: u8;
 
 pub export fn _start() linksection(".text._start") callconv(.Naked) noreturn {
     asm volatile (
