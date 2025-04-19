@@ -322,6 +322,16 @@ pub const Thread = struct {
 
                 return @sizeOf(arch.SyscallRegs);
             },
+            .set_vmem => {
+                // TODO: require stopping the thread or something
+                const vmem = try (try get_capability(thread, @truncate(trap.arg2))).as(PageTableLevel4);
+                target_thread.ptr().vmem = vmem;
+                return 0;
+            },
+            .set_prio => {
+                target_thread.ptr().priority = @truncate(trap.arg2);
+                return 0;
+            },
         }
     }
 };

@@ -36,6 +36,8 @@ pub fn main() !void {
     try abi.sys.thread_write_regs(new_thread, &regs);
     try abi.sys.thread_start(new_thread);
 
+    abi.sys.yield();
+
     try abi.sys.thread_stop(new_thread);
     try abi.sys.thread_stop(abi.BOOTSTRAP_SELF_THREAD);
     unreachable;

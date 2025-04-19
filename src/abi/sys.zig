@@ -224,6 +224,8 @@ pub const ThreadCallId = enum(u8) {
     stop,
     read_regs,
     write_regs,
+    set_vmem,
+    set_prio,
 };
 
 pub const ThreadRegs = extern struct {
@@ -282,6 +284,22 @@ pub fn thread_write_regs(thread_cap: u32, regs: *const ThreadRegs) !void {
         @as(usize, thread_cap),
         @intFromEnum(ThreadCallId.write_regs),
         @intFromPtr(regs),
+    });
+}
+
+pub fn thread_set_vmem(thread_cap: u32, vmem_cap: u32) !void {
+    _ = try call(.send, .{
+        @as(usize, thread_cap),
+        @intFromEnum(ThreadCallId.set_vmem),
+        @as(usize, vmem_cap),
+    });
+}
+
+pub fn thread_set_prio(thread_cap: u32, priority: u2) !void {
+    _ = try call(.send, .{
+        @as(usize, thread_cap),
+        @intFromEnum(ThreadCallId.set_prio),
+        @as(usize, priority),
     });
 }
 
