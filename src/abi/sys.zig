@@ -42,47 +42,21 @@ pub const MapFlags = extern struct {
 };
 
 pub const Error = error{
-    InvalidAddress,
-    NoSuchProcess,
-    OutOfVirtualMemory,
-    OutOfMemory,
-    InvalidAlloc,
-    InvalidUtf8,
-
-    NotFound,
-    AlreadyExists,
-    NotADirectory,
-    NotAFile,
-    FilesystemError,
-    PermissionDenied,
-    UnexpectedEOF,
-    Interrupted,
-    WriteZero,
-    BadFileDescriptor,
-
-    InvalidFlags,
-
-    InvalidDomain,
-    InvalidType,
-    UnknownProtocol,
-
-    ConnectionRefused,
-    Closed,
-
-    InvalidArgument,
-
-    IsAPipe,
-    NotASocket,
-
     Unimplemented,
-
+    InvalidAddress,
+    InvalidFlags,
+    InvalidType,
+    InvalidArgument,
     InvalidCapability,
+    InvalidSyscall,
+    OutOfMemory,
     EntryNotPresent,
     EntryIsHuge,
+    NotStopped,
+    IsStopped,
+    NoVmem,
 
     UnknownError,
-
-    // pub fn decode() Self!usize {}
 };
 
 pub fn encode(result: Error!usize) usize {
@@ -95,43 +69,19 @@ pub fn encode(result: Error!usize) usize {
 
 pub fn encodeError(err: Error) usize {
     return @bitCast(-@as(isize, switch (err) {
-        error.InvalidAddress => 1,
-        error.NoSuchProcess => 2,
-        error.OutOfVirtualMemory => 3,
-        error.OutOfMemory => 4,
-        error.InvalidAlloc => 5,
-        error.InvalidUtf8 => 6,
-
-        error.NotFound => 7,
-        error.AlreadyExists => 8,
-        error.NotADirectory => 9,
-        error.NotAFile => 10,
-        error.FilesystemError => 11,
-        error.PermissionDenied => 12,
-        error.UnexpectedEOF => 13,
-        error.Interrupted => 14,
-        error.WriteZero => 15,
-        error.BadFileDescriptor => 16,
-
-        error.InvalidFlags => 17,
-
-        error.InvalidDomain => 18,
-        error.InvalidType => 19,
-        error.UnknownProtocol => 20,
-
-        error.ConnectionRefused => 21,
-        error.Closed => 22,
-
-        error.InvalidArgument => 23,
-
-        error.IsAPipe => 24,
-        error.NotASocket => 25,
-
-        error.InvalidCapability => 26,
-        error.EntryNotPresent => 27,
-        error.EntryIsHuge => 28,
-
-        error.Unimplemented => 29,
+        error.Unimplemented => 1,
+        error.InvalidAddress => 2,
+        error.InvalidFlags => 3,
+        error.InvalidType => 4,
+        error.InvalidArgument => 5,
+        error.InvalidCapability => 6,
+        error.InvalidSyscall => 7,
+        error.OutOfMemory => 8,
+        error.EntryNotPresent => 9,
+        error.EntryIsHuge => 10,
+        error.NotStopped => 11,
+        error.IsStopped => 12,
+        error.NoVmem => 13,
 
         error.UnknownError => std.debug.panic("unknown error shouldn't be encoded", .{}),
     }));
@@ -143,44 +93,19 @@ pub fn decode(v: usize) Error!usize {
 
     return switch (err) {
         std.math.minInt(isize)...0 => v,
-        1 => error.InvalidAddress,
-        2 => error.NoSuchProcess,
-        3 => error.OutOfVirtualMemory,
-        4 => error.OutOfMemory,
-        5 => error.InvalidAlloc,
-        6 => error.InvalidUtf8,
-
-        7 => error.NotFound,
-        8 => error.AlreadyExists,
-        9 => error.NotADirectory,
-        10 => error.NotAFile,
-        11 => error.FilesystemError,
-        12 => error.PermissionDenied,
-        13 => error.UnexpectedEOF,
-        14 => error.Interrupted,
-        15 => error.WriteZero,
-        16 => error.BadFileDescriptor,
-
-        17 => error.InvalidFlags,
-
-        18 => error.InvalidDomain,
-        19 => error.InvalidType,
-        20 => error.UnknownProtocol,
-
-        21 => error.ConnectionRefused,
-        22 => error.Closed,
-
-        23 => error.InvalidArgument,
-
-        24 => error.IsAPipe,
-        25 => error.NotASocket,
-
-        26 => error.InvalidCapability,
-        27 => error.EntryNotPresent,
-        28 => error.EntryIsHuge,
-
-        29 => error.Unimplemented,
-
+        1 => error.Unimplemented,
+        2 => error.InvalidAddress,
+        3 => error.InvalidFlags,
+        4 => error.InvalidType,
+        5 => error.InvalidArgument,
+        6 => error.InvalidCapability,
+        7 => error.InvalidSyscall,
+        8 => error.OutOfMemory,
+        9 => error.EntryNotPresent,
+        10 => error.EntryIsHuge,
+        11 => error.NotStopped,
+        12 => error.IsStopped,
+        13 => error.NoVmem,
         else => return error.UnknownError,
     };
 }

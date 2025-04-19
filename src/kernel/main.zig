@@ -112,7 +112,7 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
 
     const id = std.meta.intToEnum(abi.sys.Id, trap.syscall_id) catch {
         log.warn("invalid syscall: {x}", .{trap.syscall_id});
-        trap.syscall_id = abi.sys.encode(abi.sys.Error.UnknownProtocol);
+        trap.syscall_id = abi.sys.encode(abi.sys.Error.InvalidSyscall);
         return;
     };
 
