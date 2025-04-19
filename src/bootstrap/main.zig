@@ -34,11 +34,11 @@ pub fn main() !void {
     regs.user_stack_ptr = @intFromPtr(&__thread_stack_end);
     regs.user_instr_ptr = @intFromPtr(&thread_main);
     try abi.sys.thread_write_regs(new_thread, &regs);
+    try abi.sys.thread_set_vmem(new_thread, abi.BOOTSTRAP_SELF_VMEM);
     try abi.sys.thread_start(new_thread);
 
     abi.sys.yield();
 
-    try abi.sys.thread_stop(new_thread);
     try abi.sys.thread_stop(abi.BOOTSTRAP_SELF_THREAD);
     unreachable;
 }
@@ -54,8 +54,7 @@ export fn thread_main() noreturn {
 
 pub fn thread() !void {
     abi.sys.log("hello from secondary thread");
-    std.debug.assert(Error.InvalidCapability == abi.sys.thread_stop(new_thread));
-    abi.sys.yield();
+    try abi.sys.thread_stop(new_thread);
     unreachable;
 }
 

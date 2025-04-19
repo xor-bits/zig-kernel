@@ -107,7 +107,7 @@ pub fn get_capability(thread: *Thread, cap_id: u32) Error!Object {
     if (cap_id >= caps.len) return Error.InvalidCapability;
 
     const obj = caps[cap_id];
-    if (caps[cap_id].owner.load(.seq_cst) != thread)
+    if (caps[cap_id].owner.load(.seq_cst) != Thread.vmemOf(thread))
         return Error.InvalidCapability;
 
     return obj;
@@ -333,6 +333,12 @@ pub const Thread = struct {
                 return 0;
             },
         }
+    }
+
+    fn vmemOf(thread: ?*Thread) ?*PageTableLevel4 {
+        const t = thread orelse return null;
+        const vmem = t.vmem orelse return null;
+        return vmem.ptr();
     }
 };
 
@@ -599,7 +605,7 @@ pub fn Ref(comptime T: type) type {
             return Object{
                 .paddr = self.paddr,
                 .type = Object.objectTypeOf(T),
-                .owner = .init(owner),
+                .owner = .init(Thread.vmemOf(owner)),
             };
         }
     };
@@ -609,7 +615,7 @@ pub const Object = struct {
     paddr: addr.Phys = .{ .raw = 0 },
     type: abi.ObjectType = .null,
     // lock: spin.Mutex = .new(),
-    owner: std.atomic.Value(?*Thread) = .init(null),
+    owner: std.atomic.Value(?*PageTableLevel4) = .init(null),
 
     /// a linked list of Objects that are derived from this one
     children: u32 = 0,
