@@ -17,13 +17,6 @@ pub const Id = enum(usize) {
     yield = 0x8,
 };
 
-pub const IdPageMap = enum(usize) {
-    /// map an entry
-    map = 0x1,
-    /// unmap an entry
-    unmap = 0x2,
-};
-
 pub const Rights = extern struct {
     readable: bool = true,
     writable: bool = false,
@@ -193,14 +186,6 @@ pub fn decode(v: usize) Error!usize {
 }
 
 //
-
-pub const Page = struct { v: [0x1000]u8 align(0x1000) };
-
-//
-
-pub fn log(s: []const u8) void {
-    _ = call(.log, .{ @intFromPtr(s.ptr), s.len }) catch unreachable;
-}
 
 // MEMORY CAPABILITY CALLS
 
@@ -384,6 +369,10 @@ pub const Args = struct {
     arg3: usize = 0,
     arg4: usize = 0,
 };
+
+pub fn log(s: []const u8) void {
+    _ = call(.log, .{ @intFromPtr(s.ptr), s.len }) catch unreachable;
+}
 
 pub fn send(cap_ptr: usize, args: Args) !usize {
     return call(.send, .{

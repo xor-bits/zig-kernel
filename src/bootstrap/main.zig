@@ -58,18 +58,6 @@ pub fn thread() !void {
     unreachable;
 }
 
-// pub export var thread_stack: [0x2000]u8 align(16) linksection(".stack") = @as([0x2000]u8, undefined);
-
-// pub export fn thread_start() linksection(".text._start") callconv(.Naked) noreturn {
-//     asm volatile (
-//         \\ movq %[sp], %%rsp
-//         \\ leaq 0x1, %%rax
-//         \\ jmp zig_main
-//         :
-//         : [sp] "rN" (&initial_stack),
-//     );
-// }
-
 fn map_naive(vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
     return map_naive_fn(abi.sys.map_frame, map_naive_lvl1, .frame, vaddr, rights, flags);
 }
