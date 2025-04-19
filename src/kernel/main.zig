@@ -170,6 +170,11 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
                 return;
             };
             trap.syscall_id = abi.sys.encode(result);
+
+            if (thread.stopped == true) {
+                // FIXME: scheduler
+                arch.hcf();
+            }
         },
         .recv => {},
         .yield => {

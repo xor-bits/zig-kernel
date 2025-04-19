@@ -219,7 +219,24 @@ pub fn alloc(mem_cap: u32, ty: abi.ObjectType) !u32 {
 
 // THREAD CAPABILITY CALLS
 
-pub const ThreadCallId = enum(u8) {};
+pub const ThreadCallId = enum(u8) {
+    start,
+    stop,
+};
+
+pub fn thread_start(thread_cap: u32) !void {
+    _ = try call(.send, .{
+        @as(usize, thread_cap),
+        @intFromEnum(ThreadCallId.start),
+    });
+}
+
+pub fn thread_stop(thread_cap: u32) !void {
+    _ = try call(.send, .{
+        @as(usize, thread_cap),
+        @intFromEnum(ThreadCallId.stop),
+    });
+}
 
 // LVL4 (VMEM) CAPABILITY CALLS
 
@@ -241,6 +258,7 @@ pub fn map_level3(lvl3_cap: u32, vmem_cap: u32, vaddr: usize, rights: abi.sys.Ri
         @as(usize, @as(u40, @bitCast(flags))),
     });
 }
+
 // LVL2 CAPABILITY CALLS
 
 pub const Lvl2CallId = enum(u8) {

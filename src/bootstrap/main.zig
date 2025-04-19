@@ -25,6 +25,9 @@ pub fn main() !void {
     const s = @as(*volatile u64, @ptrFromInt(0x1000_0000_0000));
     s.* = 56;
     log.info("val={}", .{s.*});
+
+    try abi.sys.thread_stop(abi.BOOTSTRAP_SELF_THREAD);
+    unreachable;
 }
 
 fn map_naive(vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {

@@ -47,6 +47,7 @@ pub fn exec() !noreturn {
 
     log.info("kernel init done, entering user-space", .{});
 
+    init_thread.ptr().stopped = false;
     arch.cpu_local().current_thread = init_thread.ptr();
     arch.sysret(&init_thread.ptr().trap);
 }

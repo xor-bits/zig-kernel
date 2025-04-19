@@ -252,9 +252,36 @@ pub const Thread = struct {
     caps_lock: spin.Mutex = .new(),
     /// scheduler priority
     priority: u2 = 1,
+    /// is the thread stopped OR running/ready/waiting
+    stopped: bool = true,
 
     pub fn init(self: *@This()) void {
         self.* = .{};
+    }
+
+    // FIXME: pass Ref(Self) instead of addr.Phys
+    pub fn call(paddr: addr.Phys, _: *Thread, trap: *arch.SyscallRegs) Error!usize {
+        log.debug("thread call", .{});
+
+        const call_id = std.meta.intToEnum(abi.sys.ThreadCallId, trap.arg1) catch {
+            return Error.InvalidArgument;
+        };
+
+        const self = (Ref(Thread){ .paddr = paddr }).ptr();
+
+        switch (call_id) {
+            .start => {
+                self.stopped = false;
+                return 0;
+                // TODO: add to ready queue
+            },
+            .stop => {
+                self.stopped = true;
+                return 0;
+                // FIXME: IPI
+                // TODO: stop the processor and take the thread
+            },
+        }
     }
 };
 
@@ -579,7 +606,7 @@ pub const Object = struct {
         return switch (self.type) {
             .null => Error.InvalidCapability,
             .memory => Memory.call(self.paddr, thread, trap),
-            .thread => Error.Unimplemented,
+            .thread => Thread.call(self.paddr, thread, trap),
             .page_table_level_4 => Error.Unimplemented,
             .page_table_level_3 => PageTableLevel3.call(self.paddr, thread, trap),
             .page_table_level_2 => PageTableLevel2.call(self.paddr, thread, trap),
