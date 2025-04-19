@@ -4,6 +4,7 @@ const abi = @import("abi");
 const initfsd = @import("initfsd.zig");
 
 const log = std.log.scoped(.bootstrap);
+const Error = abi.sys.Error;
 
 //
 
@@ -18,16 +19,53 @@ pub var heap = std.heap.FixedBufferAllocator.init(heap_ptr[0..abi.BOOTSTRAP_HEAP
 pub fn main() !void {
     abi.sys.log("hello");
 
-    const lvl3 = try abi.sys.alloc(abi.BOOTSTRAP_MEMORY, .page_table_level_3);
-    const lvl2 = try abi.sys.alloc(abi.BOOTSTRAP_MEMORY, .page_table_level_2);
-    const lvl1 = try abi.sys.alloc(abi.BOOTSTRAP_MEMORY, .page_table_level_1);
-    const frame = try abi.sys.alloc(abi.BOOTSTRAP_MEMORY, .frame);
+    try map_naive(0x1000_0000_0000, .{ .writable = true }, .{});
+    log.info("mapped", .{});
 
-    try abi.sys.map_frame(frame, abi.BOOTSTRAP_SELF_VMEM, .{
+    const s = @as(*volatile u64, @ptrFromInt(0x1000_0000_0000));
+    s.* = 56;
+    log.info("val={}", .{s.*});
+}
+
+fn map_naive(vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
+    return map_naive_fn(abi.sys.map_frame, map_naive_lvl1, .frame, vaddr, rights, flags);
+}
+
+fn map_naive_lvl1(vaddr: usize, _: abi.sys.Rights, _: abi.sys.MapFlags) !void {
+    return map_naive_fn(abi.sys.map_level1, map_naive_lvl2, .page_table_level_1, vaddr, .{
+        .writable = true,
+    }, .{});
+}
+
+fn map_naive_lvl2(vaddr: usize, _: abi.sys.Rights, _: abi.sys.MapFlags) !void {
+    return map_naive_fn(abi.sys.map_level2, map_naive_lvl3, .page_table_level_2, vaddr, .{
+        .writable = true,
+    }, .{});
+}
+
+fn map_naive_lvl3(vaddr: usize, _: abi.sys.Rights, _: abi.sys.MapFlags) !void {
+    return map_naive_fn(abi.sys.map_level3, map_naive_fail, .page_table_level_3, vaddr, .{
+        .writable = true,
+    }, .{});
+}
+
+fn map_naive_fail(_: usize, _: abi.sys.Rights, _: abi.sys.MapFlags) !void {
+    return error.CannotMap;
+}
+
+fn map_naive_fn(comptime map_fn: anytype, comptime if_not_present: anytype, ty: abi.ObjectType, vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
+    const obj = try abi.sys.alloc(abi.BOOTSTRAP_MEMORY, ty);
+    const err = map_fn(obj, abi.BOOTSTRAP_SELF_VMEM, vaddr, .{
         .writable = true,
     }, .{});
 
-    log.info("got lvl3={} lvl2={} lvl1={} frame={}", .{ lvl3, lvl2, lvl1, frame });
+    if (err != error.EntryNotPresent) return err;
+
+    try if_not_present(vaddr, rights, flags);
+
+    return map_fn(obj, abi.BOOTSTRAP_SELF_VMEM, vaddr, .{
+        .writable = true,
+    }, .{});
 }
 
 fn exec_elf(path: []const u8) !void {

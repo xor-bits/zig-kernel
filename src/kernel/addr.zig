@@ -1,6 +1,8 @@
 const std = @import("std");
+const abi = @import("abi");
 
 const main = @import("main.zig");
+const Error = abi.sys.Error;
 
 //
 
@@ -46,6 +48,14 @@ pub const Virt = struct {
         level4: u9 = 0,
         _extra: u16 = 0,
     };
+
+    pub fn fromUser(i: u64) Error!Virt {
+        if (i >= 0x8000_0000_0000) {
+            return Error.InvalidAddress;
+        } else {
+            return fromInt(i);
+        }
+    }
 
     pub fn fromInt(i: usize) Virt {
         return Virt{

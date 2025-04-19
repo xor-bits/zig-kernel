@@ -84,6 +84,8 @@ pub const Error = error{
     Unimplemented,
 
     InvalidCapability,
+    EntryNotPresent,
+    EntryIsHuge,
 
     UnknownError,
 
@@ -133,8 +135,10 @@ pub fn encodeError(err: Error) usize {
         error.NotASocket => 25,
 
         error.InvalidCapability => 26,
+        error.EntryNotPresent => 27,
+        error.EntryIsHuge => 28,
 
-        error.Unimplemented => 27,
+        error.Unimplemented => 29,
 
         error.UnknownError => std.debug.panic("unknown error shouldn't be encoded", .{}),
     }));
@@ -179,8 +183,10 @@ pub fn decode(v: usize) Error!usize {
         25 => error.NotASocket,
 
         26 => error.InvalidCapability,
+        27 => error.EntryNotPresent,
+        28 => error.EntryIsHuge,
 
-        27 => error.Unimplemented,
+        29 => error.Unimplemented,
 
         else => return error.UnknownError,
     };
@@ -221,15 +227,53 @@ pub const Lvl4CallId = enum(u8) {};
 
 // LVL3 CAPABILITY CALLS
 
-pub const Lvl3CallId = enum(u8) {};
+pub const Lvl3CallId = enum(u8) {
+    map,
+};
 
+pub fn map_level3(lvl3_cap: u32, vmem_cap: u32, vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
+    _ = try call(.send, .{
+        @as(usize, lvl3_cap),
+        @intFromEnum(Lvl3CallId.map),
+        @as(usize, vmem_cap),
+        vaddr,
+        @as(usize, @as(u32, @bitCast(rights))),
+        @as(usize, @as(u40, @bitCast(flags))),
+    });
+}
 // LVL2 CAPABILITY CALLS
 
-pub const Lvl2CallId = enum(u8) {};
+pub const Lvl2CallId = enum(u8) {
+    map,
+};
+
+pub fn map_level2(lvl2_cap: u32, vmem_cap: u32, vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
+    _ = try call(.send, .{
+        @as(usize, lvl2_cap),
+        @intFromEnum(Lvl2CallId.map),
+        @as(usize, vmem_cap),
+        vaddr,
+        @as(usize, @as(u32, @bitCast(rights))),
+        @as(usize, @as(u40, @bitCast(flags))),
+    });
+}
 
 // LVL1 CAPABILITY CALLS
 
-pub const Lvl1CallId = enum(u8) {};
+pub const Lvl1CallId = enum(u8) {
+    map,
+};
+
+pub fn map_level1(lvl1_cap: u32, vmem_cap: u32, vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
+    _ = try call(.send, .{
+        @as(usize, lvl1_cap),
+        @intFromEnum(Lvl1CallId.map),
+        @as(usize, vmem_cap),
+        vaddr,
+        @as(usize, @as(u32, @bitCast(rights))),
+        @as(usize, @as(u40, @bitCast(flags))),
+    });
+}
 
 // FRAME CAPABILITY CALLS
 
@@ -237,11 +281,12 @@ pub const FrameCallId = enum(u8) {
     map,
 };
 
-pub fn map_frame(frame_cap: u32, vmem_cap: u32, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
+pub fn map_frame(frame_cap: u32, vmem_cap: u32, vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
     _ = try call(.send, .{
         @as(usize, frame_cap),
         @intFromEnum(FrameCallId.map),
         @as(usize, vmem_cap),
+        vaddr,
         @as(usize, @as(u32, @bitCast(rights))),
         @as(usize, @as(u40, @bitCast(flags))),
     });
@@ -291,32 +336,6 @@ pub fn recv(cap_ptr: usize) !Args {
 
 pub fn yield() void {
     _ = call(.yield, .{}) catch unreachable;
-}
-
-//
-
-pub const MapArgs = extern struct {
-    target: usize,
-    vmem: usize,
-    vaddr: usize,
-    rights: Rights,
-    flags: MapFlags,
-    _pad: usize = 0,
-};
-
-pub fn map_level3(
-    target: usize,
-    vmem: usize,
-    vaddr: usize,
-    rights: Rights,
-    flags: MapFlags,
-) Error!void {
-    send(target, .{
-        .arg0 = vmem,
-        .arg1 = vaddr,
-        .arg2 = @bitCast(rights),
-        .arg3 = @bitCast(flags),
-    });
 }
 
 //
