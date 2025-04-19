@@ -72,7 +72,7 @@ pub fn main() noreturn {
     log.info("kernel main", .{});
     log.info("zig version: {s}", .{builtin.zig_version_string});
     log.info("kernel version: 0.0.2", .{});
-    log.info("kernel git revision: {s}", .{std.mem.trimRight(u8, @embedFile("git-rev"), "\n\r")});
+    log.info("kernel git revision: {s}", .{comptime std.mem.trimRight(u8, @embedFile("git-rev"), "\n\r")});
 
     log.info("initializing physical memory allocator", .{});
     pmem.init();
