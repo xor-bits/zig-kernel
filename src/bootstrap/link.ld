@@ -16,7 +16,9 @@ SECTIONS {
   } :rodata
 
   .stack : {
-    *(.stack)
+    . = ALIGN(16);
+    . += 0x10000;
+    PROVIDE(__stack_end = .);
   } :stack
 
   .data : {
