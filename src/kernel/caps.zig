@@ -12,6 +12,10 @@ const Error = abi.sys.Error;
 
 //
 
+const LOG_OBJ_CALLS: bool = false;
+
+//
+
 // just x86_64 rn
 pub const Entry = packed struct {
     present: u1 = 0,
@@ -226,7 +230,8 @@ pub const Memory = struct {
             return Error.InvalidArgument;
         };
 
-        log.debug("memory call \"{s}\"", .{@tagName(call_id)});
+        if (LOG_OBJ_CALLS)
+            log.debug("memory call \"{s}\"", .{@tagName(call_id)});
 
         switch (call_id) {
             .alloc => {
@@ -272,7 +277,8 @@ pub const Thread = struct {
 
         const target_thread = Ref(Thread){ .paddr = paddr };
 
-        log.debug("thread call \"{s}\" from {*} on {*}", .{ @tagName(call_id), thread, target_thread.ptr() });
+        if (LOG_OBJ_CALLS)
+            log.debug("thread call \"{s}\" from {*} on {*}", .{ @tagName(call_id), thread, target_thread.ptr() });
 
         switch (call_id) {
             .start => {
@@ -420,7 +426,8 @@ pub const PageTableLevel3 = struct {
             return Error.InvalidArgument;
         };
 
-        log.debug("lvl3 call \"{s}\"", .{@tagName(call_id)});
+        if (LOG_OBJ_CALLS)
+            log.debug("lvl3 call \"{s}\"", .{@tagName(call_id)});
 
         switch (call_id) {
             .map => {
@@ -475,7 +482,8 @@ pub const PageTableLevel2 = struct {
             return Error.InvalidArgument;
         };
 
-        log.debug("lvl2 call \"{s}\"", .{@tagName(call_id)});
+        if (LOG_OBJ_CALLS)
+            log.debug("lvl2 call \"{s}\"", .{@tagName(call_id)});
 
         switch (call_id) {
             .map => {
@@ -520,7 +528,8 @@ pub const PageTableLevel1 = struct {
             return Error.InvalidArgument;
         };
 
-        log.debug("lvl1 call \"{s}\"", .{@tagName(call_id)});
+        if (LOG_OBJ_CALLS)
+            log.debug("lvl1 call \"{s}\"", .{@tagName(call_id)});
 
         switch (call_id) {
             .map => {
@@ -559,7 +568,8 @@ pub const Frame = struct {
             return Error.InvalidArgument;
         };
 
-        log.debug("frame call \"{s}\"", .{@tagName(call_id)});
+        if (LOG_OBJ_CALLS)
+            log.debug("frame call \"{s}\"", .{@tagName(call_id)});
 
         switch (call_id) {
             .map => {
