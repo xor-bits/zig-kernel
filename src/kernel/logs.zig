@@ -15,7 +15,13 @@ pub const std_options: std.Options = .{
 fn logFn(comptime message_level: std.log.Level, comptime scope: @TypeOf(.enum_literal), comptime format: []const u8, args: anytype) void {
     const level_txt = comptime message_level.asText();
     const scope_txt = if (scope == .default) "" else " " ++ @tagName(scope);
-    const fmt = "[ " ++ level_txt ++ scope_txt ++ " ]: " ++ format ++ "\n";
+    const level_col = comptime switch (message_level) {
+        .debug => "\x1B[96m",
+        .info => "\x1B[92m",
+        .warn => "\x1B[93m",
+        .err => "\x1B[91m",
+    };
+    const fmt = "\x1B[90m[ " ++ level_col ++ level_txt ++ "\x1B[90m" ++ scope_txt ++ " ]: \x1B[0m" ++ format ++ "\n";
 
     log_lock.lock();
     defer log_lock.unlock();
