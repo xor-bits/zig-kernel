@@ -44,34 +44,16 @@ pub fn init() !void {
     debug_type(Object);
 }
 
-pub fn capability_array() []Object {
-    const len = @min(capability_array_len.load(.acquire), 2 << 32);
-    return @as([*]Object, @ptrFromInt(CAPABILITY_ARRAY_POINTER))[0..len];
-
-    // if (len >= (2 << u32)) {
-    //     @branchHint(.cold);
-    //     capability_array_len.fetchSub(1, .release)
-    // }
-}
-
-pub fn capability_array_unchecked() []Object {
-    return @as([*]Object, @ptrFromInt(CAPABILITY_ARRAY_POINTER))[0 .. 2 << 32];
-}
-
+/// create a capability out of an object
 pub fn push_capability(obj: Object) u32 {
-    const cap = allocate();
+    const cap_id = allocate();
+    const cap = &capability_array_unchecked()[cap_id];
 
-    const new_object = &capability_array_unchecked()[cap];
-    new_object.* = .{
-        // keep the owner as null until everything else is written
-        .paddr = obj.paddr,
-        .type = obj.type,
-        .children = obj.children,
-        .next = obj.next,
-    };
-    new_object.owner.store(obj.owner.raw, .release);
+    cap.lock.lock();
+    cap.* = obj;
+    cap.lock.unlock();
 
-    return cap;
+    return cap_id;
 }
 
 /// returns an object from a capability,
@@ -80,31 +62,116 @@ pub fn get_capability(thread: *Thread, cap_id: u32) Error!Object {
     const caps = capability_array();
     if (cap_id >= caps.len) return Error.InvalidCapability;
 
-    const obj = caps[cap_id];
-    if (caps[cap_id].owner.load(.seq_cst) != Thread.vmemOf(thread))
+    const current = Thread.vmemOf(thread);
+    const cap = &caps[cap_id];
+
+    // fast path fail if the capability is not owned or being modified
+    if (cap.owner != current)
+        return Error.InvalidCapability;
+
+    cap.lock.lock();
+    const obj = cap.*;
+    cap.lock.unlock();
+
+    if (obj.owner != current)
         return Error.InvalidCapability;
 
     return obj;
 }
 
+/// removes a capability and returns the object
+/// some other thread might invalidate the capability during this
+/// `dealloc`
+pub fn take_capability(comptime dealloc: bool, thread: *Thread, cap_id: u32) Error!Object {
+    const caps = capability_array();
+    if (cap_id >= caps.len) return Error.InvalidCapability;
+
+    const current = Thread.vmemOf(thread);
+    const cap = &caps[cap_id];
+
+    // fast path fail if the capability is not owned or being modified
+    if (cap.owner != current)
+        return Error.InvalidCapability;
+
+    cap.lock.lock();
+    defer cap.lock.unlock();
+
+    const obj = cap.*;
+    if (obj.owner != current)
+        return Error.InvalidCapability;
+    cap.* = .{};
+
+    if (dealloc)
+        deallocate(cap_id);
+
+    return obj;
+}
+
+/// assumes that the capability is from `take_capability` without `dealloc`
+///
+/// some consuming calls use this combined with `take_capability(false, ..)`
+/// to 'return back' the capability if the operation failed
+pub fn set_capability(cap_id: u32, obj: Object) void {
+    const cap = &capability_array_unchecked()[cap_id];
+    cap.lock.lock();
+    cap.* = obj;
+    cap.lock.unlock();
+}
+
+/// a single bidirectional call
 pub fn call(thread: *Thread, cap_id: u32, trap: *arch.SyscallRegs) Error!void {
     const obj = try get_capability(thread, cap_id);
     return obj.call(thread, trap);
 }
 
+/// a single consuming bidirectional call
+pub fn consume(thread: *Thread, cap_id: u32, trap: *arch.SyscallRegs) Error!void {
+    const obj = try take_capability(false, thread, cap_id);
+    obj.consume(thread, trap) catch |err| {
+        // place the capability back on error
+        set_capability(cap_id, obj);
+        return err;
+    };
+    // deallocate the capability on success
+    deallocate(cap_id);
+}
+
+/// Receiver specific unidirectional call
 pub fn recv(thread: *Thread, cap_id: u32, trap: *arch.SyscallRegs) Error!usize {
     const obj = try get_capability(thread, cap_id);
     return obj.recv(thread, trap);
 }
 
+/// Receiver specific unidirectional call
 pub fn reply(thread: *Thread, cap_id: u32, trap: *arch.SyscallRegs) Error!usize {
     const obj = try get_capability(thread, cap_id);
     return obj.reply(thread, trap);
 }
 
+pub fn replyRecv() Error!void {
+    // TODO:
+}
+
+pub fn capAssertNotNull(cap: u32, trap: *arch.SyscallRegs) bool {
+    if (cap == 0) {
+        trap.syscall_id = abi.sys.encode(Error.InvalidCapability);
+        return true;
+    }
+    return false;
+}
+
 //
 
-fn allocate() u32 {
+pub fn capability_array() []Object {
+    const len = @min(capability_array_len.load(.acquire), 2 << 32);
+    return @as([*]Object, @ptrFromInt(CAPABILITY_ARRAY_POINTER))[0..len];
+}
+
+pub fn capability_array_unchecked() []Object {
+    return @as([*]Object, @ptrFromInt(CAPABILITY_ARRAY_POINTER))[0 .. 2 << 32];
+}
+
+pub fn allocate() u32 {
     {
         free_list_lock.lock();
         defer free_list_lock.unlock();
@@ -120,25 +187,16 @@ fn allocate() u32 {
     return caps_vmem.growCapArray();
 }
 
-fn deallocate(cap: u32, expected_thread: ?*Thread) bool {
-    // FIXME: deallocation is more complicated
-
+pub fn deallocate(cap: u32) void {
     free_list_lock.lock();
     defer free_list_lock.unlock();
 
     if (free_list != 0) {
         const new_head = &capability_array_unchecked()[cap];
-        // zero out all fields
-        // owner is zeroed first and in an atomic way,
-        // because it is used to check if the capability is partially written (in multi cpu contexts)
-        if (null != new_head.owner.cmpxchgStrong(expected_thread, null, .acquire, .monotonic))
-            return false;
-
         new_head.* = .{ .next = free_list };
     }
 
     free_list = cap;
-    return true;
 }
 
 //
@@ -187,20 +245,25 @@ pub fn Ref(comptime T: type) type {
         }
 
         pub fn object(self: @This(), owner: ?*Thread) Object {
-            return Object{
+            return .{
                 .paddr = self.paddr,
                 .type = Object.objectTypeOf(T),
-                .owner = .init(Thread.vmemOf(owner)),
+                .owner = Thread.vmemOf(owner),
             };
         }
     };
 }
 
 pub const Object = struct {
+    /// physical address (or metadata for ZST) for the kernel object
     paddr: addr.Phys = .{ .raw = 0 },
+    /// capability ownership is tied to virtual address spaces
+    owner: ?*PageTableLevel4 = null,
+    /// capability kind, like memory, receiver, .. or thread
     type: abi.ObjectType = .null,
-    // lock: spin.Mutex = .new(),
-    owner: std.atomic.Value(?*PageTableLevel4) = .init(null),
+    /// lock for reading/writing the capability slot
+    /// the object is just quickly copied while the lock is held
+    lock: spin.Mutex = .new(),
 
     /// a linked list of Objects that are derived from this one
     children: u32 = 0,
@@ -253,13 +316,28 @@ pub const Object = struct {
             .null => Error.InvalidCapability,
             .memory => Memory.call(self.paddr, thread, trap),
             .thread => Thread.call(self.paddr, thread, trap),
-            .page_table_level_4 => Error.Unimplemented,
+            .page_table_level_4 => Error.InvalidArgument,
             .page_table_level_3 => PageTableLevel3.call(self.paddr, thread, trap),
             .page_table_level_2 => PageTableLevel2.call(self.paddr, thread, trap),
             .page_table_level_1 => PageTableLevel1.call(self.paddr, thread, trap),
             .frame => Frame.call(self.paddr, thread, trap),
             .receiver => Receiver.call(self.paddr, thread, trap),
             .sender => Sender.call(self.paddr, thread, trap),
+        };
+    }
+
+    pub fn consume(self: Self, thread: *Thread, trap: *arch.SyscallRegs) Error!void {
+        return switch (self.type) {
+            .null => Error.InvalidCapability,
+            .memory => Error.InvalidArgument,
+            .thread => Error.InvalidArgument,
+            .page_table_level_4 => Error.InvalidArgument,
+            .page_table_level_3 => PageTableLevel3.consume(self.paddr, thread, trap),
+            .page_table_level_2 => PageTableLevel2.consume(self.paddr, thread, trap),
+            .page_table_level_1 => PageTableLevel1.consume(self.paddr, thread, trap),
+            .frame => Frame.consume(self.paddr, thread, trap),
+            .receiver => Error.InvalidArgument,
+            .sender => Error.InvalidArgument,
         };
     }
 

@@ -57,6 +57,11 @@ pub const Frame = struct {
     }
 
     pub fn call(paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
+        _ = .{ paddr, thread, trap };
+        return Error.InvalidArgument;
+    }
+
+    pub fn consume(paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
         const msg = trap.readMessage();
 
         const call_id = std.meta.intToEnum(abi.sys.FrameCallId, msg.arg0) catch {

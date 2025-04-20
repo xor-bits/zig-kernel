@@ -148,6 +148,9 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
         return;
     };
 
+    const locals = arch.cpu_local();
+    const thread = locals.current_thread.?;
+
     // log.debug("syscall: {s}", .{@tagName(id)});
     // defer log.debug("syscall done", .{});
     switch (id) {
@@ -189,60 +192,51 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
                 _ = log.info("{s}", .{line});
             }
         },
+        .debug => {
+            const cap_id: u32 = @truncate(trap.arg0);
+            if (caps.get_capability(thread, cap_id)) |obj| {
+                trap.syscall_id = abi.sys.encode(@intFromEnum(obj.type));
+            } else |err| {
+                trap.syscall_id = abi.sys.encode(err);
+            }
+        },
         .call => {
             const cap_id: u32 = @truncate(trap.arg0);
-            if (cap_id == 0) {
-                trap.syscall_id = abi.sys.encode(abi.sys.Error.InvalidCapability);
-                return;
-            }
-
-            const locals = arch.cpu_local();
-            const thread = locals.current_thread.?;
+            if (caps.capAssertNotNull(cap_id, trap)) return;
 
             trap.syscall_id = abi.sys.encode(0);
             caps.call(thread, cap_id, trap) catch |err| {
                 trap.syscall_id = abi.sys.encode(err);
             };
+        },
+        .consume => {
+            const cap_id: u32 = @truncate(trap.arg0);
+            if (caps.capAssertNotNull(cap_id, trap)) return;
 
-            if (thread.status == .stopped) {
-                proc.yield(trap);
-            }
+            trap.syscall_id = abi.sys.encode(0);
+            caps.consume(thread, cap_id, trap) catch |err| {
+                trap.syscall_id = abi.sys.encode(err);
+            };
         },
         .recv => {
             const cap_id: u32 = @truncate(trap.arg0);
-            if (cap_id == 0) {
-                trap.syscall_id = abi.sys.encode(abi.sys.Error.InvalidCapability);
-                return;
-            }
-
-            const locals = arch.cpu_local();
-            const thread = locals.current_thread.?;
+            if (caps.capAssertNotNull(cap_id, trap)) return;
 
             trap.syscall_id = abi.sys.encode(caps.recv(thread, cap_id, trap));
-
-            if (thread.status == .stopped) {
-                proc.yield(trap);
-            }
         },
         .reply => {
             const cap_id: u32 = @truncate(trap.arg0);
-            if (cap_id == 0) {
-                trap.syscall_id = abi.sys.encode(abi.sys.Error.InvalidCapability);
-                return;
-            }
-
-            const locals = arch.cpu_local();
-            const thread = locals.current_thread.?;
+            if (caps.capAssertNotNull(cap_id, trap)) return;
 
             trap.syscall_id = abi.sys.encode(caps.reply(thread, cap_id, trap));
-
-            if (thread.status == .stopped) {
-                proc.yield(trap);
-            }
         },
         .yield => {
             proc.yield(trap);
         },
         // else => std.debug.panic("TODO: syscall {s}", .{@tagName(id)}),
+    }
+
+    if (thread.status == .stopped) {
+        proc.yield(trap);
     }
 }

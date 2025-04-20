@@ -11,9 +11,6 @@ const Error = abi.sys.Error;
 pub const std_options = abi.std_options;
 pub const panic = abi.panic;
 
-const heap_ptr: [*]u8 = @ptrFromInt(abi.BOOTSTRAP_HEAP);
-pub var heap = std.heap.FixedBufferAllocator.init(heap_ptr[0..abi.BOOTSTRAP_HEAP_SIZE]);
-
 //
 
 pub fn main() !void {
@@ -99,11 +96,11 @@ fn map_naive_fail(_: usize, _: abi.sys.Rights, _: abi.sys.MapFlags) !void {
 
 fn map_naive_fn(comptime map_fn: anytype, comptime if_not_present: anytype, ty: abi.ObjectType, vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
     const obj = try abi.sys.alloc(abi.BOOTSTRAP_MEMORY, ty);
-    log.info("alloc returned: {}", .{obj});
+    log.debug("allocated before ({any}) = {any}", .{ ty, abi.sys.debug(obj) });
+    defer log.debug("allocated after ({any}) = {any}", .{ ty, abi.sys.debug(obj) });
     const err = map_fn(obj, abi.BOOTSTRAP_SELF_VMEM, vaddr, .{
         .writable = true,
     }, .{});
-    log.info("map returned: {!}", .{err});
 
     if (err != error.EntryNotPresent) return err;
 
@@ -115,6 +112,8 @@ fn map_naive_fn(comptime map_fn: anytype, comptime if_not_present: anytype, ty: 
 }
 
 fn exec_elf(path: []const u8) !void {
+    const heap = 0;
+
     const elf_file = initfsd.openFile(path).?;
     const elf_bytes = initfsd.readFile(elf_file);
     var elf = std.io.fixedBufferStream(elf_bytes);
