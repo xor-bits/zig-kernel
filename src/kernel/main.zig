@@ -189,7 +189,7 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
                 _ = log.info("{s}", .{line});
             }
         },
-        .send => {
+        .call => {
             const cap_id: u32 = @truncate(trap.arg0);
             if (cap_id == 0) {
                 trap.syscall_id = abi.sys.encode(abi.sys.Error.InvalidCapability);
@@ -199,7 +199,10 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
             const locals = arch.cpu_local();
             const thread = locals.current_thread.?;
 
-            trap.syscall_id = abi.sys.encode(caps.call(thread, cap_id, trap));
+            trap.syscall_id = abi.sys.encode(0);
+            caps.call(thread, cap_id, trap) catch |err| {
+                trap.syscall_id = abi.sys.encode(err);
+            };
 
             if (thread.status == .stopped) {
                 proc.yield(trap);

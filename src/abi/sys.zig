@@ -9,7 +9,7 @@ pub const Id = enum(usize) {
     /// print debug logs to serial output
     log = 0x1,
 
-    send = 0x2,
+    call = 0x2,
 
     recv = 0x3,
 
@@ -122,11 +122,12 @@ pub const MemoryCallId = enum(u8) {
 
 // allocate a new capability using a memory capability
 pub fn alloc(mem_cap: u32, ty: abi.ObjectType) !u32 {
-    return @truncate(try syscall(.send, .{
-        @as(usize, mem_cap),
-        @intFromEnum(MemoryCallId.alloc),
-        @as(usize, @intFromEnum(ty)),
-    }));
+    var msg: Message = .{
+        .arg0 = @intFromEnum(MemoryCallId.alloc),
+        .arg1 = @intFromEnum(ty),
+    };
+    try call(mem_cap, &msg);
+    return @truncate(msg.cap);
 }
 
 // THREAD CAPABILITY CALLS
@@ -170,49 +171,49 @@ pub const ThreadRegs = extern struct {
 };
 
 pub fn thread_start(thread_cap: u32) !void {
-    _ = try syscall(.send, .{
-        @as(usize, thread_cap),
-        @intFromEnum(ThreadCallId.start),
-    });
+    var msg: Message = .{
+        .arg0 = @intFromEnum(ThreadCallId.start),
+    };
+    try call(thread_cap, &msg);
 }
 
 pub fn thread_stop(thread_cap: u32) !void {
-    _ = try syscall(.send, .{
-        @as(usize, thread_cap),
-        @intFromEnum(ThreadCallId.stop),
-    });
+    var msg: Message = .{
+        .arg0 = @intFromEnum(ThreadCallId.stop),
+    };
+    try call(thread_cap, &msg);
 }
 
 pub fn thread_read_regs(thread_cap: u32, regs: *ThreadRegs) !void {
-    _ = try syscall(.send, .{
-        @as(usize, thread_cap),
-        @intFromEnum(ThreadCallId.read_regs),
-        @intFromPtr(regs),
-    });
+    var msg: Message = .{
+        .arg0 = @intFromEnum(ThreadCallId.read_regs),
+        .arg1 = @intFromPtr(regs),
+    };
+    try call(thread_cap, &msg);
 }
 
 pub fn thread_write_regs(thread_cap: u32, regs: *const ThreadRegs) !void {
-    _ = try syscall(.send, .{
-        @as(usize, thread_cap),
-        @intFromEnum(ThreadCallId.write_regs),
-        @intFromPtr(regs),
-    });
+    var msg: Message = .{
+        .arg0 = @intFromEnum(ThreadCallId.write_regs),
+        .arg1 = @intFromPtr(regs),
+    };
+    try call(thread_cap, &msg);
 }
 
 pub fn thread_set_vmem(thread_cap: u32, vmem_cap: u32) !void {
-    _ = try syscall(.send, .{
-        @as(usize, thread_cap),
-        @intFromEnum(ThreadCallId.set_vmem),
-        @as(usize, vmem_cap),
-    });
+    var msg: Message = .{
+        .arg0 = @intFromEnum(ThreadCallId.set_vmem),
+        .arg1 = vmem_cap,
+    };
+    try call(thread_cap, &msg);
 }
 
 pub fn thread_set_prio(thread_cap: u32, priority: u2) !void {
-    _ = try syscall(.send, .{
-        @as(usize, thread_cap),
-        @intFromEnum(ThreadCallId.set_prio),
-        @as(usize, priority),
-    });
+    var msg: Message = .{
+        .arg0 = @intFromEnum(ThreadCallId.set_prio),
+        .arg1 = priority,
+    };
+    try call(thread_cap, &msg);
 }
 
 // LVL4 (VMEM) CAPABILITY CALLS
@@ -226,14 +227,14 @@ pub const Lvl3CallId = enum(u8) {
 };
 
 pub fn map_level3(lvl3_cap: u32, vmem_cap: u32, vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
-    _ = try syscall(.send, .{
-        @as(usize, lvl3_cap),
-        @intFromEnum(Lvl3CallId.map),
-        @as(usize, vmem_cap),
-        vaddr,
-        @as(usize, @as(u32, @bitCast(rights))),
-        @as(usize, @as(u40, @bitCast(flags))),
-    });
+    var msg: Message = .{
+        .arg0 = @intFromEnum(Lvl3CallId.map),
+        .arg1 = vmem_cap,
+        .arg2 = vaddr,
+        .arg3 = @as(u32, @bitCast(rights)),
+        .arg4 = @as(u40, @bitCast(flags)),
+    };
+    try call(lvl3_cap, &msg);
 }
 
 // LVL2 CAPABILITY CALLS
@@ -243,14 +244,14 @@ pub const Lvl2CallId = enum(u8) {
 };
 
 pub fn map_level2(lvl2_cap: u32, vmem_cap: u32, vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
-    _ = try syscall(.send, .{
-        @as(usize, lvl2_cap),
-        @intFromEnum(Lvl2CallId.map),
-        @as(usize, vmem_cap),
-        vaddr,
-        @as(usize, @as(u32, @bitCast(rights))),
-        @as(usize, @as(u40, @bitCast(flags))),
-    });
+    var msg: Message = .{
+        .arg0 = @intFromEnum(Lvl2CallId.map),
+        .arg1 = vmem_cap,
+        .arg2 = vaddr,
+        .arg3 = @as(u32, @bitCast(rights)),
+        .arg4 = @as(u40, @bitCast(flags)),
+    };
+    try call(lvl2_cap, &msg);
 }
 
 // LVL1 CAPABILITY CALLS
@@ -260,14 +261,14 @@ pub const Lvl1CallId = enum(u8) {
 };
 
 pub fn map_level1(lvl1_cap: u32, vmem_cap: u32, vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
-    _ = try syscall(.send, .{
-        @as(usize, lvl1_cap),
-        @intFromEnum(Lvl1CallId.map),
-        @as(usize, vmem_cap),
-        vaddr,
-        @as(usize, @as(u32, @bitCast(rights))),
-        @as(usize, @as(u40, @bitCast(flags))),
-    });
+    var msg: Message = .{
+        .arg0 = @intFromEnum(Lvl1CallId.map),
+        .arg1 = vmem_cap,
+        .arg2 = vaddr,
+        .arg3 = @as(u32, @bitCast(rights)),
+        .arg4 = @as(u40, @bitCast(flags)),
+    };
+    try call(lvl1_cap, &msg);
 }
 
 // FRAME CAPABILITY CALLS
@@ -277,14 +278,14 @@ pub const FrameCallId = enum(u8) {
 };
 
 pub fn map_frame(frame_cap: u32, vmem_cap: u32, vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
-    _ = try syscall(.send, .{
-        @as(usize, frame_cap),
-        @intFromEnum(FrameCallId.map),
-        @as(usize, vmem_cap),
-        vaddr,
-        @as(usize, @as(u32, @bitCast(rights))),
-        @as(usize, @as(u40, @bitCast(flags))),
-    });
+    var msg: Message = .{
+        .arg0 = @intFromEnum(FrameCallId.map),
+        .arg1 = vmem_cap,
+        .arg2 = vaddr,
+        .arg3 = @as(u32, @bitCast(rights)),
+        .arg4 = @as(u40, @bitCast(flags)),
+    };
+    try call(frame_cap, &msg);
 }
 
 // RECEIVER CAPABILITY CALLS
@@ -294,17 +295,25 @@ pub const ReceiverCallId = enum(u8) {
 };
 
 pub fn receiver_subscribe(recv_cap: u32) Error!u32 {
-    return @truncate(try syscall(.send, .{
-        @as(usize, recv_cap),
-        @intFromEnum(ReceiverCallId.subscribe),
-    }));
+    var msg: Message = .{
+        .arg0 = @intFromEnum(ReceiverCallId.subscribe),
+    };
+    try call(recv_cap, &msg);
+    return @truncate(msg.cap);
 }
 
 // SENDER CAPABILITY CALLS
 
 // SYSCALLS
 
-pub const Args = struct {
+pub const Message = extern struct {
+    /// capability id
+    cap: u32 = 0,
+    /// Number of extra arguments in the thread extra arguments array.
+    /// They can contain capabilities that have their ownership
+    /// automatically transferred.
+    extra: u32 = 0,
+    // fast registers \/
     arg0: usize = 0,
     arg1: usize = 0,
     arg2: usize = 0,
@@ -312,68 +321,61 @@ pub const Args = struct {
     arg4: usize = 0,
 };
 
+comptime {
+    std.debug.assert(@sizeOf(Message) == @sizeOf([6]usize));
+}
+
 pub fn log(s: []const u8) void {
     _ = syscall(.log, .{ @intFromPtr(s.ptr), s.len }) catch unreachable;
 }
 
-pub fn call(cap_ptr: usize, args: *Args) !void {
-    _ = try rwcall(.send, cap_ptr, args);
+pub fn call(cap: u32, msg: *Message) !void {
+    msg.cap = cap;
+    _ = try rwcall(.call, msg);
 }
 
-pub fn recv(cap_ptr: usize, args: *Args) !usize {
-    return rwcall(.recv, cap_ptr, args);
+pub fn recv(cap: u32, msg: *Message) !usize {
+    msg.cap = cap;
+    return rwcall(.recv, msg);
 }
 
-fn rwcall(id: Id, cap_ptr: usize, args: *Args) !usize {
-    const res, const args_out = syscall6rw(@intFromEnum(id), .{
-        cap_ptr,
-        args.arg0,
-        args.arg1,
-        args.arg2,
-        args.arg3,
-        args.arg4,
-    });
-    args.arg0 = args_out[1];
-    args.arg1 = args_out[2];
-    args.arg2 = args_out[3];
-    args.arg3 = args_out[4];
-    args.arg4 = args_out[5];
-
-    return decode(res);
-}
-
-pub fn reply(cap_ptr: usize, args: Args) !void {
+pub fn reply(cap: u32, msg: *Message) !void {
+    msg.cap = cap;
+    const regs: *[6]usize = @ptrCast(msg);
     _ = try syscall(.reply, .{
-        cap_ptr,
-        args.arg0,
-        args.arg1,
-        args.arg2,
-        args.arg3,
-        args.arg4,
+        regs[0],
+        regs[1],
+        regs[2],
+        regs[3],
+        regs[4],
+        regs[5],
     });
 }
-
-// pub fn recv(cap_ptr: usize) !struct { usize, Args } {
-//     const res, const args = call6rw(@intFromEnum(Id.replyRecv), .{
-//         cap_ptr,
-//         0,
-//         0,
-//         0,
-//         0,
-//         0,
-//     });
-//     const result = try decode(res);
-//     return .{ result, .{
-//         .arg0 = args[1],
-//         .arg1 = args[2],
-//         .arg2 = args[3],
-//         .arg3 = args[4],
-//         .arg4 = args[5],
-//     } };
-// }
 
 pub fn yield() void {
     _ = syscall(.yield, .{}) catch unreachable;
+}
+
+fn rwcall(id: Id, msg: *Message) !usize {
+    const regs: *[6]usize = @ptrCast(msg);
+
+    const res, const args_out = syscall6rw(@intFromEnum(id), .{
+        regs[0],
+        regs[1],
+        regs[2],
+        regs[3],
+        regs[4],
+        regs[5],
+    });
+
+    regs[0] = args_out[0];
+    regs[1] = args_out[1];
+    regs[2] = args_out[2];
+    regs[3] = args_out[3];
+    regs[4] = args_out[4];
+    regs[5] = args_out[5];
+
+    return decode(res);
 }
 
 //

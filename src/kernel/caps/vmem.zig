@@ -153,6 +153,7 @@ pub const PageTableLevel4 = struct {
         try next.map_frame(paddr, vaddr, rights, flags);
     }
 };
+
 /// a `PageTableLevel4` points to multiple of these
 pub const PageTableLevel3 = struct {
     entries: [512]Entry align(0x1000) = std.mem.zeroes([512]Entry),
@@ -165,7 +166,7 @@ pub const PageTableLevel3 = struct {
         return true;
     }
 
-    pub fn call(paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!usize {
+    pub fn call(paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
         const call_id = std.meta.intToEnum(abi.sys.Lvl3CallId, trap.arg1) catch {
             return Error.InvalidArgument;
         };
@@ -181,7 +182,6 @@ pub const PageTableLevel3 = struct {
                 const flags: abi.sys.MapFlags = @bitCast(@as(u40, @truncate(trap.arg5)));
 
                 try vmem.ptr().map_level3(paddr, vaddr, rights, flags);
-                return 0;
             },
         }
     }
@@ -213,6 +213,7 @@ pub const PageTableLevel3 = struct {
         try next.map_frame(paddr, vaddr, rights, flags);
     }
 };
+
 /// a `PageTableLevel3` points to multiple of these
 pub const PageTableLevel2 = struct {
     entries: [512]Entry align(0x1000) = std.mem.zeroes([512]Entry),
@@ -225,7 +226,7 @@ pub const PageTableLevel2 = struct {
         return true;
     }
 
-    pub fn call(paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!usize {
+    pub fn call(paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
         const call_id = std.meta.intToEnum(abi.sys.Lvl2CallId, trap.arg1) catch {
             return Error.InvalidArgument;
         };
@@ -241,7 +242,6 @@ pub const PageTableLevel2 = struct {
                 const flags: abi.sys.MapFlags = @bitCast(@as(u40, @truncate(trap.arg5)));
 
                 try vmem.ptr().map_level2(paddr, vaddr, rights, flags);
-                return 0;
             },
         }
     }
@@ -263,6 +263,7 @@ pub const PageTableLevel2 = struct {
         try next.map_frame(paddr, vaddr, rights, flags);
     }
 };
+
 /// a `PageTableLevel2` points to multiple of these
 pub const PageTableLevel1 = struct {
     entries: [512]Entry align(0x1000) = std.mem.zeroes([512]Entry),
@@ -275,7 +276,7 @@ pub const PageTableLevel1 = struct {
         return true;
     }
 
-    pub fn call(paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!usize {
+    pub fn call(paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
         const call_id = std.meta.intToEnum(abi.sys.Lvl1CallId, trap.arg1) catch {
             return Error.InvalidArgument;
         };
@@ -291,7 +292,6 @@ pub const PageTableLevel1 = struct {
                 const flags: abi.sys.MapFlags = @bitCast(@as(u40, @truncate(trap.arg5)));
 
                 try vmem.ptr().map_level1(paddr, vaddr, rights, flags);
-                return 0;
             },
         }
     }

@@ -1,4 +1,5 @@
 const std = @import("std");
+const abi = @import("abi");
 const limine = @import("limine");
 
 const apic = @import("../apic.zig");
@@ -1103,6 +1104,27 @@ pub const SyscallRegs = extern struct {
     _rbx: u64 = 0,
     syscall_id: u64 = 0, // rax = 0, also the return register
     user_stack_ptr: u64 = 0, // rsp
+
+    pub fn readMessage(self: *const @This()) abi.sys.Message {
+        return @bitCast([6]u64{
+            self.arg0,
+            self.arg1,
+            self.arg2,
+            self.arg3,
+            self.arg4,
+            self.arg5,
+        });
+    }
+
+    pub fn writeMessage(self: *@This(), msg: abi.sys.Message) void {
+        const regs: [6]u64 = @bitCast(msg);
+        self.arg0 = regs[0];
+        self.arg1 = regs[1];
+        self.arg2 = regs[2];
+        self.arg3 = regs[3];
+        self.arg4 = regs[4];
+        self.arg5 = regs[5];
+    }
 };
 
 const syscall_enter = std.fmt.comptimePrint(

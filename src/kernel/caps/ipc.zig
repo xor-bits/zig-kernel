@@ -23,7 +23,7 @@ pub const Receiver = struct {
         return true;
     }
 
-    pub fn call(paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!usize {
+    pub fn call(paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
         const call_id = std.meta.intToEnum(abi.sys.ReceiverCallId, trap.arg1) catch {
             return Error.InvalidArgument;
         };
@@ -34,7 +34,7 @@ pub const Receiver = struct {
         switch (call_id) {
             .subscribe => {
                 const sender = caps.Ref(Sender){ .paddr = paddr };
-                return caps.push_capability(sender.object(thread));
+                trap.arg0 = caps.push_capability(sender.object(thread));
             },
         }
     }
@@ -90,7 +90,7 @@ pub const Sender = struct {
     }
 
     // block until the receiver is free, then switch to the receiver
-    pub fn call(paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!usize {
+    pub fn call(paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
         if (caps.LOG_OBJ_CALLS)
             log.debug("sender call", .{});
 
@@ -112,7 +112,6 @@ pub const Sender = struct {
         self.sender.store(thread, .seq_cst);
         proc.switchTo(trap, listener);
         trap.arg1, trap.arg2, trap.arg3, trap.arg4, trap.arg5 = args;
-        return trap.arg0;
     }
 };
 

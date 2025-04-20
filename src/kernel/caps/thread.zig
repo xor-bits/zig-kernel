@@ -38,7 +38,7 @@ pub const Thread = struct {
     }
 
     // FIXME: pass Ref(Self) instead of addr.Phys
-    pub fn call(paddr: addr.Phys, thread: *Thread, trap: *arch.SyscallRegs) Error!usize {
+    pub fn call(paddr: addr.Phys, thread: *Thread, trap: *arch.SyscallRegs) Error!void {
         const call_id = std.meta.intToEnum(abi.sys.ThreadCallId, trap.arg1) catch {
             return Error.InvalidArgument;
         };
@@ -51,11 +51,9 @@ pub const Thread = struct {
         switch (call_id) {
             .start => {
                 try proc.start(target_thread);
-                return 0;
             },
             .stop => {
                 try proc.stop(target_thread);
-                return 0;
             },
             .read_regs => {
                 if (!std.mem.isAligned(trap.arg2, @alignOf(abi.sys.ThreadRegs))) {
@@ -75,7 +73,8 @@ pub const Thread = struct {
                 // abi.sys.ThreadRegs is written as if it was arch.SyscallRegs
                 const ptr = @as(*volatile arch.SyscallRegs, @ptrFromInt(trap.arg2));
                 ptr.* = tmp;
-                return @sizeOf(arch.SyscallRegs);
+
+                trap.arg0 = @sizeOf(arch.SyscallRegs);
             },
             .write_regs => {
                 if (!std.mem.isAligned(trap.arg2, @alignOf(abi.sys.ThreadRegs))) {
@@ -94,7 +93,7 @@ pub const Thread = struct {
                     target_thread.ptr().trap = tmp;
                 }
 
-                return @sizeOf(arch.SyscallRegs);
+                trap.arg0 = @sizeOf(arch.SyscallRegs);
             },
             .set_vmem => {
                 if (target_thread.ptr().status != .stopped) return Error.NotStopped;
@@ -102,11 +101,9 @@ pub const Thread = struct {
                 // TODO: require stopping the thread or something
                 const vmem = try (try caps.get_capability(thread, @truncate(trap.arg2))).as(caps.PageTableLevel4);
                 target_thread.ptr().vmem = vmem;
-                return 0;
             },
             .set_prio => {
                 target_thread.ptr().priority = @truncate(trap.arg2);
-                return 0;
             },
         }
     }

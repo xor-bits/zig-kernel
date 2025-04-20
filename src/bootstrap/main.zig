@@ -40,11 +40,11 @@ pub fn main() !void {
     const recv = try abi.sys.alloc(abi.BOOTSTRAP_MEMORY, .receiver);
     send = try abi.sys.receiver_subscribe(recv);
 
-    var msg: abi.sys.Args = undefined;
+    var msg: abi.sys.Message = undefined;
     const from = try abi.sys.recv(recv, &msg);
     log.info("got call msg={any} from={}", .{ msg, from });
     msg = .{ .arg0 = 3, .arg1 = 4, .arg2 = 5, .arg3 = 6, .arg4 = 7 };
-    try abi.sys.reply(recv, msg);
+    try abi.sys.reply(recv, &msg);
 
     abi.sys.yield();
 
@@ -64,7 +64,7 @@ export fn thread_main() noreturn {
 
 pub fn thread() !void {
     abi.sys.log("hello from secondary thread");
-    var msg: abi.sys.Args = .{ .arg0 = 2, .arg1 = 3, .arg2 = 4, .arg3 = 5, .arg4 = 6 };
+    var msg: abi.sys.Message = .{ .arg0 = 2, .arg1 = 3, .arg2 = 4, .arg3 = 5, .arg4 = 6 };
     try abi.sys.call(send, &msg);
     log.info("got reply msg={}", .{msg});
     try abi.sys.thread_stop(new_thread);
@@ -99,9 +99,11 @@ fn map_naive_fail(_: usize, _: abi.sys.Rights, _: abi.sys.MapFlags) !void {
 
 fn map_naive_fn(comptime map_fn: anytype, comptime if_not_present: anytype, ty: abi.ObjectType, vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
     const obj = try abi.sys.alloc(abi.BOOTSTRAP_MEMORY, ty);
+    log.info("alloc returned: {}", .{obj});
     const err = map_fn(obj, abi.BOOTSTRAP_SELF_VMEM, vaddr, .{
         .writable = true,
     }, .{});
+    log.info("map returned: {!}", .{err});
 
     if (err != error.EntryNotPresent) return err;
 

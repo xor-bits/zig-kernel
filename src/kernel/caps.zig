@@ -87,7 +87,7 @@ pub fn get_capability(thread: *Thread, cap_id: u32) Error!Object {
     return obj;
 }
 
-pub fn call(thread: *Thread, cap_id: u32, trap: *arch.SyscallRegs) Error!usize {
+pub fn call(thread: *Thread, cap_id: u32, trap: *arch.SyscallRegs) Error!void {
     const obj = try get_capability(thread, cap_id);
     return obj.call(thread, trap);
 }
@@ -248,7 +248,7 @@ pub const Object = struct {
         };
     }
 
-    pub fn call(self: Self, thread: *Thread, trap: *arch.SyscallRegs) Error!usize {
+    pub fn call(self: Self, thread: *Thread, trap: *arch.SyscallRegs) Error!void {
         return switch (self.type) {
             .null => Error.InvalidCapability,
             .memory => Memory.call(self.paddr, thread, trap),
