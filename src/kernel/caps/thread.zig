@@ -22,8 +22,8 @@ pub const Thread = struct {
     caps_lock: spin.Mutex = .new(),
     /// scheduler priority
     priority: u2 = 1,
-    /// is the thread stopped OR running/ready/waiting
-    stopped: bool = true,
+    /// is the thread stopped/running/ready/waiting
+    status: enum { stopped, running, ready, waiting } = .stopped,
     /// scheduler linked list
     next: ?caps.Ref(Thread) = null,
     /// scheduler linked list
@@ -31,6 +31,10 @@ pub const Thread = struct {
 
     pub fn init(self: *@This()) void {
         self.* = .{};
+    }
+
+    pub fn canAlloc() bool {
+        return true;
     }
 
     // FIXME: pass Ref(Self) instead of addr.Phys
@@ -93,7 +97,7 @@ pub const Thread = struct {
                 return @sizeOf(arch.SyscallRegs);
             },
             .set_vmem => {
-                if (!target_thread.ptr().stopped) return Error.NotStopped;
+                if (target_thread.ptr().status != .stopped) return Error.NotStopped;
 
                 // TODO: require stopping the thread or something
                 const vmem = try (try caps.get_capability(thread, @truncate(trap.arg2))).as(caps.PageTableLevel4);

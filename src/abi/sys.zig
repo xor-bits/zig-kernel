@@ -13,6 +13,8 @@ pub const Id = enum(usize) {
 
     recv = 0x3,
 
+    reply = 0x4,
+
     /// give up the CPU for other tasks
     yield = 0x8,
 };
@@ -120,7 +122,7 @@ pub const MemoryCallId = enum(u8) {
 
 // allocate a new capability using a memory capability
 pub fn alloc(mem_cap: u32, ty: abi.ObjectType) !u32 {
-    return @truncate(try call(.send, .{
+    return @truncate(try syscall(.send, .{
         @as(usize, mem_cap),
         @intFromEnum(MemoryCallId.alloc),
         @as(usize, @intFromEnum(ty)),
@@ -168,21 +170,21 @@ pub const ThreadRegs = extern struct {
 };
 
 pub fn thread_start(thread_cap: u32) !void {
-    _ = try call(.send, .{
+    _ = try syscall(.send, .{
         @as(usize, thread_cap),
         @intFromEnum(ThreadCallId.start),
     });
 }
 
 pub fn thread_stop(thread_cap: u32) !void {
-    _ = try call(.send, .{
+    _ = try syscall(.send, .{
         @as(usize, thread_cap),
         @intFromEnum(ThreadCallId.stop),
     });
 }
 
 pub fn thread_read_regs(thread_cap: u32, regs: *ThreadRegs) !void {
-    _ = try call(.send, .{
+    _ = try syscall(.send, .{
         @as(usize, thread_cap),
         @intFromEnum(ThreadCallId.read_regs),
         @intFromPtr(regs),
@@ -190,7 +192,7 @@ pub fn thread_read_regs(thread_cap: u32, regs: *ThreadRegs) !void {
 }
 
 pub fn thread_write_regs(thread_cap: u32, regs: *const ThreadRegs) !void {
-    _ = try call(.send, .{
+    _ = try syscall(.send, .{
         @as(usize, thread_cap),
         @intFromEnum(ThreadCallId.write_regs),
         @intFromPtr(regs),
@@ -198,7 +200,7 @@ pub fn thread_write_regs(thread_cap: u32, regs: *const ThreadRegs) !void {
 }
 
 pub fn thread_set_vmem(thread_cap: u32, vmem_cap: u32) !void {
-    _ = try call(.send, .{
+    _ = try syscall(.send, .{
         @as(usize, thread_cap),
         @intFromEnum(ThreadCallId.set_vmem),
         @as(usize, vmem_cap),
@@ -206,7 +208,7 @@ pub fn thread_set_vmem(thread_cap: u32, vmem_cap: u32) !void {
 }
 
 pub fn thread_set_prio(thread_cap: u32, priority: u2) !void {
-    _ = try call(.send, .{
+    _ = try syscall(.send, .{
         @as(usize, thread_cap),
         @intFromEnum(ThreadCallId.set_prio),
         @as(usize, priority),
@@ -224,7 +226,7 @@ pub const Lvl3CallId = enum(u8) {
 };
 
 pub fn map_level3(lvl3_cap: u32, vmem_cap: u32, vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
-    _ = try call(.send, .{
+    _ = try syscall(.send, .{
         @as(usize, lvl3_cap),
         @intFromEnum(Lvl3CallId.map),
         @as(usize, vmem_cap),
@@ -241,7 +243,7 @@ pub const Lvl2CallId = enum(u8) {
 };
 
 pub fn map_level2(lvl2_cap: u32, vmem_cap: u32, vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
-    _ = try call(.send, .{
+    _ = try syscall(.send, .{
         @as(usize, lvl2_cap),
         @intFromEnum(Lvl2CallId.map),
         @as(usize, vmem_cap),
@@ -258,7 +260,7 @@ pub const Lvl1CallId = enum(u8) {
 };
 
 pub fn map_level1(lvl1_cap: u32, vmem_cap: u32, vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
-    _ = try call(.send, .{
+    _ = try syscall(.send, .{
         @as(usize, lvl1_cap),
         @intFromEnum(Lvl1CallId.map),
         @as(usize, vmem_cap),
@@ -275,7 +277,7 @@ pub const FrameCallId = enum(u8) {
 };
 
 pub fn map_frame(frame_cap: u32, vmem_cap: u32, vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
-    _ = try call(.send, .{
+    _ = try syscall(.send, .{
         @as(usize, frame_cap),
         @intFromEnum(FrameCallId.map),
         @as(usize, vmem_cap),
@@ -284,6 +286,21 @@ pub fn map_frame(frame_cap: u32, vmem_cap: u32, vaddr: usize, rights: abi.sys.Ri
         @as(usize, @as(u40, @bitCast(flags))),
     });
 }
+
+// RECEIVER CAPABILITY CALLS
+
+pub const ReceiverCallId = enum(u8) {
+    subscribe,
+};
+
+pub fn receiver_subscribe(recv_cap: u32) Error!u32 {
+    return @truncate(try syscall(.send, .{
+        @as(usize, recv_cap),
+        @intFromEnum(ReceiverCallId.subscribe),
+    }));
+}
+
+// SENDER CAPABILITY CALLS
 
 // SYSCALLS
 
@@ -296,11 +313,37 @@ pub const Args = struct {
 };
 
 pub fn log(s: []const u8) void {
-    _ = call(.log, .{ @intFromPtr(s.ptr), s.len }) catch unreachable;
+    _ = syscall(.log, .{ @intFromPtr(s.ptr), s.len }) catch unreachable;
 }
 
-pub fn send(cap_ptr: usize, args: Args) !usize {
-    return call(.send, .{
+pub fn call(cap_ptr: usize, args: *Args) !void {
+    _ = try rwcall(.send, cap_ptr, args);
+}
+
+pub fn recv(cap_ptr: usize, args: *Args) !usize {
+    return rwcall(.recv, cap_ptr, args);
+}
+
+fn rwcall(id: Id, cap_ptr: usize, args: *Args) !usize {
+    const res, const args_out = syscall6rw(@intFromEnum(id), .{
+        cap_ptr,
+        args.arg0,
+        args.arg1,
+        args.arg2,
+        args.arg3,
+        args.arg4,
+    });
+    args.arg0 = args_out[1];
+    args.arg1 = args_out[2];
+    args.arg2 = args_out[3];
+    args.arg3 = args_out[4];
+    args.arg4 = args_out[5];
+
+    return decode(res);
+}
+
+pub fn reply(cap_ptr: usize, args: Args) !void {
+    _ = try syscall(.reply, .{
         cap_ptr,
         args.arg0,
         args.arg1,
@@ -310,34 +353,32 @@ pub fn send(cap_ptr: usize, args: Args) !usize {
     });
 }
 
-pub fn recv(cap_ptr: usize) !Args {
-    const res, const args = call6rw(@intFromEnum(Id.recv), .{
-        cap_ptr,
-        0,
-        0,
-        0,
-        0,
-        0,
-    });
-
-    _ = try decode(res);
-
-    return .{
-        .arg0 = args[0],
-        .arg1 = args[1],
-        .arg2 = args[2],
-        .arg3 = args[3],
-        .arg4 = args[4],
-    };
-}
+// pub fn recv(cap_ptr: usize) !struct { usize, Args } {
+//     const res, const args = call6rw(@intFromEnum(Id.replyRecv), .{
+//         cap_ptr,
+//         0,
+//         0,
+//         0,
+//         0,
+//         0,
+//     });
+//     const result = try decode(res);
+//     return .{ result, .{
+//         .arg0 = args[1],
+//         .arg1 = args[2],
+//         .arg2 = args[3],
+//         .arg3 = args[4],
+//         .arg4 = args[5],
+//     } };
+// }
 
 pub fn yield() void {
-    _ = call(.yield, .{}) catch unreachable;
+    _ = syscall(.yield, .{}) catch unreachable;
 }
 
 //
 
-pub fn call(id: Id, args: anytype) Error!usize {
+pub fn syscall(id: Id, args: anytype) Error!usize {
     const ArgsType = @TypeOf(args);
     const args_type_info = @typeInfo(ArgsType);
     if (args_type_info != .@"struct" or !args_type_info.@"struct".is_tuple) {
@@ -348,32 +389,32 @@ pub fn call(id: Id, args: anytype) Error!usize {
 
     const syscall_id = @intFromEnum(id);
     const result: usize = switch (fields.len) {
-        0 => call0(
+        0 => syscall0(
             syscall_id,
         ),
-        1 => call1(
+        1 => syscall1(
             syscall_id,
             @field(args, fields[0].name),
         ),
-        2 => call2(
+        2 => syscall2(
             syscall_id,
             @field(args, fields[0].name),
             @field(args, fields[1].name),
         ),
-        3 => call3(
+        3 => syscall3(
             syscall_id,
             @field(args, fields[0].name),
             @field(args, fields[1].name),
             @field(args, fields[2].name),
         ),
-        4 => call4(
+        4 => syscall4(
             syscall_id,
             @field(args, fields[0].name),
             @field(args, fields[1].name),
             @field(args, fields[2].name),
             @field(args, fields[3].name),
         ),
-        5 => call5(
+        5 => syscall5(
             syscall_id,
             @field(args, fields[0].name),
             @field(args, fields[1].name),
@@ -381,7 +422,7 @@ pub fn call(id: Id, args: anytype) Error!usize {
             @field(args, fields[3].name),
             @field(args, fields[4].name),
         ),
-        6 => call6(
+        6 => syscall6(
             syscall_id,
             @field(args, fields[0].name),
             @field(args, fields[1].name),
@@ -397,7 +438,7 @@ pub fn call(id: Id, args: anytype) Error!usize {
 }
 
 // TODO: move intFromEnum to here
-pub fn call0(id: usize) usize {
+pub fn syscall0(id: usize) usize {
     return asm volatile ("syscall"
         : [ret] "={rax}" (-> usize),
         : [id] "{rax}" (id),
@@ -405,7 +446,7 @@ pub fn call0(id: usize) usize {
     );
 }
 
-pub fn call1(id: usize, arg1: usize) usize {
+pub fn syscall1(id: usize, arg1: usize) usize {
     return asm volatile ("syscall"
         : [ret] "={rax}" (-> usize),
         : [id] "{rax}" (id),
@@ -414,7 +455,7 @@ pub fn call1(id: usize, arg1: usize) usize {
     );
 }
 
-pub fn call2(id: usize, arg1: usize, arg2: usize) usize {
+pub fn syscall2(id: usize, arg1: usize, arg2: usize) usize {
     return asm volatile ("syscall"
         : [ret] "={rax}" (-> usize),
         : [id] "{rax}" (id),
@@ -424,7 +465,7 @@ pub fn call2(id: usize, arg1: usize, arg2: usize) usize {
     );
 }
 
-pub fn call3(id: usize, arg1: usize, arg2: usize, arg3: usize) usize {
+pub fn syscall3(id: usize, arg1: usize, arg2: usize, arg3: usize) usize {
     return asm volatile ("syscall"
         : [ret] "={rax}" (-> usize),
         : [id] "{rax}" (id),
@@ -435,7 +476,7 @@ pub fn call3(id: usize, arg1: usize, arg2: usize, arg3: usize) usize {
     );
 }
 
-pub fn call4(id: usize, arg1: usize, arg2: usize, arg3: usize, arg4: usize) usize {
+pub fn syscall4(id: usize, arg1: usize, arg2: usize, arg3: usize, arg4: usize) usize {
     return asm volatile ("syscall"
         : [ret] "={rax}" (-> usize),
         : [id] "{rax}" (id),
@@ -447,7 +488,7 @@ pub fn call4(id: usize, arg1: usize, arg2: usize, arg3: usize, arg4: usize) usiz
     );
 }
 
-pub fn call5(id: usize, arg1: usize, arg2: usize, arg3: usize, arg4: usize, arg5: usize) usize {
+pub fn syscall5(id: usize, arg1: usize, arg2: usize, arg3: usize, arg4: usize, arg5: usize) usize {
     return asm volatile ("syscall"
         : [ret] "={rax}" (-> usize),
         : [id] "{rax}" (id),
@@ -460,7 +501,7 @@ pub fn call5(id: usize, arg1: usize, arg2: usize, arg3: usize, arg4: usize, arg5
     );
 }
 
-pub fn call6(id: usize, arg1: usize, arg2: usize, arg3: usize, arg4: usize, arg5: usize, arg6: usize) usize {
+pub fn syscall6(id: usize, arg1: usize, arg2: usize, arg3: usize, arg4: usize, arg5: usize, arg6: usize) usize {
     return asm volatile ("syscall"
         : [ret] "={rax}" (-> usize),
         : [id] "{rax}" (id),
@@ -474,7 +515,7 @@ pub fn call6(id: usize, arg1: usize, arg2: usize, arg3: usize, arg4: usize, arg5
     );
 }
 
-pub fn call6rw(id: usize, args: [6]usize) struct { usize, [6]usize } {
+pub fn syscall6rw(id: usize, args: [6]usize) struct { usize, [6]usize } {
     var arg0: usize = undefined; // arrays dont work on outputs for whatever reason
     var arg1: usize = undefined;
     var arg2: usize = undefined;

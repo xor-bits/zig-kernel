@@ -15,6 +15,10 @@ const Error = abi.sys.Error;
 pub const Memory = struct {
     pub fn init(_: *@This()) void {}
 
+    pub fn canAlloc() bool {
+        return true;
+    }
+
     pub fn call(_: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!usize {
         const call_id = std.meta.intToEnum(abi.sys.MemoryCallId, trap.arg1) catch {
             return Error.InvalidArgument;
@@ -44,6 +48,10 @@ pub const Memory = struct {
 /// (and can't be used to allocate things)
 pub const Frame = struct {
     data: [512]u64 align(0x1000) = std.mem.zeroes([512]u64),
+
+    pub fn canAlloc() bool {
+        return true;
+    }
 
     pub fn init(self: *@This()) void {
         self.* = .{};

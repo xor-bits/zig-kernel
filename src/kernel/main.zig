@@ -192,7 +192,7 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
         .send => {
             const cap_id: u32 = @truncate(trap.arg0);
             if (cap_id == 0) {
-                trap.syscall_id = abi.sys.encode(abi.sys.Error.InvalidAddress);
+                trap.syscall_id = abi.sys.encode(abi.sys.Error.InvalidCapability);
                 return;
             }
 
@@ -201,11 +201,42 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
 
             trap.syscall_id = abi.sys.encode(caps.call(thread, cap_id, trap));
 
-            if (thread.stopped == true) {
+            if (thread.status == .stopped) {
                 proc.yield(trap);
             }
         },
-        .recv => {},
+        .recv => {
+            const cap_id: u32 = @truncate(trap.arg0);
+            if (cap_id == 0) {
+                trap.syscall_id = abi.sys.encode(abi.sys.Error.InvalidCapability);
+                return;
+            }
+
+            const locals = arch.cpu_local();
+            const thread = locals.current_thread.?;
+
+            trap.syscall_id = abi.sys.encode(caps.recv(thread, cap_id, trap));
+
+            if (thread.status == .stopped) {
+                proc.yield(trap);
+            }
+        },
+        .reply => {
+            const cap_id: u32 = @truncate(trap.arg0);
+            if (cap_id == 0) {
+                trap.syscall_id = abi.sys.encode(abi.sys.Error.InvalidCapability);
+                return;
+            }
+
+            const locals = arch.cpu_local();
+            const thread = locals.current_thread.?;
+
+            trap.syscall_id = abi.sys.encode(caps.reply(thread, cap_id, trap));
+
+            if (thread.status == .stopped) {
+                proc.yield(trap);
+            }
+        },
         .yield => {
             proc.yield(trap);
         },

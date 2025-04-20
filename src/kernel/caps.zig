@@ -7,6 +7,7 @@ const spin = @import("spin.zig");
 const pmem = @import("pmem.zig");
 const proc = @import("proc.zig");
 
+const caps_ipc = @import("caps/ipc.zig");
 const caps_pmem = @import("caps/pmem.zig");
 const caps_thread = @import("caps/thread.zig");
 const caps_vmem = @import("caps/vmem.zig");
@@ -27,6 +28,8 @@ pub const PageTableLevel4 = caps_vmem.PageTableLevel4;
 pub const PageTableLevel3 = caps_vmem.PageTableLevel3;
 pub const PageTableLevel2 = caps_vmem.PageTableLevel2;
 pub const PageTableLevel1 = caps_vmem.PageTableLevel1;
+pub const Receiver = caps_ipc.Receiver;
+pub const Sender = caps_ipc.Sender;
 
 //
 
@@ -37,6 +40,8 @@ pub fn init() !void {
 
     // push the null capability
     _ = push_capability(.{});
+
+    debug_type(Object);
 }
 
 pub fn capability_array() []Object {
@@ -85,6 +90,16 @@ pub fn get_capability(thread: *Thread, cap_id: u32) Error!Object {
 pub fn call(thread: *Thread, cap_id: u32, trap: *arch.SyscallRegs) Error!usize {
     const obj = try get_capability(thread, cap_id);
     return obj.call(thread, trap);
+}
+
+pub fn recv(thread: *Thread, cap_id: u32, trap: *arch.SyscallRegs) Error!usize {
+    const obj = try get_capability(thread, cap_id);
+    return obj.recv(thread, trap);
+}
+
+pub fn reply(thread: *Thread, cap_id: u32, trap: *arch.SyscallRegs) Error!usize {
+    const obj = try get_capability(thread, cap_id);
+    return obj.reply(thread, trap);
 }
 
 //
@@ -151,6 +166,9 @@ pub fn Ref(comptime T: type) type {
         pub fn alloc() Error!Self {
             std.debug.assert(std.mem.isAligned(0x1000, @alignOf(T)));
 
+            if (!T.canAlloc())
+                return Error.InvalidType;
+
             const N_PAGES = comptime std.math.divCeil(usize, @sizeOf(T), 0x1000) catch unreachable;
 
             const paddr = if (@sizeOf(T) == 0)
@@ -200,6 +218,8 @@ pub const Object = struct {
             PageTableLevel2 => .page_table_level_2,
             PageTableLevel1 => .page_table_level_1,
             Frame => .frame,
+            Receiver => .receiver,
+            Sender => .sender,
             else => @compileError(std.fmt.comptimePrint("invalid Capability type: {}", .{@typeName(T)})),
         };
     }
@@ -223,6 +243,8 @@ pub const Object = struct {
             .page_table_level_2 => (try Ref(PageTableLevel2).alloc()).object(owner),
             .page_table_level_1 => (try Ref(PageTableLevel1).alloc()).object(owner),
             .frame => (try Ref(Frame).alloc()).object(owner),
+            .receiver => (try Ref(Receiver).alloc()).object(owner),
+            .sender => Error.InvalidType, // receiver can be cloned to make senders
         };
     }
 
@@ -236,6 +258,38 @@ pub const Object = struct {
             .page_table_level_2 => PageTableLevel2.call(self.paddr, thread, trap),
             .page_table_level_1 => PageTableLevel1.call(self.paddr, thread, trap),
             .frame => Frame.call(self.paddr, thread, trap),
+            .receiver => Receiver.call(self.paddr, thread, trap),
+            .sender => Sender.call(self.paddr, thread, trap),
+        };
+    }
+
+    pub fn recv(self: Self, thread: *Thread, trap: *arch.SyscallRegs) Error!usize {
+        return switch (self.type) {
+            .null => Error.InvalidCapability,
+            .memory => Error.InvalidArgument,
+            .thread => Error.InvalidArgument,
+            .page_table_level_4 => Error.InvalidArgument,
+            .page_table_level_3 => Error.InvalidArgument,
+            .page_table_level_2 => Error.InvalidArgument,
+            .page_table_level_1 => Error.InvalidArgument,
+            .frame => Error.InvalidArgument,
+            .receiver => Receiver.recv(self.paddr, thread, trap),
+            .sender => Error.InvalidArgument,
+        };
+    }
+
+    pub fn reply(self: Self, thread: *Thread, trap: *arch.SyscallRegs) Error!usize {
+        return switch (self.type) {
+            .null => Error.InvalidCapability,
+            .memory => Error.InvalidArgument,
+            .thread => Error.InvalidArgument,
+            .page_table_level_4 => Error.InvalidArgument,
+            .page_table_level_3 => Error.InvalidArgument,
+            .page_table_level_2 => Error.InvalidArgument,
+            .page_table_level_1 => Error.InvalidArgument,
+            .frame => Error.InvalidArgument,
+            .receiver => Receiver.reply(self.paddr, thread, trap),
+            .sender => Error.InvalidArgument,
         };
     }
 };

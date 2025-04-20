@@ -109,6 +109,10 @@ pub const PageTableLevel4 = struct {
         std.mem.copyForwards(Entry, self.entries[256..], kernel_table[0..]);
     }
 
+    pub fn canAlloc() bool {
+        return true;
+    }
+
     pub fn switchTo(self: caps.Ref(@This())) void {
         var cur = arch.Cr3.read();
         if (cur.pml4_phys_base == self.paddr.raw) return;
@@ -155,6 +159,10 @@ pub const PageTableLevel3 = struct {
 
     pub fn init(self: *@This()) void {
         self.* = .{};
+    }
+
+    pub fn canAlloc() bool {
+        return true;
     }
 
     pub fn call(paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!usize {
@@ -213,6 +221,10 @@ pub const PageTableLevel2 = struct {
         self.* = .{};
     }
 
+    pub fn canAlloc() bool {
+        return true;
+    }
+
     pub fn call(paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!usize {
         const call_id = std.meta.intToEnum(abi.sys.Lvl2CallId, trap.arg1) catch {
             return Error.InvalidArgument;
@@ -257,6 +269,10 @@ pub const PageTableLevel1 = struct {
 
     pub fn init(self: *@This()) void {
         self.* = .{};
+    }
+
+    pub fn canAlloc() bool {
+        return true;
     }
 
     pub fn call(paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!usize {

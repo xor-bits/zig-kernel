@@ -37,6 +37,15 @@ pub fn main() !void {
     try abi.sys.thread_set_vmem(new_thread, abi.BOOTSTRAP_SELF_VMEM);
     try abi.sys.thread_start(new_thread);
 
+    const recv = try abi.sys.alloc(abi.BOOTSTRAP_MEMORY, .receiver);
+    send = try abi.sys.receiver_subscribe(recv);
+
+    var msg: abi.sys.Args = undefined;
+    const from = try abi.sys.recv(recv, &msg);
+    log.info("got call msg={any} from={}", .{ msg, from });
+    msg = .{ .arg0 = 3, .arg1 = 4, .arg2 = 5, .arg3 = 6, .arg4 = 7 };
+    try abi.sys.reply(recv, msg);
+
     abi.sys.yield();
 
     try abi.sys.thread_stop(abi.BOOTSTRAP_SELF_THREAD);
@@ -44,6 +53,7 @@ pub fn main() !void {
 }
 
 var new_thread: u32 = 0;
+var send: u32 = 0;
 
 export fn thread_main() noreturn {
     thread() catch |err| {
@@ -54,6 +64,9 @@ export fn thread_main() noreturn {
 
 pub fn thread() !void {
     abi.sys.log("hello from secondary thread");
+    var msg: abi.sys.Args = .{ .arg0 = 2, .arg1 = 3, .arg2 = 4, .arg3 = 5, .arg4 = 6 };
+    try abi.sys.call(send, &msg);
+    log.info("got reply msg={}", .{msg});
     try abi.sys.thread_stop(new_thread);
     unreachable;
 }

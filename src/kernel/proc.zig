@@ -52,31 +52,41 @@ const Queue = struct {
 
 //
 
-/// add the current thread back to the ready queue and maybe switch to another thread
+/// add the current thread back to the ready queue (if ready) and maybe switch to another thread
 pub fn yield(trap: *arch.SyscallRegs) void {
     const local = arch.cpu_local();
-
     if (local.current_thread) |prev_thread| {
         local.current_thread = null;
         prev_thread.trap = trap.*;
 
-        if (!prev_thread.stopped) {
-            ready(prev_thread);
+        switch (prev_thread.status) {
+            .ready, .running => ready(prev_thread),
+            .stopped, .waiting => {},
         }
     }
 
-    const next_thread = next();
-    local.current_thread = next_thread.ptr();
-    caps.PageTableLevel4.switchTo(local.current_thread.?.vmem.?);
-    trap.* = local.current_thread.?.trap;
+    switchNow(trap);
+}
+
+/// switch to another thread without adding the thread back to the ready queue
+pub fn switchNow(trap: *arch.SyscallRegs) void {
+    switchTo(trap, next().ptr());
+}
+
+/// switch to another thread, skipping the scheduler entirely
+pub fn switchTo(trap: *arch.SyscallRegs, thread: *caps.Thread) void {
+    const local = arch.cpu_local();
+    local.current_thread = thread;
+    caps.PageTableLevel4.switchTo(thread.vmem.?);
+    trap.* = thread.trap;
 }
 
 /// stop the thread and (TODO) interrupt a processor that might be running it
 pub fn stop(thread: caps.Ref(caps.Thread)) Error!void {
     const thread_ptr = thread.ptr();
-    if (thread_ptr.stopped) return Error.IsStopped;
+    if (thread_ptr.status == .stopped) return Error.IsStopped;
 
-    thread_ptr.stopped = true;
+    thread_ptr.status = .stopped;
     _ = active_threads.fetchSub(1, .release);
     // FIXME: IPI
     // TODO: stop the processor and take the thread
@@ -85,17 +95,17 @@ pub fn stop(thread: caps.Ref(caps.Thread)) Error!void {
 /// start the thread, if its not running
 pub fn start(thread: caps.Ref(caps.Thread)) Error!void {
     const thread_ptr = thread.ptr();
-    if (!thread_ptr.stopped) return Error.NotStopped;
+    if (thread_ptr.status != .stopped) return Error.NotStopped;
     if (thread_ptr.vmem == null) return Error.NoVmem;
 
     _ = active_threads.fetchAdd(1, .acquire);
-    thread_ptr.stopped = false;
     ready(thread_ptr);
 }
 
 pub fn ready(thread: *caps.Thread) void {
     const prio = thread.priority;
-    std.debug.assert(thread.stopped == false);
+    std.debug.assert(thread.status != .ready and thread.status != .running);
+    thread.status = .ready;
 
     queue_locks[prio].lock();
     defer queue_locks[prio].unlock();
@@ -126,7 +136,7 @@ pub fn tryNext() ?caps.Ref(caps.Thread) {
         defer lock.unlock();
 
         if (queue.pop()) |next_thread| {
-            if (next_thread.ptr().stopped) {
+            if (next_thread.ptr().status == .stopped) {
                 continue;
             } else {
                 return next_thread;

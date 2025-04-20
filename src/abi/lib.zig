@@ -59,6 +59,8 @@ pub const ObjectType = enum(u8) {
     page_table_level_2,
     page_table_level_1,
     frame,
+    receiver,
+    sender,
 };
 
 //
