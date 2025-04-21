@@ -81,7 +81,9 @@ pub const Frame = struct {
                 const rights: abi.sys.Rights = @bitCast(@as(u32, @truncate(msg.arg3)));
                 const flags: abi.sys.MapFlags = @bitCast(@as(u40, @truncate(msg.arg4)));
 
+                // log.info("mapping 0x{x} to 0x{x} {} {}", .{ paddr.raw, vaddr.raw, rights, flags });
                 try vmem.ptr().map_frame(paddr, vaddr, rights, flags);
+                arch.flush_tlb_addr(vaddr.raw);
             },
         }
     }

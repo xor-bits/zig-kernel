@@ -3,24 +3,84 @@ const abi = @import("abi");
 
 const main = @import("main.zig");
 
-const heap = &main.heap;
-
 const log = std.log.scoped(.initfsd);
 
 //
 
-var initfs_tar = std.ArrayList(u8).init(heap.allocator());
+// 0x1000_0000_0000;
+
+const vmm_vector = std.mem.Allocator{
+    .ptr = &vmm_vector_top,
+    .vtable = &.{
+        .alloc = vmm_vector_alloc,
+        .resize = vmm_vector_resize,
+        .remap = vmm_vector_remap,
+        .free = vmm_vector_free,
+    },
+};
+
+var vmm_vector_top: usize = 0x1000_0000_0000;
+
+// const vmm_vector_vtable = std.mem.Allocator.VTable {};
+
+fn vmm_vector_alloc(_top: *anyopaque, len: usize, _: std.mem.Alignment, _: usize) ?[*]u8 {
+    const top: *usize = @alignCast(@ptrCast(_top));
+    const ptr: [*]u8 = @ptrFromInt(top.*);
+    vmm_vector_grow(top, std.math.divCeil(
+        usize,
+        len,
+        0x1000,
+    ) catch return null) catch return null;
+    return ptr;
+}
+
+fn vmm_vector_resize(_: *anyopaque, _: []u8, _: std.mem.Alignment, _: usize, _: usize) bool {
+    return false;
+}
+
+fn vmm_vector_remap(_top: *anyopaque, memory: []u8, _: std.mem.Alignment, new_len: usize, _: usize) ?[*]u8 {
+    const top: *usize = @alignCast(@ptrCast(_top));
+    vmm_vector_grow(top, std.math.divCeil(
+        usize,
+        new_len,
+        0x1000,
+    ) catch return null) catch return null;
+    return memory.ptr;
+}
+
+fn vmm_vector_free(_: *anyopaque, _: []u8, _: std.mem.Alignment, _: usize) void {}
+
+fn vmm_vector_grow(top: *usize, n_pages: usize) !void {
+    for (0..n_pages) |_| {
+        try main.map_naive(
+            try abi.sys.alloc(abi.BOOTSTRAP_MEMORY, .frame),
+            top.*,
+            .{ .writable = true },
+            .{},
+        );
+        top.* += 0x1000;
+    }
+}
+
+var initfs_tar: std.ArrayList(u8) = .init(vmm_vector);
 
 //
 
 pub fn init(initfs: []const u8) !void {
     var initfs_tar_gz = std.io.fixedBufferStream(initfs);
+    log.info("decompressing", .{});
+    // while (true) {
+    //     try initfs_tar.append(5);
+    //     log.info("{}", .{initfs_tar.items.len});
+    // }
     try std.compress.flate.inflate.decompress(.gzip, initfs_tar_gz.reader(), initfs_tar.writer());
-    std.debug.assert(std.mem.eql(u8, initfs_tar.items[257..][0..8], "ustar\x20\x20\x00"));
+    // std.debug.assert(std.mem.eql(u8, initfs_tar.items[257..][0..8], "ustar\x20\x20\x00"));
 }
 
 pub fn run() noreturn {
     abi.sys.system_rename(0, "initfsd");
+
+    const heap = 2;
 
     // io ring for sending requests elsewhere
     const io_ring = abi.IoRing.init(64, heap.allocator()) catch unreachable;

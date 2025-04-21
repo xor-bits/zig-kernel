@@ -25,9 +25,8 @@ pub fn exec(a: args.Args) !void {
     (arch.Cr3{
         .pml4_phys_base = vmem.paddr.toParts().page,
     }).write();
-    try map_bootstrap(vmem_lvl4, a);
 
-    // const boot_info = try caps.Ref(caps.BootInfo).alloc();
+    const boot_info = try map_bootstrap(vmem_lvl4, a);
 
     const init_thread = try caps.Ref(caps.Thread).alloc();
     init_thread.ptr().* = .{
@@ -46,15 +45,19 @@ pub fn exec(a: args.Args) !void {
     std.debug.assert(id == abi.BOOTSTRAP_SELF_THREAD);
     id = caps.push_capability(init_memory.object(init_thread.ptr()));
     std.debug.assert(id == abi.BOOTSTRAP_MEMORY);
+    id = caps.push_capability(boot_info.object(init_thread.ptr()));
+    std.debug.assert(id == abi.BOOTSTRAP_BOOT_INFO);
 
     try proc.start(init_thread);
 }
 
-fn map_bootstrap(vmem_lvl4: *caps.PageTableLevel4, a: args.Args) !void {
-    const low = addr.Virt.fromInt(abi.BOOTSTRAP_EXE);
-    const high = addr.Virt.fromInt(abi.BOOTSTRAP_EXE + a.bootstrap_data.len);
+fn map_bootstrap(vmem_lvl4: *caps.PageTableLevel4, a: args.Args) !caps.Ref(caps.Frame) {
+    const data_len = a.bootstrap_data.len + a.bootstrap_path.len + a.initfs_data.len + a.initfs_path.len;
 
-    log.info("bootstrap binary size: 0x{x}", .{a.bootstrap_data.len});
+    const low = addr.Virt.fromInt(abi.BOOTSTRAP_EXE);
+    const high = addr.Virt.fromInt(abi.BOOTSTRAP_EXE + data_len);
+
+    log.info("bootstrap virtual memory size: 0x{x}", .{data_len});
     log.info("mapping user-space [ 0x{x:0>16}..0x{x:0>16} ]", .{ low.raw, high.raw });
 
     var current = low;
@@ -121,9 +124,55 @@ fn map_bootstrap(vmem_lvl4: *caps.PageTableLevel4, a: args.Args) !void {
         );
     }
 
-    log.info("copying bootstrap", .{});
-    const bootstrap_addr = @as([*]u8, @ptrFromInt(abi.BOOTSTRAP_EXE))[0..a.bootstrap_data.len];
-    std.mem.copyForwards(u8, bootstrap_addr, a.bootstrap_data);
+    arch.flush_tlb();
+
+    const boot_info = try caps.Ref(caps.Frame).alloc();
+    const boot_info_ptr: *volatile abi.BootInfo = @ptrCast(boot_info.ptr());
+
+    boot_info_ptr.* = .{
+        .bootstrap_data = @ptrFromInt(abi.BOOTSTRAP_EXE),
+        .bootstrap_data_len = a.bootstrap_data.len,
+        .bootstrap_path = @ptrFromInt(abi.BOOTSTRAP_EXE + a.bootstrap_data.len),
+        .bootstrap_path_len = a.bootstrap_path.len,
+        .initfs_data = @ptrFromInt(abi.BOOTSTRAP_EXE + a.bootstrap_data.len + a.bootstrap_path.len),
+        .initfs_data_len = a.initfs_data.len,
+        .initfs_path = @ptrFromInt(abi.BOOTSTRAP_EXE + a.bootstrap_data.len + a.bootstrap_path.len + a.initfs_data.len),
+        .initfs_path_len = a.initfs_path.len,
+    };
+
+    log.info("copying bootstrap data", .{});
+    std.mem.copyForwards(
+        u8,
+        @as([]u8, @ptrCast(boot_info_ptr.bootstrapData())),
+        a.bootstrap_data,
+    );
+    log.info("copying bootstrap path", .{});
+    std.mem.copyForwards(
+        u8,
+        @as([]u8, @ptrCast(boot_info_ptr.bootstrapPath())),
+        a.bootstrap_path,
+    );
+    log.info("copying initfs data", .{});
+    std.mem.copyForwards(
+        u8,
+        @as([]u8, @ptrCast(boot_info_ptr.initfsData())),
+        a.initfs_data,
+    );
+    log.info("copying initfs path", .{});
+    std.mem.copyForwards(
+        u8,
+        @as([]u8, @ptrCast(boot_info_ptr.initfsPath())),
+        a.initfs_path,
+    );
+
+    log.info("bootstrap binary addr: {*}", .{boot_info_ptr.bootstrapData().ptr});
+    log.info("bootstrap binary size: {}", .{boot_info_ptr.bootstrapData().len});
+    log.info("bootstrap binary path: '{s}'", .{boot_info_ptr.bootstrapPath()});
+    log.info("initfs addr: {*}", .{boot_info_ptr.initfsData().ptr});
+    log.info("initfs size: {}", .{boot_info_ptr.initfsData().len});
+    log.info("initfs path: '{s}'", .{boot_info_ptr.initfsPath()});
+
+    return boot_info;
 }
 
 pub fn alloc(pages: usize) Error!addr.Phys {

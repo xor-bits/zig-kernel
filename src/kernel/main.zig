@@ -110,6 +110,7 @@ pub fn main() noreturn {
         std.debug.panic("failed to set up bootstrap: {}", .{err});
     };
 
+    log.info("entering user-space", .{});
     proc_enter();
 }
 
@@ -132,6 +133,7 @@ pub fn smpmain() noreturn {
         std.debug.panic("failed to initialize ACPI CPU-{}: {any}", .{ id, err });
     };
 
+    log.info("entering user-space", .{});
     proc_enter();
 }
 

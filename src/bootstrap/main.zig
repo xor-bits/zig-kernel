@@ -14,19 +14,30 @@ pub const panic = abi.panic;
 //
 
 pub fn main() !void {
-    abi.sys.log("hello");
+    try map_naive(
+        abi.BOOTSTRAP_BOOT_INFO,
+        0x8000_0000_0000 - 0x1000,
+        .{ .writable = true },
+        .{},
+    );
+    log.info("boot info mapped", .{});
+    const boot_info = @as(*volatile abi.BootInfo, @ptrFromInt(0x8000_0000_0000 - 0x1000));
+    // log.info("boot info {}", .{boot_info.*});
 
-    try map_naive(0x1000_0000_0000, .{ .writable = true }, .{});
-    log.info("mapped", .{});
-    const s = @as(*volatile u64, @ptrFromInt(0x1000_0000_0000));
-    s.* = 56;
-    log.info("val={}", .{s.*});
+    log.info("bootstrap binary addr: {*}", .{boot_info.bootstrapData().ptr});
+    log.info("bootstrap binary size: {}", .{boot_info.bootstrapData().len});
+    log.info("bootstrap binary path: '{s}'", .{boot_info.bootstrapPath()});
+    log.info("initfs addr: {*}", .{boot_info.initfsData().ptr});
+    log.info("initfs size: {}", .{boot_info.initfsData().len});
+    log.info("initfs path: '{s}'", .{boot_info.initfsPath()});
+
+    try initfsd.init(boot_info.initfsData());
 
     var regs: abi.sys.ThreadRegs = .{};
-    try abi.sys.thread_read_regs(abi.BOOTSTRAP_SELF_THREAD, &regs);
-    log.info("regs='{}'", .{regs});
+    // try abi.sys.thread_read_regs(abi.BOOTSTRAP_SELF_THREAD, &regs);
+    // log.info("regs='{}'", .{regs});
+    // regs = .{};
 
-    regs = .{};
     new_thread = try abi.sys.alloc(abi.BOOTSTRAP_MEMORY, .thread);
     regs.user_stack_ptr = @intFromPtr(&__thread_stack_end);
     regs.user_instr_ptr = @intFromPtr(&thread_main);
@@ -68,8 +79,20 @@ pub fn thread() !void {
     unreachable;
 }
 
-fn map_naive(vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
-    return map_naive_fn(abi.sys.map_frame, map_naive_lvl1, .frame, vaddr, rights, flags);
+pub fn map_naive(obj: u32, vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
+    const err = abi.sys.map_frame(obj, abi.BOOTSTRAP_SELF_VMEM, vaddr, .{
+        .writable = true,
+    }, .{});
+
+    if (err != error.EntryNotPresent) return err;
+
+    try map_naive_lvl1(vaddr, rights, flags);
+
+    return abi.sys.map_frame(obj, abi.BOOTSTRAP_SELF_VMEM, vaddr, .{
+        .writable = true,
+    }, .{});
+
+    // return map_naive_fn(abi.sys.map_frame, map_naive_lvl1, .frame, vaddr, rights, flags);
 }
 
 fn map_naive_lvl1(vaddr: usize, _: abi.sys.Rights, _: abi.sys.MapFlags) !void {
@@ -96,8 +119,6 @@ fn map_naive_fail(_: usize, _: abi.sys.Rights, _: abi.sys.MapFlags) !void {
 
 fn map_naive_fn(comptime map_fn: anytype, comptime if_not_present: anytype, ty: abi.ObjectType, vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
     const obj = try abi.sys.alloc(abi.BOOTSTRAP_MEMORY, ty);
-    log.debug("allocated before ({any}) = {any}", .{ ty, abi.sys.debug(obj) });
-    defer log.debug("allocated after ({any}) = {any}", .{ ty, abi.sys.debug(obj) });
     const err = map_fn(obj, abi.BOOTSTRAP_SELF_VMEM, vaddr, .{
         .writable = true,
     }, .{});
@@ -213,6 +234,38 @@ pub export fn _start() linksection(".text._start") callconv(.Naked) noreturn {
 }
 
 export fn zig_main() noreturn {
+    log.info("hello from bootstrap", .{});
+
+    // switch to a bigger stack (256KiB, because the initfs deflate takes up 64KiB on its own)
+    const stack_top: usize = 0x8000_0000_0000 - 0x2000;
+    var stack_base = stack_top - 0x40000;
+    for (0..0x40) |_| {
+        // log.info("mapping 0x{x}", .{stack_base});
+        map_4kib(stack_base) catch |err| {
+            std.debug.panic("not enough memory for a stack: {}", .{err});
+        };
+        stack_base += 0x1000;
+    }
+    log.info("stack mapping complete 0x{x}..0x{x}", .{ stack_top - 0x40000, stack_top });
+
+    asm volatile (
+        \\ jmp zig_main_realstack
+        :
+        : [sp] "{rsp}" (comptime stack_top),
+    );
+    unreachable;
+}
+
+fn map_4kib(vaddr: usize) !void {
+    try map_naive(
+        try abi.sys.alloc(abi.BOOTSTRAP_MEMORY, .frame),
+        vaddr,
+        .{ .writable = true },
+        .{},
+    );
+}
+
+export fn zig_main_realstack() noreturn {
     main() catch |err| {
         std.debug.panic("{}", .{err});
     };

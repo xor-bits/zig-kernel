@@ -15,6 +15,7 @@ pub const BOOTSTRAP_EXE = 0x200_0000;
 pub const BOOTSTRAP_SELF_VMEM: u32 = 1;
 pub const BOOTSTRAP_SELF_THREAD: u32 = 2;
 pub const BOOTSTRAP_MEMORY: u32 = 3;
+pub const BOOTSTRAP_BOOT_INFO: u32 = 4;
 
 //
 
@@ -61,6 +62,33 @@ pub const ObjectType = enum(u8) {
     frame,
     receiver,
     sender,
+};
+
+pub const BootInfo = extern struct {
+    bootstrap_data: [*]u8,
+    bootstrap_data_len: usize,
+    bootstrap_path: [*]u8,
+    bootstrap_path_len: usize,
+    initfs_data: [*]u8,
+    initfs_data_len: usize,
+    initfs_path: [*]u8,
+    initfs_path_len: usize,
+
+    pub fn bootstrapData(self: @This()) []u8 {
+        return self.bootstrap_data[0..self.bootstrap_data_len];
+    }
+
+    pub fn bootstrapPath(self: @This()) []u8 {
+        return self.bootstrap_path[0..self.bootstrap_path_len];
+    }
+
+    pub fn initfsData(self: @This()) []u8 {
+        return self.initfs_data[0..self.initfs_data_len];
+    }
+
+    pub fn initfsPath(self: @This()) []u8 {
+        return self.initfs_path[0..self.initfs_path_len];
+    }
 };
 
 //
