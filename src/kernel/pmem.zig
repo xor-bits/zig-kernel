@@ -167,7 +167,7 @@ fn toRefcntIndex(page_index: u32) !usize {
         return error.OutOfBounds;
     }
 
-    return page_index - page_index;
+    return page_index - base_phys_page;
 }
 
 fn deallocateContiguous(pages: []Page) void {
@@ -203,6 +203,8 @@ pub fn init() void {
         log.err("physical memory manager already initialized", .{});
         return;
     }
+
+    printInfo();
 
     var usable_memory: usize = 0;
     var memory_top: usize = 0;
