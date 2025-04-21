@@ -81,10 +81,15 @@ pub fn main() noreturn {
     // arch.smp_init();
 
     // set up arch specific things: GDT, TSS, IDT, syscalls, ...
-    log.info("initializing CPU", .{});
     const id = arch.next_cpu_id();
+    log.info("initializing CPU-{}", .{id});
     arch.init_cpu(id) catch |err| {
         std.debug.panic("failed to initialize CPU-{}: {}", .{ id, err });
+    };
+
+    log.info("parsing kernel cmdline", .{});
+    const a = args.parse() catch |err| {
+        std.debug.panic("failed to parse kernel cmdline: {}", .{err});
     };
 
     // initialize ACPI specific things: APIC, HPET, ...
@@ -94,13 +99,14 @@ pub fn main() noreturn {
     };
 
     // set things (like the global kernel address space) up for the capability system
+    log.info("initializing caps", .{});
     caps.init() catch |err| {
         std.debug.panic("failed to initialize caps: {}", .{err});
     };
 
     // initialize and execute the bootstrap process
     log.info("initializing bootstrap", .{});
-    init.exec() catch |err| {
+    init.exec(a) catch |err| {
         std.debug.panic("failed to set up bootstrap: {}", .{err});
     };
 

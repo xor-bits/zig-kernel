@@ -28,23 +28,31 @@ pub fn parse() !Args {
         };
         const second = arg.rest();
 
-        if (std.mem.eql(u8, first, "initfs")) {
-            args.initfs = second;
+        if (std.mem.eql(u8, first, "bootstrap")) {
+            args.bootstrap_path = second;
+        } else if (std.mem.eql(u8, first, "initfs")) {
+            args.initfs_path = second;
         }
     }
 
     const modules_response: *limine.ModuleResponse = modules.response orelse {
-        std.debug.panic("no initfs.tar.gz", .{});
+        return error.MissingModules;
     };
 
     for (modules_response.modules()) |module| {
-        if (std.mem.eql(u8, args.initfs, std.mem.sliceTo(module.path, 0))) {
-            args.initfs = module.data();
+        const path = std.mem.sliceTo(module.path, 0);
+
+        if (std.mem.eql(u8, args.bootstrap_path, path)) {
+            args.bootstrap_data = module.data();
+        } else if (std.mem.eql(u8, args.initfs_path, path)) {
+            args.initfs_data = module.data();
         }
     }
 
-    if (args.initfs.len == 0) {
+    if (args.initfs_data.len == 0) {
         return error.MissingInitfs;
+    } else if (args.bootstrap_data.len == 0) {
+        return error.MissingBootstrap;
     }
 
     return args;
@@ -53,5 +61,8 @@ pub fn parse() !Args {
 //
 
 pub const Args = struct {
-    initfs: []const u8 = "",
+    bootstrap_path: []const u8 = "",
+    bootstrap_data: []const u8 = "",
+    initfs_path: []const u8 = "",
+    initfs_data: []const u8 = "",
 };

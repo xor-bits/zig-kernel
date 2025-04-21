@@ -3,6 +3,7 @@ const abi = @import("abi");
 const limine = @import("limine");
 
 const addr = @import("addr.zig");
+const args = @import("args.zig");
 const arch = @import("arch.zig");
 const caps = @import("caps.zig");
 const pmem = @import("pmem.zig");
@@ -16,7 +17,7 @@ const Error = abi.sys.Error;
 // pub export var memory: limine.MemoryMapRequest = .{};
 
 /// load and exec the bootstrap process
-pub fn exec() !void {
+pub fn exec(a: args.Args) !void {
     const vmem = try caps.Ref(caps.PageTableLevel4).alloc();
     const vmem_lvl4 = vmem.ptr();
     vmem_lvl4.init();
@@ -24,7 +25,7 @@ pub fn exec() !void {
     (arch.Cr3{
         .pml4_phys_base = vmem.paddr.toParts().page,
     }).write();
-    try map_bootstrap(vmem_lvl4);
+    try map_bootstrap(vmem_lvl4, a);
 
     // const boot_info = try caps.Ref(caps.BootInfo).alloc();
 
@@ -49,13 +50,11 @@ pub fn exec() !void {
     try proc.start(init_thread);
 }
 
-fn map_bootstrap(vmem_lvl4: *caps.PageTableLevel4) !void {
-    const bootstrap_binary: []const u8 = @embedFile("bootstrap");
-
+fn map_bootstrap(vmem_lvl4: *caps.PageTableLevel4, a: args.Args) !void {
     const low = addr.Virt.fromInt(abi.BOOTSTRAP_EXE);
-    const high = addr.Virt.fromInt(abi.BOOTSTRAP_EXE + bootstrap_binary.len);
+    const high = addr.Virt.fromInt(abi.BOOTSTRAP_EXE + a.bootstrap_data.len);
 
-    log.info("bootstrap binary size: 0x{x}", .{bootstrap_binary.len});
+    log.info("bootstrap binary size: 0x{x}", .{a.bootstrap_data.len});
     log.info("mapping user-space [ 0x{x:0>16}..0x{x:0>16} ]", .{ low.raw, high.raw });
 
     var current = low;
@@ -123,8 +122,8 @@ fn map_bootstrap(vmem_lvl4: *caps.PageTableLevel4) !void {
     }
 
     log.info("copying bootstrap", .{});
-    const bootstrap_addr = @as([*]u8, @ptrFromInt(abi.BOOTSTRAP_EXE))[0..bootstrap_binary.len];
-    std.mem.copyForwards(u8, bootstrap_addr, bootstrap_binary);
+    const bootstrap_addr = @as([*]u8, @ptrFromInt(abi.BOOTSTRAP_EXE))[0..a.bootstrap_data.len];
+    std.mem.copyForwards(u8, bootstrap_addr, a.bootstrap_data);
 }
 
 pub fn alloc(pages: usize) Error!addr.Phys {

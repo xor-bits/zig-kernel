@@ -38,11 +38,11 @@ pub fn build(b: *std.Build) !void {
     const bootstrap_bin = createBootstrapBin(b, target, optimize, abi);
 
     // build the kernel ELF
-    const kernel_elf = createKernelElf(b, target, optimize, abi, bootstrap_bin);
+    const kernel_elf = createKernelElf(b, target, optimize, abi);
 
     const initfs_tar_gz = createInitfsTarGz(target, optimize, abi, b);
 
-    const os_iso = createIso(b, native_target, optimize, kernel_elf, initfs_tar_gz);
+    const os_iso = createIso(b, native_target, optimize, kernel_elf, initfs_tar_gz, bootstrap_bin);
 
     // run the os in qemu
     const qemu_step = b.addSystemCommand(&.{
@@ -65,9 +65,6 @@ pub fn build(b: *std.Build) !void {
         "base=localtime",
         "-vga",
         "std",
-        "-display",
-        "none",
-        // "gtk,show-cursor=off",
         "-usb",
         "-device",
         "virtio-sound",
@@ -76,6 +73,19 @@ pub fn build(b: *std.Build) !void {
         "-drive",
     });
     qemu_step.addPrefixedFileArg("format=raw,file=", os_iso);
+
+    const display = b.option(bool, "display", "QEMU gui true/false") orelse false;
+    if (display) {
+        qemu_step.addArgs(&.{
+            "-display",
+            "gtk,show-cursor=off",
+        });
+    } else {
+        qemu_step.addArgs(&.{
+            "-display",
+            "none",
+        });
+    }
 
     const debug = b.option(u2, "debug", "QEMU debug level") orelse 1;
     switch (debug) {
@@ -119,6 +129,7 @@ fn createIso(
     native_optimize: std.builtin.OptimizeMode,
     kernel_elf: std.Build.LazyPath,
     initfs_tar_gz: std.Build.LazyPath,
+    bootstrap_bin: std.Build.LazyPath,
 ) std.Build.LazyPath {
     _ = native_optimize; // autofix
     _ = native_target; // autofix
@@ -143,6 +154,7 @@ fn createIso(
     const wf = b.addNamedWriteFiles("create virtual iso root");
     _ = wf.addCopyFile(kernel_elf, "boot/kernel.elf");
     _ = wf.addCopyFile(initfs_tar_gz, "boot/initfs.tar.gz");
+    _ = wf.addCopyFile(bootstrap_bin, "boot/bootstrap.bin");
     _ = wf.addCopyFile(b.path("limine.conf"), "boot/limine/limine.conf");
     _ = wf.addCopyFile(limine_bootloader_pkg.path("limine-bios.sys"), "boot/limine/limine-bios.sys");
     _ = wf.addCopyFile(limine_bootloader_pkg.path("limine-bios-cd.bin"), "boot/limine/limine-bios-cd.bin");
@@ -203,7 +215,6 @@ fn createKernelElf(
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
     abi: *std.Build.Module,
-    bootstrap_bin: *std.Build.Module,
 ) std.Build.LazyPath {
     const git_rev_run = b.addSystemCommand(&.{ "git", "rev-parse", "HEAD" });
     const git_rev = git_rev_run.captureStdOut();
@@ -225,7 +236,6 @@ fn createKernelElf(
     kernel_elf_step.root_module.addImport("limine", b.dependency("limine", .{}).module("limine"));
     kernel_elf_step.root_module.addImport("abi", abi);
     kernel_elf_step.root_module.addImport("font", createFont(b));
-    kernel_elf_step.root_module.addImport("bootstrap", bootstrap_bin);
     kernel_elf_step.root_module.addImport("git-rev", git_rev_mod);
 
     b.installArtifact(kernel_elf_step);
@@ -239,7 +249,7 @@ fn createBootstrapBin(
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
     abi: *std.Build.Module,
-) *std.Build.Module {
+) std.Build.LazyPath {
     const bootstrap_elf_step = b.addExecutable(.{
         .name = "bootstrap.elf",
         .root_source_file = b.path("./src/bootstrap/main.zig"),
@@ -257,9 +267,7 @@ fn createBootstrapBin(
     const install_bootstrap_bin = b.addInstallFile(bootstrap_bin_step.getOutput(), "bootstrap.bin");
     b.getInstallStep().dependOn(&install_bootstrap_bin.step);
 
-    return b.createModule(.{
-        .root_source_file = bootstrap_bin_step.getOutput(),
-    });
+    return bootstrap_bin_step.getOutput();
 }
 
 // create the shared ABI library
