@@ -11,19 +11,12 @@ SECTIONS {
     *(.text .text.*)
   } :text
 
-  .rodata : {
-    *(.rodata .rodata.*)
-  } :rodata
-
-  .stack : {
+  .data : {
     . = ALIGN(16);
     . += 0x8000;
     PROVIDE(__stack_end = .);
     . += 0x4000;
     PROVIDE(__thread_stack_end = .);
-  } :stack
-
-  .data : {
     *(.data .data.*)
   } :data
 
@@ -31,6 +24,10 @@ SECTIONS {
     *(.bss .bss.*)
     *(COMMON)
   } :bss
+
+  .rodata : {
+    *(.rodata .rodata.*)
+  } :rodata
 
   /DISCARD/ : {
     *(.eh_frame*)
