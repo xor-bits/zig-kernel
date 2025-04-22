@@ -33,6 +33,8 @@ pub fn main() !void {
 
     try initfsd.init(boot_info.initfsData());
 
+    // try exec_elf("/sbin/init");
+
     var regs: abi.sys.ThreadRegs = .{};
     // try abi.sys.thread_read_regs(abi.BOOTSTRAP_SELF_THREAD, &regs);
     // log.info("regs='{}'", .{regs});
@@ -133,8 +135,6 @@ fn map_naive_fn(comptime map_fn: anytype, comptime if_not_present: anytype, ty: 
 }
 
 fn exec_elf(path: []const u8) !void {
-    const heap = 0;
-
     const elf_file = initfsd.openFile(path).?;
     const elf_bytes = initfsd.readFile(elf_file);
     var elf = std.io.fixedBufferStream(elf_bytes);
@@ -145,10 +145,13 @@ fn exec_elf(path: []const u8) !void {
     }
     log.info("xor crc of `{s}` is {d}", .{ path, crc });
 
-    var maps = std.ArrayList(abi.sys.Map).init(heap.allocator());
-
     const header = try std.elf.Header.read(&elf);
     var program_headers = header.program_header_iterator(&elf);
+
+    const new_vmem = try abi.sys.alloc(abi.BOOTSTRAP_MEMORY, .page_table_level_4);
+
+    const maps = 0;
+    _ = new_vmem;
 
     try maps.append(abi.sys.Map{
         .dst = 0x7FFF_FFF0_0000,
@@ -236,7 +239,7 @@ pub export fn _start() linksection(".text._start") callconv(.Naked) noreturn {
 export fn zig_main() noreturn {
     log.info("hello from bootstrap", .{});
 
-    // switch to a bigger stack (256KiB, because the initfs deflate takes up 64KiB on its own)
+    // switch to a bigger stack (256KiB, because the initfs deflate takes up over 128KiB on its own)
     const stack_top: usize = 0x8000_0000_0000 - 0x2000;
     var stack_base = stack_top - 0x40000;
     for (0..0x40) |_| {

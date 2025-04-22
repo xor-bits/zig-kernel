@@ -23,6 +23,8 @@ pub const LOG_OBJ_CALLS: bool = false;
 
 pub const Memory = caps_pmem.Memory;
 pub const Frame = caps_pmem.Frame;
+pub const HugeFrame = caps_pmem.HugeFrame;
+pub const GiantFrame = caps_pmem.GiantFrame;
 pub const Thread = caps_thread.Thread;
 pub const PageTableLevel4 = caps_vmem.PageTableLevel4;
 pub const PageTableLevel3 = caps_vmem.PageTableLevel3;
@@ -281,6 +283,8 @@ pub const Object = struct {
             PageTableLevel2 => .page_table_level_2,
             PageTableLevel1 => .page_table_level_1,
             Frame => .frame,
+            HugeFrame => .huge_frame,
+            GiantFrame => .giant_frame,
             Receiver => .receiver,
             Sender => .sender,
             else => @compileError(std.fmt.comptimePrint("invalid Capability type: {}", .{@typeName(T)})),
@@ -306,6 +310,8 @@ pub const Object = struct {
             .page_table_level_2 => (try Ref(PageTableLevel2).alloc()).object(owner),
             .page_table_level_1 => (try Ref(PageTableLevel1).alloc()).object(owner),
             .frame => (try Ref(Frame).alloc()).object(owner),
+            .huge_frame => (try Ref(HugeFrame).alloc()).object(owner),
+            .giant_frame => (try Ref(GiantFrame).alloc()).object(owner),
             .receiver => (try Ref(Receiver).alloc()).object(owner),
             .sender => Error.InvalidType, // receiver can be cloned to make senders
         };
@@ -321,6 +327,8 @@ pub const Object = struct {
             .page_table_level_2 => PageTableLevel2.call(self.paddr, thread, trap),
             .page_table_level_1 => PageTableLevel1.call(self.paddr, thread, trap),
             .frame => Frame.call(self.paddr, thread, trap),
+            .huge_frame => HugeFrame.call(self.paddr, thread, trap),
+            .giant_frame => GiantFrame.call(self.paddr, thread, trap),
             .receiver => Receiver.call(self.paddr, thread, trap),
             .sender => Sender.call(self.paddr, thread, trap),
         };
@@ -336,6 +344,8 @@ pub const Object = struct {
             .page_table_level_2 => PageTableLevel2.consume(self.paddr, thread, trap),
             .page_table_level_1 => PageTableLevel1.consume(self.paddr, thread, trap),
             .frame => Frame.consume(self.paddr, thread, trap),
+            .huge_frame => HugeFrame.consume(self.paddr, thread, trap),
+            .giant_frame => GiantFrame.consume(self.paddr, thread, trap),
             .receiver => Error.InvalidArgument,
             .sender => Error.InvalidArgument,
         };
@@ -351,6 +361,8 @@ pub const Object = struct {
             .page_table_level_2 => Error.InvalidArgument,
             .page_table_level_1 => Error.InvalidArgument,
             .frame => Error.InvalidArgument,
+            .huge_frame => Error.InvalidArgument,
+            .giant_frame => Error.InvalidArgument,
             .receiver => Receiver.recv(self.paddr, thread, trap),
             .sender => Error.InvalidArgument,
         };
@@ -366,6 +378,8 @@ pub const Object = struct {
             .page_table_level_2 => Error.InvalidArgument,
             .page_table_level_1 => Error.InvalidArgument,
             .frame => Error.InvalidArgument,
+            .huge_frame => Error.InvalidArgument,
+            .giant_frame => Error.InvalidArgument,
             .receiver => Receiver.reply(self.paddr, thread, trap),
             .sender => Error.InvalidArgument,
         };

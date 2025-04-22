@@ -52,15 +52,31 @@ pub fn panic(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace, ret_
 //
 
 pub const ObjectType = enum(u8) {
+    /// an unallocated/invalid capability
     null = 0,
+    /// capability that allows kernel object allocation
     memory,
+    /// capability to manage a single thread control block (TCB)
     thread,
+    /// capability to the virtual memory structure
     page_table_level_4,
+    /// capability to an intermediate virtual memory structure
     page_table_level_3,
+    /// capability to an intermediate virtual memory structure
     page_table_level_2,
+    /// capability to an intermediate virtual memory structure
     page_table_level_1,
+    /// capability to a 4KiB physical page
     frame,
+    /// capability to a 2MiB physical page
+    huge_frame,
+    /// capability to a 1GiB physical page
+    giant_frame,
+    /// capability to **the** receiver end of an endpoint,
+    /// there can only be a single receiver
     receiver,
+    /// capability to **a** sender end of an endpoint,
+    /// there can be multiple senders
     sender,
 };
 

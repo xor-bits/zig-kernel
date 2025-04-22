@@ -69,12 +69,8 @@ var initfs_tar: std.ArrayList(u8) = .init(vmm_vector);
 pub fn init(initfs: []const u8) !void {
     var initfs_tar_gz = std.io.fixedBufferStream(initfs);
     log.info("decompressing", .{});
-    // while (true) {
-    //     try initfs_tar.append(5);
-    //     log.info("{}", .{initfs_tar.items.len});
-    // }
     try std.compress.flate.inflate.decompress(.gzip, initfs_tar_gz.reader(), initfs_tar.writer());
-    // std.debug.assert(std.mem.eql(u8, initfs_tar.items[257..][0..8], "ustar\x20\x20\x00"));
+    std.debug.assert(std.mem.eql(u8, initfs_tar.items[257..][0..8], "ustar\x20\x20\x00"));
 }
 
 pub fn run() noreturn {
