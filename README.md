@@ -10,12 +10,22 @@ hiillos is the [hyperion](https://github.com/hyperion-os/hyperion) kernel rewrit
 
 ```bash
 zig build run # thats it
+
+# read 'Project-Specific Options' from `zig build --help` for more options
+zig build run -Dtest=true # include custom unit test runner
 ```
 
 ## Building an ISO
 
 ```bash
 zig build # generates the os.iso in zig-out/os.iso
+```
+
+### Developement environment run cmd
+
+```bash
+zig build run --prominent-compile-errors --summary none -freference-trace \
+ -Doptimize=ReleaseSmall -Duefi=false -Ddebug=1 -Dgdb=false -Ddisplay=false -Dtest=true
 ```
 
 ## Stuff included here
@@ -28,9 +38,11 @@ zig build # generates the os.iso in zig-out/os.iso
 
 ### NOTE: /path/to/something is a short form for fs:///path/to/something
 
-The plan is to have the kernel be just a scheduler, IPC relay, vfs protocol "loadbalancer" and a virtual memory manager.
+The plan is to have the kernel be just a scheduler, IPC relay,
+physical memory manager and maybe a virtual memory manager.
 
-Every path is a URI, where the protocol part (proto://) tells the kernel, which service handles that path. This is kind of like how Redox os does things.
+The system uses seL4-like capabilities, but on a global linear array instead of the CNode tree.
+And physical memory allocation is managed by the kernel.
 
 - [x] kernel
   - [x] PMM
@@ -45,11 +57,6 @@ Every path is a URI, where the protocol part (proto://) tells the kernel, which 
   - [ ] message IPC, shared memory IPC
   - [ ] figure out userland interrupts (ps2 keyboard, ..)
   - [x] syscalls:
-    - [x] syscall to exec a binary (based on a provided mem map)
-    - [x] syscall to create a vfs proto
-    - [x] syscall to accept a vfs proto cmd
-    - [x] syscall to return a vfs proto cmd result
-    - [ ] syscalls for unix sockets
 
 - [x] bootstrap/initfsd process
   - [x] decompress initfs.tar.gz
