@@ -71,7 +71,7 @@ pub fn main() noreturn {
 
     log.info("kernel main", .{});
     log.info("zig version: {s}", .{builtin.zig_version_string});
-    log.info("kernel version: 0.0.2", .{});
+    log.info("kernel version: 0.0.2{s}", .{if (builtin.is_test) "-testing" else ""});
     log.info("kernel git revision: {s}", .{comptime std.mem.trimRight(u8, @embedFile("git-rev"), "\n\r")});
 
     log.info("initializing physical memory allocator", .{});
@@ -103,6 +103,13 @@ pub fn main() noreturn {
     caps.init() catch |err| {
         std.debug.panic("failed to initialize caps: {}", .{err});
     };
+
+    if (builtin.is_test) {
+        log.info("running tests", .{});
+        @import("root").run_tests() catch |err| {
+            std.debug.panic("failed to run tests: {}", .{err});
+        };
+    }
 
     // initialize and execute the bootstrap process
     log.info("initializing bootstrap", .{});
@@ -247,4 +254,9 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
     if (thread.status == .stopped) {
         proc.yield(trap);
     }
+}
+
+test "trivial test" {
+    try std.testing.expect(builtin.target.cpu.arch == .x86_64);
+    try std.testing.expect(builtin.target.abi == .none);
 }

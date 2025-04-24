@@ -17,10 +17,6 @@ pub fn build(b: *std.Build) !void {
     disabled_features.addFeature(@intFromEnum(Feature.avx2));
     disabled_features.addFeature(@intFromEnum(Feature.mmx));
 
-    // b.addTest(.{
-    //     .test_runner =
-    // });
-
     const target = b.resolveTargetQuery(.{
         .cpu_arch = .x86_64,
         .os_tag = .freestanding,
@@ -29,7 +25,6 @@ pub fn build(b: *std.Build) !void {
         .cpu_features_sub = disabled_features,
     });
     const native_target = b.standardTargetOptions(.{});
-
     const optimize = b.standardOptimizeOption(.{});
 
     const abi = createAbi(b, target, optimize);
@@ -224,23 +219,50 @@ fn createKernelElf(
 
     b.getInstallStep().dependOn(&b.addInstallFileWithDir(git_rev, .prefix, "git-rev").step);
 
-    const kernel_elf_step = b.addExecutable(.{
-        .name = "kernel.elf",
+    const kernel_module = b.addModule("kernel", .{
         .root_source_file = b.path("src/kernel/main.zig"),
         .target = target,
         .optimize = optimize,
         .code_model = .kernel,
     });
-    kernel_elf_step.setLinkerScript(b.path("linker/x86_64.ld"));
-    kernel_elf_step.want_lto = false;
-    kernel_elf_step.root_module.addImport("limine", b.dependency("limine", .{}).module("limine"));
-    kernel_elf_step.root_module.addImport("abi", abi);
-    kernel_elf_step.root_module.addImport("font", createFont(b));
-    kernel_elf_step.root_module.addImport("git-rev", git_rev_mod);
+    kernel_module.addImport("limine", b.dependency("limine", .{}).module("limine"));
+    kernel_module.addImport("abi", abi);
+    kernel_module.addImport("font", createFont(b));
+    kernel_module.addImport("git-rev", git_rev_mod);
 
-    b.installArtifact(kernel_elf_step);
+    if (b.option(bool, "test", "include test runner") orelse false) {
+        const testkernel_elf_step = b.addTest(.{
+            .name = "kernel.elf",
+            // .target = target,
+            // .optimize = optimize,
+            // .test_runner = .{ .path = b.path("src/kernel/main.zig"), .mode = .simple },
+            // .root_source_file = b.path("src/kernel/test.zig"),
+            .test_runner = .{ .path = b.path("src/kernel/test.zig"), .mode = .simple },
+            .root_module = kernel_module,
+        });
 
-    return kernel_elf_step.getEmittedBin();
+        testkernel_elf_step.setLinkerScript(b.path("linker/x86_64.ld"));
+        testkernel_elf_step.want_lto = false;
+        testkernel_elf_step.pie = false;
+        testkernel_elf_step.root_module.addImport("kernel", kernel_module);
+
+        b.installArtifact(testkernel_elf_step);
+
+        return testkernel_elf_step.getEmittedBin();
+    } else {
+        const kernel_elf_step = b.addExecutable(.{
+            .name = "kernel.elf",
+            .root_module = kernel_module,
+        });
+
+        kernel_elf_step.setLinkerScript(b.path("linker/x86_64.ld"));
+        kernel_elf_step.want_lto = false;
+        kernel_elf_step.pie = false;
+
+        b.installArtifact(kernel_elf_step);
+
+        return kernel_elf_step.getEmittedBin();
+    }
 }
 
 // create the embedded bootstrap.bin
@@ -275,11 +297,17 @@ fn createBootstrapBin(
 
 // create the shared ABI library
 fn createAbi(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Module {
-    return b.createModule(.{
+    const mod = b.createModule(.{
         .root_source_file = b.path("./src/abi/lib.zig"),
         .target = target,
         .optimize = optimize,
     });
+
+    mod.addAnonymousImport("build-zon", .{
+        .root_source_file = b.path("build.zig.zon"),
+    });
+
+    return mod;
 }
 
 // convert the font.bmp into a more usable format

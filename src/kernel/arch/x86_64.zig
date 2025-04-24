@@ -1215,7 +1215,7 @@ export fn syscall_handler_wrapper(args: *SyscallRegs) callconv(.SysV) void {
 }
 
 test "structure sizes" {
-    std.testing.expectEqual(8, @sizeOf(GdtDescriptor));
-    std.testing.expectEqual(16, @sizeOf(Entry));
-    std.testing.expectEqual(8, @sizeOf(PageFaultError));
+    try std.testing.expectEqual(8, @sizeOf(GdtDescriptor));
+    try std.testing.expectEqual(16, @sizeOf(Entry));
+    try std.testing.expectEqual(8, @sizeOf(PageFaultError));
 }
