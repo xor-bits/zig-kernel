@@ -46,14 +46,14 @@ pub const Memory = struct {
 /// raw physical memory again, but now mappable
 /// (and can't be used to allocate things)
 pub const Frame = struct {
-    data: [512]u64 align(0x1000) = std.mem.zeroes([512]u64),
+    data: [512]u64 align(0x1000),
 
     pub fn canAlloc() bool {
         return true;
     }
 
     pub fn init(self: *@This()) void {
-        self.* = .{};
+        std.crypto.secureZero(u64, @ptrCast(self.data[0..]));
     }
 
     pub fn call(paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
@@ -94,14 +94,14 @@ pub const Frame = struct {
 /// raw physical memory again, but now mappable
 /// (and can't be used to allocate things)
 pub const HugeFrame = struct {
-    data: [512 * 512]u64 align(0x1000) = std.mem.zeroes([512 * 512]u64),
+    data: [512 * 512]u64 align(0x1000),
 
     pub fn canAlloc() bool {
         return true;
     }
 
     pub fn init(self: *@This()) void {
-        self.* = .{};
+        std.crypto.secureZero(u64, @ptrCast(self.data[0..]));
     }
 
     pub fn call(paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
@@ -142,14 +142,14 @@ pub const HugeFrame = struct {
 /// raw physical memory again, but now mappable
 /// (and can't be used to allocate things)
 pub const GiantFrame = struct {
-    data: [512 * 512 * 512]u64 align(0x1000) = std.mem.zeroes([512 * 512 * 512]u64),
+    data: [512 * 512 * 512]u64 align(0x1000),
 
     pub fn canAlloc() bool {
         return true;
     }
 
     pub fn init(self: *@This()) void {
-        self.* = .{};
+        std.crypto.secureZero(u64, @ptrCast(self.data[0..]));
     }
 
     pub fn call(paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
