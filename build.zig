@@ -28,17 +28,45 @@ pub fn build(b: *std.Build) !void {
     }));
 
     const abi = createAbi(b, &opts);
-
-    // build the bootstrap.bin
     const bootstrap_bin = createBootstrapBin(b, &opts, abi);
-
-    // build the kernel ELF
     const kernel_elf = createKernelElf(b, &opts, abi);
-
     const initfs_tar_gz = createInitfsTarGz(b, &opts, abi);
-
     const os_iso = createIso(b, kernel_elf, initfs_tar_gz, bootstrap_bin);
 
+    runQemu(b, &opts, os_iso);
+}
+
+const Opts = struct {
+    native_target: std.Build.ResolvedTarget,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    display: bool,
+    debug: u2,
+    use_ovmf: bool,
+    ovmf_fd: []const u8,
+    gdb: bool,
+    testing: bool,
+};
+
+fn options(b: *std.Build, target: std.Build.ResolvedTarget) Opts {
+    return .{
+        .native_target = b.standardTargetOptions(.{}),
+        .target = target,
+        .optimize = b.standardOptimizeOption(.{}),
+        .display = b.option(bool, "display", "QEMU gui true/false") orelse true,
+        .debug = b.option(u2, "debug", "QEMU debug level") orelse 1,
+        .use_ovmf = b.option(
+            bool,
+            "uefi",
+            "use OVMF UEFI to boot in QEMU (OVMF is slower, but has more features) (default: false)",
+        ) orelse false,
+        .ovmf_fd = b.option([]const u8, "ovmf", "OVMF.fd path") orelse "/usr/share/ovmf/x64/OVMF.fd",
+        .gdb = b.option(bool, "gdb", "use GDB") orelse false,
+        .testing = b.option(bool, "test", "include test runner") orelse false,
+    };
+}
+
+fn runQemu(b: *std.Build, opts: *const Opts, os_iso: std.Build.LazyPath) void {
     // run the os in qemu
     const qemu_step = b.addSystemCommand(&.{
         "qemu-system-x86_64",
@@ -85,15 +113,9 @@ pub fn build(b: *std.Build) !void {
     const debug = opts.debug;
     switch (debug) {
         0 => {},
-        1 => {
-            qemu_step.addArgs(&.{ "-d", "guest_errors" });
-        },
-        2 => {
-            qemu_step.addArgs(&.{ "-d", "cpu_reset,guest_errors" });
-        },
-        3 => {
-            qemu_step.addArgs(&.{ "-d", "int,cpu_reset,guest_errors" });
-        },
+        1 => qemu_step.addArgs(&.{ "-d", "guest_errors" }),
+        2 => qemu_step.addArgs(&.{ "-d", "cpu_reset,guest_errors" }),
+        3 => qemu_step.addArgs(&.{ "-d", "int,cpu_reset,guest_errors" }),
     }
 
     const use_ovmf = opts.use_ovmf;
@@ -107,41 +129,9 @@ pub fn build(b: *std.Build) !void {
         qemu_step.addArgs(&.{ "-s", "-S" });
     }
 
-    const install_iso = b.addInstallFile(os_iso, "os.iso");
-    b.getInstallStep().dependOn(&install_iso.step);
-
     const run_step = b.step("run", "Run in QEMU");
     run_step.dependOn(&qemu_step.step);
-}
-
-const Opts = struct {
-    native_target: std.Build.ResolvedTarget,
-    target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
-    display: bool,
-    debug: u2,
-    use_ovmf: bool,
-    ovmf_fd: []const u8,
-    gdb: bool,
-    testing: bool,
-};
-
-fn options(b: *std.Build, target: std.Build.ResolvedTarget) Opts {
-    return .{
-        .native_target = b.standardTargetOptions(.{}),
-        .target = target,
-        .optimize = b.standardOptimizeOption(.{}),
-        .display = b.option(bool, "display", "QEMU gui true/false") orelse true,
-        .debug = b.option(u2, "debug", "QEMU debug level") orelse 1,
-        .use_ovmf = b.option(
-            bool,
-            "uefi",
-            "use OVMF UEFI to boot in QEMU (OVMF is slower, but has more features) (default: false)",
-        ) orelse false,
-        .ovmf_fd = b.option([]const u8, "ovmf", "OVMF.fd path") orelse "/usr/share/ovmf/x64/OVMF.fd",
-        .gdb = b.option(bool, "gdb", "use GDB") orelse false,
-        .testing = b.option(bool, "test", "include test runner") orelse false,
-    };
+    run_step.dependOn(b.getInstallStep());
 }
 
 fn createIso(
@@ -185,6 +175,9 @@ fn createIso(
     wrapper_run.addDirectoryArg(wf.getDirectory());
     const os_iso = wrapper_run.addOutputFileArg("os.iso");
     wrapper_run.step.dependOn(&limine_step.step);
+
+    const install_iso = b.addInstallFile(os_iso, "os.iso");
+    b.getInstallStep().dependOn(&install_iso.step);
 
     return os_iso;
 }
