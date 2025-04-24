@@ -1,10 +1,8 @@
 <div align="center">
 
-# zig-kernel
+# hiillos
 
-zig-kernel is the [hyperion](https://github.com/hyperion-os/hyperion) kernel rewritten as a microkernel in pure Zig
-
-the name is very temporary
+hiillos is the [hyperion](https://github.com/hyperion-os/hyperion) kernel rewritten as a microkernel in pure Zig
 
 </div>
 
@@ -21,8 +19,6 @@ zig build # generates the os.iso in zig-out/os.iso
 ```
 
 ## Stuff included here
-
-Despite the name, this repo holds more than just the kernel
 
  - kernel: [src/kernel](/src/kernel)
  - bootstrap process: [src/bootstrap](src/bootstrap)
@@ -41,6 +37,7 @@ Every path is a URI, where the protocol part (proto://) tells the kernel, which 
   - [x] VMM
   - [x] GDT, TSS, IDT
   - [x] ACPI, APIC
+  - [ ] SMP
   - [x] user space
   - [ ] HPET
   - [x] scheduler
