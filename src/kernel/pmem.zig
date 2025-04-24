@@ -198,10 +198,9 @@ fn deallocate(refcount: *std.atomic.Value(u8)) void {
 
 //
 
-pub fn init() void {
+pub fn init() !void {
     if (IS_DEBUG and initialized) {
-        log.err("physical memory manager already initialized", .{});
-        return;
+        return error.PmmAlreadyInitialized;
     }
 
     printInfo();
@@ -210,8 +209,7 @@ pub fn init() void {
     var memory_top: usize = 0;
     var memory_bottom: usize = std.math.maxInt(usize);
     const memory_response: *limine.MemoryMapResponse = memory.response orelse {
-        log.err("no memory", .{});
-        arch.hcf();
+        return error.NoMemoryResponse;
     };
 
     for (memory_response.entries()) |memory_map_entry| {
@@ -255,8 +253,7 @@ pub fn init() void {
     }
     base_phys_page = addr.Phys.fromInt(memory_bottom).toParts().page;
     page_refcounts = page_refcounts_null orelse {
-        log.err("not enough contiguous memory", .{});
-        arch.hcf();
+        return error.NotEnoughContiguousMemory;
     };
     // log.err("page_refcounts at: {*}", .{page_refcounts});
     for (page_refcounts) |*r| {

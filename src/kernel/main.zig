@@ -75,7 +75,9 @@ pub fn main() noreturn {
     log.info("kernel git revision: {s}", .{comptime std.mem.trimRight(u8, @embedFile("git-rev"), "\n\r")});
 
     log.info("initializing physical memory allocator", .{});
-    pmem.init();
+    pmem.init() catch |err| {
+        std.debug.panic("failed to initialize PMM: {}", .{err});
+    };
 
     // boot up a few processors
     // arch.smp_init();
