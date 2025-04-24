@@ -2,7 +2,8 @@
 
 # hiillos
 
-hiillos is the [hyperion](https://github.com/hyperion-os/hyperion) kernel rewritten as a microkernel in pure Zig
+hiillos is an operating system with its own microkernel
+all written in pure Zig
 
 </div>
 
