@@ -1,5 +1,7 @@
 const std = @import("std");
 
+//
+
 pub fn build(b: *std.Build) !void {
     const Target = std.Target;
     const Feature = Target.x86.Feature;
@@ -17,27 +19,25 @@ pub fn build(b: *std.Build) !void {
     disabled_features.addFeature(@intFromEnum(Feature.avx2));
     disabled_features.addFeature(@intFromEnum(Feature.mmx));
 
-    const target = b.resolveTargetQuery(.{
+    const opts = options(b, b.resolveTargetQuery(.{
         .cpu_arch = .x86_64,
         .os_tag = .freestanding,
         .abi = .none,
         .cpu_features_add = enabled_features,
         .cpu_features_sub = disabled_features,
-    });
-    const native_target = b.standardTargetOptions(.{});
-    const optimize = b.standardOptimizeOption(.{});
+    }));
 
-    const abi = createAbi(b, target, optimize);
+    const abi = createAbi(b, &opts);
 
     // build the bootstrap.bin
-    const bootstrap_bin = createBootstrapBin(b, target, optimize, abi);
+    const bootstrap_bin = createBootstrapBin(b, &opts, abi);
 
     // build the kernel ELF
-    const kernel_elf = createKernelElf(b, target, optimize, abi);
+    const kernel_elf = createKernelElf(b, &opts, abi);
 
-    const initfs_tar_gz = createInitfsTarGz(target, optimize, abi, b);
+    const initfs_tar_gz = createInitfsTarGz(b, &opts, abi);
 
-    const os_iso = createIso(b, native_target, optimize, kernel_elf, initfs_tar_gz, bootstrap_bin);
+    const os_iso = createIso(b, kernel_elf, initfs_tar_gz, bootstrap_bin);
 
     // run the os in qemu
     const qemu_step = b.addSystemCommand(&.{
@@ -69,7 +69,7 @@ pub fn build(b: *std.Build) !void {
     });
     qemu_step.addPrefixedFileArg("format=raw,file=", os_iso);
 
-    const display = b.option(bool, "display", "QEMU gui true/false") orelse false;
+    const display = opts.display;
     if (display) {
         qemu_step.addArgs(&.{
             "-display",
@@ -82,7 +82,7 @@ pub fn build(b: *std.Build) !void {
         });
     }
 
-    const debug = b.option(u2, "debug", "QEMU debug level") orelse 1;
+    const debug = opts.debug;
     switch (debug) {
         0 => {},
         1 => {
@@ -96,17 +96,13 @@ pub fn build(b: *std.Build) !void {
         },
     }
 
-    const use_ovmf = b.option(
-        bool,
-        "uefi",
-        "use OVMF UEFI to boot in QEMU (OVMF is slower, but has more features) (default: false)",
-    ) orelse false;
+    const use_ovmf = opts.use_ovmf;
     if (use_ovmf) {
-        const ovmf_fd = std.posix.getenv("OVMF_FD") orelse "/usr/share/ovmf/x64/OVMF.fd";
+        const ovmf_fd = opts.ovmf_fd;
         qemu_step.addArgs(&.{ "-bios", ovmf_fd });
     }
 
-    const gdb = b.option(bool, "gdb", "use GDB") orelse false;
+    const gdb = opts.gdb;
     if (gdb) {
         qemu_step.addArgs(&.{ "-s", "-S" });
     }
@@ -118,16 +114,42 @@ pub fn build(b: *std.Build) !void {
     run_step.dependOn(&qemu_step.step);
 }
 
+const Opts = struct {
+    native_target: std.Build.ResolvedTarget,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    display: bool,
+    debug: u2,
+    use_ovmf: bool,
+    ovmf_fd: []const u8,
+    gdb: bool,
+    testing: bool,
+};
+
+fn options(b: *std.Build, target: std.Build.ResolvedTarget) Opts {
+    return .{
+        .native_target = b.standardTargetOptions(.{}),
+        .target = target,
+        .optimize = b.standardOptimizeOption(.{}),
+        .display = b.option(bool, "display", "QEMU gui true/false") orelse true,
+        .debug = b.option(u2, "debug", "QEMU debug level") orelse 1,
+        .use_ovmf = b.option(
+            bool,
+            "uefi",
+            "use OVMF UEFI to boot in QEMU (OVMF is slower, but has more features) (default: false)",
+        ) orelse false,
+        .ovmf_fd = b.option([]const u8, "ovmf", "OVMF.fd path") orelse "/usr/share/ovmf/x64/OVMF.fd",
+        .gdb = b.option(bool, "gdb", "use GDB") orelse false,
+        .testing = b.option(bool, "test", "include test runner") orelse false,
+    };
+}
+
 fn createIso(
     b: *std.Build,
-    native_target: std.Build.ResolvedTarget,
-    native_optimize: std.builtin.OptimizeMode,
     kernel_elf: std.Build.LazyPath,
     initfs_tar_gz: std.Build.LazyPath,
     bootstrap_bin: std.Build.LazyPath,
 ) std.Build.LazyPath {
-    _ = native_optimize; // autofix
-    _ = native_target; // autofix
 
     // clone & configure limine (WARNING: this runs a Makefile from a dependency at compile time)
     const limine_bootloader_pkg = b.dependency("limine_bootloader", .{});
@@ -168,17 +190,16 @@ fn createIso(
 }
 
 fn createInitfsTarGz(
-    target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
-    abi: *std.Build.Module,
     b: *std.Build,
+    opts: *const Opts,
+    abi: *std.Build.Module,
 ) std.Build.LazyPath {
     // create initfs:///sbin/init
     const init = b.addExecutable(.{
         .name = "init",
         .root_source_file = b.path("./src/init/main.zig"),
-        .target = target,
-        .optimize = optimize,
+        .target = opts.target,
+        .optimize = opts.optimize,
     });
     init.root_module.addImport("abi", abi);
     b.installArtifact(init);
@@ -207,8 +228,7 @@ fn createInitfsTarGz(
 
 fn createKernelElf(
     b: *std.Build,
-    target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
+    opts: *const Opts,
     abi: *std.Build.Module,
 ) std.Build.LazyPath {
     const git_rev_run = b.addSystemCommand(&.{ "git", "rev-parse", "HEAD" });
@@ -221,8 +241,8 @@ fn createKernelElf(
 
     const kernel_module = b.addModule("kernel", .{
         .root_source_file = b.path("src/kernel/main.zig"),
-        .target = target,
-        .optimize = optimize,
+        .target = opts.target,
+        .optimize = opts.optimize,
         .code_model = .kernel,
     });
     kernel_module.addImport("limine", b.dependency("limine", .{}).module("limine"));
@@ -230,7 +250,7 @@ fn createKernelElf(
     kernel_module.addImport("font", createFont(b));
     kernel_module.addImport("git-rev", git_rev_mod);
 
-    if (b.option(bool, "test", "include test runner") orelse false) {
+    if (opts.testing) {
         const testkernel_elf_step = b.addTest(.{
             .name = "kernel.elf",
             // .target = target,
@@ -268,15 +288,14 @@ fn createKernelElf(
 // create the embedded bootstrap.bin
 fn createBootstrapBin(
     b: *std.Build,
-    target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
+    opts: *const Opts,
     abi: *std.Build.Module,
 ) std.Build.LazyPath {
     const bootstrap_elf_step = b.addExecutable(.{
         .name = "bootstrap.elf",
         .root_source_file = b.path("./src/bootstrap/main.zig"),
-        .target = target,
-        .optimize = optimize,
+        .target = opts.target,
+        .optimize = opts.optimize,
     });
     bootstrap_elf_step.root_module.addImport("abi", abi);
     bootstrap_elf_step.setLinkerScript(b.path("./src/bootstrap/link.ld"));
@@ -296,11 +315,11 @@ fn createBootstrapBin(
 }
 
 // create the shared ABI library
-fn createAbi(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Module {
+fn createAbi(b: *std.Build, opts: *const Opts) *std.Build.Module {
     const mod = b.createModule(.{
         .root_source_file = b.path("./src/abi/lib.zig"),
-        .target = target,
-        .optimize = optimize,
+        .target = opts.target,
+        .optimize = opts.optimize,
     });
 
     mod.addAnonymousImport("build-zon", .{
