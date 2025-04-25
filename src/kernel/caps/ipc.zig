@@ -72,13 +72,16 @@ pub const Receiver = struct {
             return Error.Unimplemented;
         }
 
+        var msg = trap.readMessage();
+        msg.cap = 0; // call doesnt get to know the Receiver capability id
+
         thread.status = .waiting;
         thread.trap = trap.*;
-        const args = .{ trap.arg1, trap.arg2, trap.arg3, trap.arg4, trap.arg5 };
         self.sender.store(thread, .seq_cst);
         proc.switchTo(trap, sender);
-        trap.arg1, trap.arg2, trap.arg3, trap.arg4, trap.arg5 = args;
-        return trap.arg0;
+
+        trap.writeMessage(msg);
+        return 0;
     }
 };
 
@@ -106,12 +109,15 @@ pub const Sender = struct {
             return Error.Unimplemented;
         }
 
+        const msg = trap.readMessage();
+        // recv gets to know the Sender capability id (just the number)
+
         thread.status = .waiting;
         thread.trap = trap.*;
-        const args = .{ trap.arg1, trap.arg2, trap.arg3, trap.arg4, trap.arg5 };
         self.sender.store(thread, .seq_cst);
         proc.switchTo(trap, listener);
-        trap.arg1, trap.arg2, trap.arg3, trap.arg4, trap.arg5 = args;
+
+        trap.writeMessage(msg);
     }
 };
 
