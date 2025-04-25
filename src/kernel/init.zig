@@ -57,8 +57,29 @@ fn map_bootstrap(vmem_lvl4: *caps.PageTableLevel4, a: args.Args) !caps.Ref(caps.
     const low = addr.Virt.fromInt(abi.BOOTSTRAP_EXE);
     const high = addr.Virt.fromInt(abi.BOOTSTRAP_EXE + data_len);
 
+    const boot_info = try caps.Ref(caps.Frame).alloc();
+    const boot_info_ptr: *volatile abi.BootInfo = @ptrCast(boot_info.ptr());
+
+    boot_info_ptr.* = .{
+        .bootstrap_data = @ptrFromInt(abi.BOOTSTRAP_EXE),
+        .bootstrap_data_len = a.bootstrap_data.len,
+        .bootstrap_path = @ptrFromInt(abi.BOOTSTRAP_EXE + a.bootstrap_data.len),
+        .bootstrap_path_len = a.bootstrap_path.len,
+        .initfs_data = @ptrFromInt(abi.BOOTSTRAP_EXE + a.bootstrap_data.len + a.bootstrap_path.len),
+        .initfs_data_len = a.initfs_data.len,
+        .initfs_path = @ptrFromInt(abi.BOOTSTRAP_EXE + a.bootstrap_data.len + a.bootstrap_path.len + a.initfs_data.len),
+        .initfs_path_len = a.initfs_path.len,
+    };
+
     log.info("bootstrap virtual memory size: 0x{x}", .{data_len});
-    log.info("mapping user-space [ 0x{x:0>16}..0x{x:0>16} ]", .{ low.raw, high.raw });
+    log.info("mapping bootstrap [ 0x{x:0>16}..0x{x:0>16} ]", .{
+        @intFromPtr(boot_info_ptr.bootstrap_data),
+        @intFromPtr(boot_info_ptr.bootstrap_data) + boot_info_ptr.bootstrap_data_len,
+    });
+    log.info("mapping initfs    [ 0x{x:0>16}..0x{x:0>16} ]", .{
+        @intFromPtr(boot_info_ptr.initfs_data),
+        @intFromPtr(boot_info_ptr.initfs_data) + boot_info_ptr.initfs_data_len,
+    });
 
     var current = low;
     while (current.raw < high.raw) : (current.raw += addr.Virt.fromParts(.{ .level4 = 1 }).raw) {
@@ -125,20 +146,6 @@ fn map_bootstrap(vmem_lvl4: *caps.PageTableLevel4, a: args.Args) !caps.Ref(caps.
     }
 
     arch.flush_tlb();
-
-    const boot_info = try caps.Ref(caps.Frame).alloc();
-    const boot_info_ptr: *volatile abi.BootInfo = @ptrCast(boot_info.ptr());
-
-    boot_info_ptr.* = .{
-        .bootstrap_data = @ptrFromInt(abi.BOOTSTRAP_EXE),
-        .bootstrap_data_len = a.bootstrap_data.len,
-        .bootstrap_path = @ptrFromInt(abi.BOOTSTRAP_EXE + a.bootstrap_data.len),
-        .bootstrap_path_len = a.bootstrap_path.len,
-        .initfs_data = @ptrFromInt(abi.BOOTSTRAP_EXE + a.bootstrap_data.len + a.bootstrap_path.len),
-        .initfs_data_len = a.initfs_data.len,
-        .initfs_path = @ptrFromInt(abi.BOOTSTRAP_EXE + a.bootstrap_data.len + a.bootstrap_path.len + a.initfs_data.len),
-        .initfs_path_len = a.initfs_path.len,
-    };
 
     log.info("copying bootstrap data", .{});
     std.mem.copyForwards(
