@@ -103,7 +103,7 @@ const Image = struct {
 
 pub const BmpError = error{
     UnexpectedEof,
-    InvalidIndentifier,
+    InvalidIdentifier,
     UnexpectedSize,
 };
 
@@ -211,7 +211,7 @@ fn parse_bmp(bmp: []const u8) !Image {
     }
 
     if (bmp_header.ident != 0x4D42) {
-        return BmpError.InvalidIndentifier;
+        return BmpError.InvalidIdentifier;
     }
 
     if (bmp.len < bmp_header.offs + dib_header.image_size) {
