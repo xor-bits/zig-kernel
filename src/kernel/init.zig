@@ -80,6 +80,8 @@ fn map_bootstrap(vmem_lvl4: *caps.PageTableLevel4, a: args.Args) !caps.Ref(caps.
         @intFromPtr(boot_info_ptr.initfs_data),
         @intFromPtr(boot_info_ptr.initfs_data) + boot_info_ptr.initfs_data_len,
     });
+    log.info("bootstrap binary path: '{s}'", .{a.bootstrap_path});
+    log.info("initfs path:           '{s}'", .{a.initfs_path});
 
     var current = low;
     while (current.raw < high.raw) : (current.raw += addr.Virt.fromParts(.{ .level4 = 1 }).raw) {
@@ -172,13 +174,7 @@ fn map_bootstrap(vmem_lvl4: *caps.PageTableLevel4, a: args.Args) !caps.Ref(caps.
         a.initfs_path,
     );
 
-    log.info("bootstrap binary addr: {*}", .{boot_info_ptr.bootstrapData().ptr});
-    log.info("bootstrap binary size: {}", .{boot_info_ptr.bootstrapData().len});
-    log.info("bootstrap binary path: '{s}'", .{boot_info_ptr.bootstrapPath()});
-    log.info("initfs addr: {*}", .{boot_info_ptr.initfsData().ptr});
-    log.info("initfs size: {}", .{boot_info_ptr.initfsData().len});
-    log.info("initfs path: '{s}'", .{boot_info_ptr.initfsPath()});
-
+    log.info("bootstrap mapped and copied", .{});
     return boot_info;
 }
 
