@@ -88,7 +88,7 @@ fn map_bootstrap(vmem_lvl4: *caps.PageTableLevel4, a: args.Args) !caps.Ref(caps.
         // log.info("mapping level 4 entry", .{});
 
         try vmem_lvl4.map_level3(
-            try alloc(1),
+                (try caps.Ref(caps.Frame).alloc()).paddr,
             current,
             .{
                 .readable = true,
@@ -104,7 +104,7 @@ fn map_bootstrap(vmem_lvl4: *caps.PageTableLevel4, a: args.Args) !caps.Ref(caps.
         // log.info("mapping level 3 entry", .{});
 
         try vmem_lvl4.map_level2(
-            try alloc(1),
+                (try caps.Ref(caps.Frame).alloc()).paddr,
             current,
             .{
                 .readable = true,
@@ -120,7 +120,7 @@ fn map_bootstrap(vmem_lvl4: *caps.PageTableLevel4, a: args.Args) !caps.Ref(caps.
         // log.info("mapping level 2 entry", .{});
 
         try vmem_lvl4.map_level1(
-            try alloc(1),
+                (try caps.Ref(caps.Frame).alloc()).paddr,
             current,
             .{
                 .readable = true,
@@ -136,7 +136,7 @@ fn map_bootstrap(vmem_lvl4: *caps.PageTableLevel4, a: args.Args) !caps.Ref(caps.
         // log.info("mapping level 1 entry", .{});
 
         try vmem_lvl4.map_frame(
-            try alloc(1),
+                (try caps.Ref(caps.Frame).alloc()).paddr,
             current,
             .{
                 .readable = true,
@@ -176,53 +176,4 @@ fn map_bootstrap(vmem_lvl4: *caps.PageTableLevel4, a: args.Args) !caps.Ref(caps.
 
     log.info("bootstrap mapped and copied", .{});
     return boot_info;
-}
-
-pub fn alloc(pages: usize) Error!addr.Phys {
-    if (comptime false) {
-        const memory = undefined;
-        const response = memory.response orelse return Error.OutOfMemory;
-
-        const bytes = pages * 0x1000;
-
-        // find the pages from aligned entries first
-        for (response.entries()) |entry| {
-            // only usable entries are usable
-            if (entry.kind != .usable) continue;
-            // only aligned entries are usable
-            if (!std.mem.isAligned(entry.base, 0x1000)) continue;
-            // only entries larger than the requested amount are usable
-            if (entry.length < bytes) continue;
-
-            const paddr = addr.Phys.fromInt(entry.base);
-
-            entry.base += bytes;
-            entry.length -= bytes;
-
-            return paddr;
-        }
-
-        // find the pages from non-aligned entries then
-        for (response.entries()) |entry| {
-            // only usable entries are usable
-            if (entry.kind != .usable) continue;
-            // only non-aligned entries are usable
-            const base = std.mem.alignForward(usize, entry.base, 0x1000);
-            if (base >= entry.base + entry.length) continue;
-            const length = base + entry.length - entry.base;
-            // only entries larger than the requested amount are usable
-            if (length < bytes) continue;
-
-            const paddr = addr.Phys.fromInt(entry.base);
-
-            entry.base = base - bytes;
-            entry.length = length - bytes;
-
-            return paddr;
-        }
-
-        return Error.OutOfMemory;
-    } else {
-        return addr.Virt.fromPtr(pmem.alloc() orelse return Error.OutOfMemory).hhdmToPhys();
-    }
 }

@@ -229,13 +229,9 @@ pub fn Ref(comptime T: type) type {
             if (!T.canAlloc())
                 return Error.InvalidType;
 
-            const N_PAGES = comptime std.math.divCeil(usize, @sizeOf(T), 0x1000) catch unreachable;
-
-            const paddr = if (@sizeOf(T) == 0)
-                addr.Phys.fromInt(0)
-            else
-                try @import("init.zig").alloc(N_PAGES);
-            const obj = Self{ .paddr = paddr };
+            const obj = Self{
+                .paddr = pmem.alloc(@sizeOf(T)) orelse return Error.OutOfMemory,
+            };
             obj.ptr().init();
 
             return obj;

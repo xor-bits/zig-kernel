@@ -5,7 +5,7 @@ const limine = @import("limine");
 const apic = @import("../apic.zig");
 const addr = @import("../addr.zig");
 const main = @import("../main.zig");
-const init = @import("../init.zig");
+const pmem = @import("../pmem.zig");
 
 const log = std.log.scoped(.arch);
 
@@ -29,8 +29,7 @@ var next: std.atomic.Value(usize) = .init(0);
 //
 
 pub fn init_cpu(id: u32) !void {
-    const tls_mem = try init.alloc(try std.math.divCeil(usize, @sizeOf(main.CpuLocalStorage), 0x1000));
-    const tls = tls_mem.toHhdm().toPtr(*main.CpuLocalStorage);
+    const tls = try pmem.page_allocator.create(main.CpuLocalStorage);
     tls.* = .{
         .self_ptr = tls,
         .cpu_config = undefined,
@@ -487,14 +486,14 @@ pub const Tss = extern struct {
     iomap_base: u16 = @sizeOf(@This()), // no iomap base
 
     fn new() !@This() {
-        const Stack = [8 * 0x1000]u8;
+        const Stack = [0x8000]u8;
 
         var res = @This(){};
 
-        var stack: addr.Phys = try init.alloc(8);
-        res.privilege_stacks[0] = @sizeOf(Stack) + @intFromPtr(stack.toHhdm().toPtr(*Stack));
-        stack = try init.alloc(8);
-        res.interrupt_stacks[0] = @sizeOf(Stack) + @intFromPtr(stack.toHhdm().toPtr(*Stack));
+        var stack: *Stack = try pmem.page_allocator.create(Stack);
+        res.privilege_stacks[0] = @sizeOf(Stack) + @intFromPtr(stack);
+        stack = try pmem.page_allocator.create(Stack);
+        res.interrupt_stacks[0] = @sizeOf(Stack) + @intFromPtr(stack);
 
         return res;
     }

@@ -86,7 +86,7 @@ pub fn growCapArray() u32 {
 }
 
 fn alloc_page() addr.Phys {
-    return addr.Virt.fromPtr(pmem.alloc() orelse std.debug.panic("OOM", .{})).hhdmToPhys();
+    return pmem.alloc(0x1000) orelse std.debug.panic("OOM", .{});
 }
 
 fn nextLevel(current: *[512]Entry, i: u9) Error!addr.Phys {

@@ -57,6 +57,11 @@ pub fn printInfo() void {
         log.info("{s:>22}: [ 0x{x:0>16}..0x{x:0>16} ]", .{ ty, from, to });
     }
 
+    var overhead: usize = 0;
+    for (bitmaps) |level| {
+        overhead = level.bitmap.len * @sizeOf(u64);
+    }
+
     log.info("usable memory: {0any}B ({0any:.1024}B)", .{
         util.NumberPrefix(usize, .binary).new(usable_memory),
     });
@@ -64,11 +69,35 @@ pub fn printInfo() void {
         util.NumberPrefix(usize, .binary).new(reclaimable),
     });
     log.info("page allocator overhead: {any}B", .{
-        util.NumberPrefix(usize, .binary).new(page_refcounts.len),
+        util.NumberPrefix(usize, .binary).new(overhead),
     });
     log.info("kernel code overhead: {any}B", .{
         util.NumberPrefix(usize, .binary).new(kernel_usage),
     });
+}
+
+pub fn printBits(comptime print: bool) usize {
+    var total_unused: usize = 0;
+    for (bitmaps, 0..) |level, i| {
+        var unused: usize = 0;
+        for (level.bitmap) |*bucket| {
+            unused += @popCount(bucket.load(.unordered));
+        }
+        total_unused += unused * (@as(usize, 0x1000) << @truncate(i));
+
+        if (print)
+            log.info("free {}B chunks: {}", .{
+                util.NumberPrefix(usize, .binary).new(@as(usize, 0x1000) << @truncate(i)),
+                unused,
+            });
+    }
+
+    if (print)
+        log.info("total free: {}B", .{
+            util.NumberPrefix(usize, .binary).new(total_unused),
+        });
+
+    return total_unused;
 }
 
 pub fn usedPages() usize {
@@ -88,15 +117,26 @@ pub fn totalPages() usize {
 /// tells if the frame allocator can be used already (debugging)
 var initialized = if (IS_DEBUG) false else void{};
 
-/// base physical page from where the refcount array starts from
-var base_phys_page: u32 = undefined;
+/// approximately 2 bits for each 4KiB page to track
+/// 4KiB, 8KiB, 16KiB, 32KiB, .. 2MiB, 4MiB, .., 512MiB and 1GiB chunks
+///
+/// 1 bit to tell if the chunk is free or allocated
+/// and each chunk (except 4KiB) has 2 chunks 'under' it
+var bitmaps: [18]Level = b: {
+    var tmp: [18]Level = undefined;
+    @memset(&tmp, .{});
+    break :b tmp;
+};
 
-/// each page has a ref counter, 0 = not allocated, N = N process(es) is using it
-var page_refcounts: []std.atomic.Value(u8) = undefined;
+const Level = struct {
+    bitmap: []std.atomic.Value(u64) = &.{},
 
-/// just an atomic index hint to rotate around the memory instead of starting the
-/// finding process from 0 every time, because pages arent usually freed almost instantly
-var next = std.atomic.Value(u32).init(0);
+    // avail: std.atomic.Value(u32) = .init(0),
+
+    /// just an atomic index hint to rotate around the memory instead of starting the
+    /// finding process from 0 every time, because pages arent usually freed almost instantly
+    next: std.atomic.Value(u32) = .init(0),
+};
 
 /// how many pages are currently in use (approx)
 var used = std.atomic.Value(u32).init(0);
@@ -104,96 +144,134 @@ var used = std.atomic.Value(u32).init(0);
 /// how many pages are usable
 var usable = std.atomic.Value(u32).init(0);
 
-fn allocateContiguous(n_pages: u32) ?[]Page {
-    const hint: u32 = @truncate(next.fetchAdd(n_pages, .monotonic) % page_refcounts.len);
+const ChunkSize = enum(u5) {
+    @"4KiB",
+    @"8KiB",
+    @"16KiB",
+    @"32KiB",
+    @"64KiB",
+    @"128KiB",
+    @"256KiB",
+    @"512KiB",
+    @"1MiB",
+    @"2MiB",
+    @"4MiB",
+    @"8MiB",
+    @"16MiB",
+    @"32MiB",
+    @"64MiB",
+    @"128MiB",
+    @"256MiB",
+    @"512MiB",
+    @"1GiB",
 
-    if (allocateContiguousFrom(n_pages, hint)) |pages| {
-        return pages;
+    fn next(self: @This()) ?@This() {
+        return std.meta.intToEnum(@This(), @intFromEnum(self) + 1) catch return null;
     }
 
-    if (allocateContiguousFrom(0, hint)) |pages| {
-        return pages;
+    fn sizeBytes(self: @This()) usize {
+        return @as(usize, 0x1000) << @intFromEnum(self);
     }
+};
 
-    log.err("OOM", .{});
-    return null;
+fn chunkSize(n_bytes: usize) ?ChunkSize {
+    // 0 = 4KiB, 1 = 8KiB, ..
+    const page_size = @max(12, std.math.log2_int_ceil(usize, n_bytes)) - 12;
+    if (page_size >= 18) return null;
+    return @enumFromInt(page_size);
 }
 
-fn allocateContiguousFrom(n_pages: u32, from: u32) ?[]Page {
-    const total_pages = page_refcounts.len;
-    var first_page = from;
+fn allocChunk(size: ChunkSize) ?addr.Phys {
+    if (debug_assert_initialized()) return null;
+
+    const bitmap: []std.atomic.Value(u64) = bitmaps[@intFromEnum(size)].bitmap;
+    for (bitmap, 0..) |*bucket, i| {
+        // bucket contains 64 bits, each controlling one chunk
+
+        // quickly skip over 64 chunks at a time if none of them is free
+        const now = bucket.load(.acquire);
+        if (now == 0) continue;
+        const lowest = now & (~now + 1);
+
+        std.debug.assert(@popCount(lowest) == 1);
+        const now2 = bucket.fetchAnd(~lowest, .acquire);
+
+        if (now2 & lowest != 0) {
+            // success: bit set to 0 from 1 before anyone else
+            return addr.Phys.fromInt((std.math.log2_int(u64, lowest) + 64 * i) * size.sizeBytes());
+        }
+    }
+
+    // NOTE: the max recursion is controlled by `ChunkSize`
+    const parent_chunk = allocChunk(size.next() orelse return null) orelse return null;
+    // split it in 2, free the first one and return the second
+
+    const chunk_id = parent_chunk.raw / size.sizeBytes();
+    const bucket_id = chunk_id / 64;
+    const bit_id: u6 = @truncate(chunk_id % 64);
+
+    const bucket = &bitmap[bucket_id];
+    _ = bucket.fetchOr(@as(usize, 1) << bit_id, .monotonic); // maybe monotonic instead of release, because nothing is written into it
+
+    return addr.Phys.fromInt(parent_chunk.raw + size.sizeBytes());
+}
+
+fn deallocChunk(ptr: addr.Phys, size: ChunkSize) void {
+    // if the buddy chunk is also free, allocate it and free the parent chunk
+    // if the buddy chunk is not free, then just free the current chunk
+    //
+    // illustration: (0=allocated, left side is the buddy and right side is the current chunk)
+    // 00 -> 01 (parent: 0->0), 10 -> 00 (parent: 0->1)
+
+    if (debug_assert_initialized()) return;
+
+    const chunk_id = ptr.raw / size.sizeBytes();
+    const bucket_id = chunk_id / 64;
+    const bit_id: u6 = @truncate(chunk_id % 64);
+
+    const bitmap: []std.atomic.Value(u64) = bitmaps[@intFromEnum(size)].bitmap;
+    const bucket = &bitmap[bucket_id];
+
+    std.debug.assert((bucket.load(.acquire) & (@as(usize, 1) << bit_id)) == 0);
+
+    // 2 cases:
+    // the buddy is on the right side
+    // the buddy is on the left side
+    const buddy_id: u6 = if (bit_id % 2 == 0) bit_id + 1 else bit_id - 1;
+
+    // if (size == .@"4KiB") {
+    //     log.info("freeing chunk_id={} bucket_id={} bit_id={} buddy_id={}", .{
+    //         chunk_id, bucket_id, bit_id, buddy_id,
+    //     });
+    // }
+    // log.info("freeing {}", .{size});
+
+    const next_size = size.next() orelse size;
+    const is_next_size = size.next() != null;
 
     while (true) {
-        if (total_pages < first_page + n_pages) {
-            return null;
-        }
+        const now = bucket.load(.acquire);
 
-        // lock pages in a reverse order
-        for (0..n_pages) |_i| {
-            const i: u32 = @truncate(n_pages - _i - 1);
-            const page = first_page + i;
+        if ((now & (@as(usize, 1) << buddy_id)) != 0 and is_next_size) {
+            // buddy is free => allocate the buddy and free the parent
 
-            if (!allocate(&page_refcounts[page])) {
-                // one couldn't be allocated
-                // deallocate everything that was allocated and move on
-                for (0.._i) |_j| {
-                    const j: u32 = @truncate(n_pages - _j - 1);
-                    const extra_page = first_page + j;
-
-                    // TODO: deallocaton isn't needed here,
-                    // the next slot allocates these immediately again
-                    deallocate(&page_refcounts[extra_page]);
-                }
-
-                first_page += i + 1;
-                break;
+            if (null == bucket.cmpxchgWeak(now, now & ~(@as(usize, 1) << buddy_id), .release, .monotonic)) {
+                const parent_ptr = addr.Phys.fromInt(std.mem.alignBackward(usize, ptr.raw, next_size.sizeBytes()));
+                deallocChunk(parent_ptr, next_size);
+                return; // tail call optimization hopefully?
             }
-        } else {
-            _ = used.fetchAdd(n_pages, .monotonic);
 
-            const pages = addr.Phys.fromParts(.{ .page = base_phys_page + first_page }).toHhdm().toPtr([*]Page);
-            return pages[0..n_pages];
+            // retry when some other bit was changed or a sporadic failure happened
+        } else {
+            // buddy is allocated => free the current
+
+            if (null == bucket.cmpxchgWeak(now, now | (@as(usize, 1) << bit_id), .release, .monotonic)) {
+                return;
+            }
+
+            // retry when some other bit was changed or a sporadic failure happened
         }
     }
-
-    // for (0..page_refcounts.len) |_i| {
-    //     ;
-    // }
-}
-
-fn toRefcntIndex(page_index: u32) !usize {
-    if (page_index < base_phys_page) {
-        @branchHint(.cold);
-        return error.OutOfBounds;
-    }
-
-    return page_index - base_phys_page;
-}
-
-fn deallocateContiguous(pages: []Page) void {
-    for (pages) |*page| {
-        const page_i = toRefcntIndex(addr.Virt.fromPtr(page).hhdmToPhys().toParts().page) catch unreachable;
-        deallocate(&page_refcounts[page_i]);
-    }
-
-    _ = used.fetchSub(pages.len, .monotonic);
-}
-
-fn deallocateContiguousZeroed(pages: []Page) void {
-    for (pages) |*page| {
-        const page_i = toRefcntIndex(addr.Virt.fromPtr(page).hhdmToPhys().toParts().page) catch unreachable;
-        deallocate(&page_refcounts[page_i]);
-    }
-
-    _ = used.fetchSub(@truncate(pages.len), .monotonic);
-}
-
-fn allocate(refcount: *std.atomic.Value(u8)) bool {
-    return null == refcount.cmpxchgStrong(0, 1, .acquire, .monotonic);
-}
-
-fn deallocate(refcount: *std.atomic.Value(u8)) void {
-    refcount.store(0, .release);
 }
 
 //
@@ -207,7 +285,6 @@ pub fn init() !void {
 
     var usable_memory: usize = 0;
     var memory_top: usize = 0;
-    var memory_bottom: usize = std.math.maxInt(usize);
     const memory_response: *limine.MemoryMapResponse = memory.response orelse {
         return error.NoMemoryResponse;
     };
@@ -216,7 +293,6 @@ pub fn init() !void {
         // const from = std.mem.alignBackward(usize, memory_map_entry.base, 1 << 12);
         // const to = std.mem.alignForward(usize, memory_map_entry.base + memory_map_entry.length, 1 << 12);
         // const len = to - from;
-        const from = memory_map_entry.base;
         const to = memory_map_entry.base + memory_map_entry.length;
         const len = memory_map_entry.length;
 
@@ -225,107 +301,148 @@ pub fn init() !void {
 
         if (memory_map_entry.kind == .usable) {
             usable_memory += len;
-            memory_bottom = @min(from, memory_bottom);
             memory_top = @max(to, memory_top);
         } else if (memory_map_entry.kind == .bootloader_reclaimable) {
-            memory_bottom = @min(from, memory_bottom);
             memory_top = @max(to, memory_top);
         }
     }
 
-    const memory_pages = (memory_top - memory_bottom) >> 12;
-    const page_refcounts_len: usize = memory_pages / @sizeOf(u8); // u8 is the physical page refcounter for forks
+    log.info("allocating bitmaps", .{});
+    for (&bitmaps, 0..) |*level, i| {
+        const bits = memory_top >> @truncate(12 + i);
+        if (bits == 0) continue;
 
-    var page_refcounts_null: ?[]std.atomic.Value(u8) = null;
-    for (memory_response.entries()) |memory_map_entry| {
-        if (memory_map_entry.kind != .usable) {
-            continue;
-        }
+        // log.debug("bits for {}B chunks: {}", .{
+        //     util.NumberPrefix(usize, .binary).new(@as(usize, 0x1000) << @truncate(i)),
+        //     bits,
+        // });
 
-        if (memory_map_entry.length >= page_refcounts_len) {
-            const ptr: [*]std.atomic.Value(u8) = addr.Phys.fromInt(memory_map_entry.base)
-                .toHhdm().toPtr([*]std.atomic.Value(u8));
-            page_refcounts_null = ptr[0..page_refcounts_len];
-            memory_map_entry.base += page_refcounts_len;
-            memory_map_entry.length -= page_refcounts_len;
-            break;
-        }
+        const bytes = std.math.divCeil(usize, bits, 8) catch bits / 8;
+        const buckets = std.math.divCeil(usize, bytes, 8) catch bytes / 8;
+
+        const bitmap_bytes = initAlloc(memory_response.entries(), buckets * @sizeOf(u64), @alignOf(u64)) orelse {
+            return error.NotEnoughContiguousMemory;
+        };
+        const bitmap: []std.atomic.Value(u64) = @as([*]std.atomic.Value(u64), @alignCast(@ptrCast(bitmap_bytes)))[0..buckets];
+
+        // log.info("bitmap from 0x{x} to 0x{x}", .{
+        //     @intFromPtr(bitmap.ptr),
+        //     @intFromPtr(bitmap.ptr) + bitmap.len * @sizeOf(std.atomic.Value(u64)),
+        // });
+
+        // fill with zeroes, so that everything is allocated
+        std.crypto.secureZero(u64, @ptrCast(bitmap));
+
+        level.* = .{
+            .bitmap = bitmap,
+        };
     }
-    base_phys_page = addr.Phys.fromInt(memory_bottom).toParts().page;
-    page_refcounts = page_refcounts_null orelse {
-        return error.NotEnoughContiguousMemory;
-    };
-    // log.err("page_refcounts at: {*}", .{page_refcounts});
-    for (page_refcounts) |*r| {
-        r.store(1, .seq_cst);
-    }
 
-    // log.err("zeroed", .{});
+    initialized = if (comptime IS_DEBUG) true else void{};
+
+    log.info("freeing usable memory", .{});
     for (memory_response.entries()) |memory_map_entry| {
         if (memory_map_entry.kind == .usable) {
-            const first_page = toRefcntIndex(addr.Phys.fromInt(memory_map_entry.base).toParts().page) catch unreachable;
+            // FIXME: a faster way would be to repeatedly deallocate chunks
+            // from smallest to biggest and then to smallest again
+            // ex: 1,2,3,7,8,8,8,8,8,8,8,8,8,8,5,4,1
+
+            const base = std.mem.alignForward(usize, memory_map_entry.base, 0x1000);
+            const waste = base - memory_map_entry.base;
+            memory_map_entry.base += waste;
+            memory_map_entry.length -= waste;
+            memory_map_entry.length = std.mem.alignBackward(usize, memory_map_entry.length, 0x1000);
+
+            const first_page: u32 = addr.Phys.fromInt(memory_map_entry.base).toParts().page;
             const n_pages: u32 = @truncate(memory_map_entry.length >> 12);
             for (first_page..first_page + n_pages) |page| {
-                page_refcounts[page].store(0, .seq_cst);
+                deallocChunk(addr.Phys.fromParts(.{ .page = @truncate(page) }), .@"4KiB");
             }
 
             _ = usable.fetchAdd(n_pages, .monotonic);
         }
     }
+}
 
-    initialized = if (comptime IS_DEBUG) true else void{};
+fn initAlloc(entries: []*limine.MemoryMapEntry, size: usize, alignment: usize) ?[*]u8 {
+    for (entries) |memory_map_entry| {
+        if (memory_map_entry.kind != .usable) {
+            continue;
+        }
+
+        const base = std.mem.alignForward(usize, memory_map_entry.base, alignment);
+        const wasted = base - memory_map_entry.base;
+        if (wasted + size > memory_map_entry.length) continue;
+
+        memory_map_entry.length -= wasted + size;
+        memory_map_entry.base = base + size;
+
+        // log.debug("init alloc 0x{x} B from 0x{x}", .{ size, base });
+
+        return addr.Phys.fromInt(base).toHhdm().toPtr([*]u8);
+    }
+
+    return null;
 }
 
 //
 
-pub fn alloc() ?*Page {
-    if (debug_assert_initialized()) return null;
+pub fn alloc(size: usize) ?addr.Phys {
+    if (size == 0)
+        return addr.Phys.fromInt(0);
 
-    const pages = allocateContiguous(1) orelse return null;
-    return @ptrCast(pages.ptr);
+    const _size = chunkSize(size) orelse return null;
+    const paddr = allocChunk(_size) orelse return null;
+    // log.info("alloc {} @ 0x{x}", .{ _size, paddr.raw });
+
+    if (IS_DEBUG) {
+        std.debug.assert(isInUsable(paddr, size));
+        std.crypto.secureZero(u64, paddr.toHhdm().toPtr([*]volatile u64)[0..512]);
+    }
+
+    return paddr;
 }
 
-pub fn free(p: *Page) void {
-    if (debug_assert_initialized()) return;
-
-    const pages: [*]Page = @ptrCast(p);
-    deallocateContiguousZeroed(pages[0..1]);
+pub fn free(chunk: addr.Phys, size: usize) void {
+    return deallocChunk(chunk, chunkSize(size) orelse {
+        log.err("trying to free a chunk that could not have been allocated", .{});
+        return;
+    });
 }
 
-fn _alloc(_: *anyopaque, len: usize, _: std.mem.Alignment, _: usize) ?[*]u8 {
-    if (debug_assert_initialized()) return null;
+fn isInUsable(paddr: addr.Phys, size: usize) bool {
+    for (memory.response.?.entries()) |entry| {
+        if (entry.kind != .usable) continue;
 
-    const aligned_len = std.mem.alignForward(usize, len, 1 << 12);
+        if (paddr.raw >= entry.base and paddr.raw + size <= entry.base + entry.length) {
+            return true;
+        }
+    }
 
-    const pages: []Page = allocateContiguous(@truncate(aligned_len >> 12)) orelse {
-        return null;
-    };
-
-    return @ptrCast(pages.ptr);
-}
-
-fn _resize(_: *anyopaque, buf: []u8, buf_align: std.mem.Alignment, new_len: usize, ret_addr: usize) bool {
-    if (debug_assert_initialized()) return false;
-
-    _ = .{ buf, buf_align, new_len, ret_addr };
-    // log.err("FIXME: resize", .{});
-    // TODO:
     return false;
 }
 
-fn _free(_: *anyopaque, buf: []u8, buf_align: std.mem.Alignment, ret_addr: usize) void {
-    if (debug_assert_initialized()) return;
-
-    _ = .{ buf_align, ret_addr };
-
-    const aligned_len = std.mem.alignForward(usize, buf.len, 1 << 12);
-    const page: [*]Page = @alignCast(@ptrCast(buf.ptr));
-    const pages = page[0 .. aligned_len >> 12];
-    deallocateContiguousZeroed(pages);
+fn _alloc(_: *anyopaque, len: usize, _: std.mem.Alignment, _: usize) ?[*]u8 {
+    const paddr = alloc(len) orelse return null;
+    return paddr.toHhdm().toPtr([*]u8);
 }
 
-fn _remap(_: *anyopaque, _: []u8, _: std.mem.Alignment, _: usize, _: usize) ?[*]u8 {
+fn _resize(_: *anyopaque, buf: []u8, _: std.mem.Alignment, new_len: usize, _: usize) bool {
+    const chunk_size = chunkSize(buf.len) orelse return false;
+    if (chunk_size.sizeBytes() >= new_len) return true;
+    return false;
+}
+
+fn _free(_: *anyopaque, buf: []u8, _: std.mem.Alignment, _: usize) void {
+    free(addr.Virt.fromPtr(buf.ptr).hhdmToPhys(), buf.len);
+}
+
+fn _remap(_: *anyopaque, buf: []u8, _: std.mem.Alignment, new_len: usize, _: usize) ?[*]u8 {
     // physical memory cant be remapped
+
+    const chunk_size = chunkSize(buf.len) orelse return null;
+    if (chunk_size.sizeBytes() >= new_len) return buf.ptr;
+
     return null;
 }
 
@@ -338,4 +455,39 @@ fn debug_assert_initialized() bool {
     } else {
         return false;
     }
+}
+
+test "no collisions" {
+    const unused_before = printBits(false);
+    var pages: [0x1000]?*Page = undefined;
+
+    // allocate all 4096 pages
+    for (&pages) |*page| {
+        page.* = page_allocator.create(Page) orelse null;
+    }
+
+    // zero all of them
+    for (&pages) |_page| {
+        const page = _page orelse continue;
+        std.crypto.secureZero(u64, @ptrCast(page[0..]));
+    }
+
+    // check for duplicates
+    for (&pages) |_page| {
+        // check for duplicates (non-null)
+        const page = _page orelse continue;
+        var dupe_count: usize = 0;
+        for (&pages) |page2| {
+            if (page == page2) dupe_count += 1;
+        }
+        try std.testing.expect(dupe_count == 1);
+    }
+
+    // free all of them
+    for (&pages) |_page| {
+        const page = _page orelse continue;
+        free(page);
+    }
+
+    try std.testing.expect(unused_before == printBits(false));
 }
