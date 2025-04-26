@@ -59,19 +59,9 @@ pub const ObjectType = enum(u8) {
     /// capability to manage a single thread control block (TCB)
     thread,
     /// capability to the virtual memory structure
-    page_table_level_4,
-    /// capability to an intermediate virtual memory structure
-    page_table_level_3,
-    /// capability to an intermediate virtual memory structure
-    page_table_level_2,
-    /// capability to an intermediate virtual memory structure
-    page_table_level_1,
+    vmem,
     /// capability to a 4KiB physical page
     frame,
-    /// capability to a 2MiB physical page
-    huge_frame,
-    /// capability to a 1GiB physical page
-    giant_frame,
     /// capability to **the** receiver end of an endpoint,
     /// there can only be a single receiver
     receiver,

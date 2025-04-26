@@ -4,6 +4,7 @@ const std = @import("std");
 const addr = @import("../addr.zig");
 const arch = @import("../arch.zig");
 const caps = @import("../caps.zig");
+const pmem = @import("../pmem.zig");
 
 const log = std.log.scoped(.caps);
 const Error = abi.sys.Error;
@@ -56,116 +57,7 @@ pub const Frame = struct {
         std.crypto.secureZero(u64, @ptrCast(self.data[0..]));
     }
 
-    pub fn call(paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
-        const msg = trap.readMessage();
-
-        const call_id = std.meta.intToEnum(abi.sys.FrameCallId, msg.arg0) catch {
-            return Error.InvalidArgument;
-        };
-
-        if (caps.LOG_OBJ_CALLS)
-            log.debug("frame call \"{s}\" msg={}", .{ @tagName(call_id), msg });
-
-        defer if (caps.LOG_OBJ_CALLS)
-            log.debug("frame call complete", .{});
-
-        switch (call_id) {
-            .map => {
-                const vmem = try (try caps.get_capability(thread, @truncate(msg.arg1))).as(caps.PageTableLevel4);
-                const vaddr = try addr.Virt.fromUser(msg.arg2);
-                const rights: abi.sys.Rights = @bitCast(@as(u32, @truncate(msg.arg3)));
-                const flags: abi.sys.MapFlags = @bitCast(@as(u40, @truncate(msg.arg4)));
-
-                // log.info("mapping 0x{x} to 0x{x} {} {}", .{ paddr.raw, vaddr.raw, rights, flags });
-                try vmem.ptr().map_frame(paddr, vaddr, rights, flags);
-                arch.flush_tlb_addr(vaddr.raw);
-            },
-        }
-    }
-};
-
-/// a `PageTableLevel2` points to multiple of these
-///
-/// raw physical memory again, but now mappable
-/// (and can't be used to allocate things)
-pub const HugeFrame = struct {
-    data: [512 * 512]u64 align(0x1000),
-
-    pub fn canAlloc() bool {
-        return true;
-    }
-
-    pub fn init(self: *@This()) void {
-        std.crypto.secureZero(u64, @ptrCast(self.data[0..]));
-    }
-
-    pub fn call(paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
-        const msg = trap.readMessage();
-
-        const call_id = std.meta.intToEnum(abi.sys.FrameCallId, msg.arg0) catch {
-            return Error.InvalidArgument;
-        };
-
-        if (caps.LOG_OBJ_CALLS)
-            log.debug("huge frame call \"{s}\" msg={}", .{ @tagName(call_id), msg });
-
-        defer if (caps.LOG_OBJ_CALLS)
-            log.debug("huge frame call complete", .{});
-
-        switch (call_id) {
-            .map => {
-                const vmem = try (try caps.get_capability(thread, @truncate(msg.arg1))).as(caps.PageTableLevel4);
-                const vaddr = try addr.Virt.fromUser(msg.arg2);
-                const rights: abi.sys.Rights = @bitCast(@as(u32, @truncate(msg.arg3)));
-                const flags: abi.sys.MapFlags = @bitCast(@as(u40, @truncate(msg.arg4)));
-
-                // log.info("mapping 0x{x} to 0x{x} {} {}", .{ paddr.raw, vaddr.raw, rights, flags });
-                try vmem.ptr().map_huge_frame(paddr, vaddr, rights, flags);
-                arch.flush_tlb_addr(vaddr.raw);
-            },
-        }
-    }
-};
-
-/// a `PageTableLevel3` points to multiple of these
-///
-/// raw physical memory again, but now mappable
-/// (and can't be used to allocate things)
-pub const GiantFrame = struct {
-    data: [512 * 512 * 512]u64 align(0x1000),
-
-    pub fn canAlloc() bool {
-        return true;
-    }
-
-    pub fn init(self: *@This()) void {
-        std.crypto.secureZero(u64, @ptrCast(self.data[0..]));
-    }
-
-    pub fn call(paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
-        const msg = trap.readMessage();
-
-        const call_id = std.meta.intToEnum(abi.sys.FrameCallId, msg.arg0) catch {
-            return Error.InvalidArgument;
-        };
-
-        if (caps.LOG_OBJ_CALLS)
-            log.debug("giant frame call \"{s}\" msg={}", .{ @tagName(call_id), msg });
-
-        defer if (caps.LOG_OBJ_CALLS)
-            log.debug("giant frame call complete", .{});
-
-        switch (call_id) {
-            .map => {
-                const vmem = try (try caps.get_capability(thread, @truncate(msg.arg1))).as(caps.PageTableLevel4);
-                const vaddr = try addr.Virt.fromUser(msg.arg2);
-                const rights: abi.sys.Rights = @bitCast(@as(u32, @truncate(msg.arg3)));
-                const flags: abi.sys.MapFlags = @bitCast(@as(u40, @truncate(msg.arg4)));
-
-                // log.info("mapping 0x{x} to 0x{x} {} {}", .{ paddr.raw, vaddr.raw, rights, flags });
-                try vmem.ptr().map_giant_frame(paddr, vaddr, rights, flags);
-                arch.flush_tlb_addr(vaddr.raw);
-            },
-        }
+    pub fn sizeOf(self: caps.Ref(@This())) pmem.ChunkSize {
+        return @enumFromInt(self.paddr.toParts().offset);
     }
 };

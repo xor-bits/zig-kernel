@@ -215,77 +215,26 @@ pub fn thread_set_prio(thread_cap: u32, priority: u2) !void {
     try call(thread_cap, &msg);
 }
 
-// LVL4 (VMEM) CAPABILITY CALLS
+// VMEM CAPABILITY CALLS
 
-pub const Lvl4CallId = enum(u8) {};
-
-// LVL3 CAPABILITY CALLS
-
-pub const Lvl3CallId = enum(u8) {
+pub const VmemCallId = enum(u8) {
     map,
 };
 
-pub fn map_level3(lvl3_cap: u32, vmem_cap: u32, vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
+pub fn map(vmem_cap: u32, frame_cap: u32, vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
     var msg: Message = .{
-        .arg0 = @intFromEnum(Lvl3CallId.map),
-        .arg1 = vmem_cap,
+        .arg0 = @intFromEnum(VmemCallId.map),
+        .arg1 = frame_cap,
         .arg2 = vaddr,
         .arg3 = @as(u32, @bitCast(rights)),
         .arg4 = @as(u40, @bitCast(flags)),
     };
-    try call(lvl3_cap, &msg);
-}
-
-// LVL2 CAPABILITY CALLS
-
-pub const Lvl2CallId = enum(u8) {
-    map,
-};
-
-pub fn map_level2(lvl2_cap: u32, vmem_cap: u32, vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
-    var msg: Message = .{
-        .arg0 = @intFromEnum(Lvl2CallId.map),
-        .arg1 = vmem_cap,
-        .arg2 = vaddr,
-        .arg3 = @as(u32, @bitCast(rights)),
-        .arg4 = @as(u40, @bitCast(flags)),
-    };
-    try call(lvl2_cap, &msg);
-}
-
-// LVL1 CAPABILITY CALLS
-
-pub const Lvl1CallId = enum(u8) {
-    map,
-};
-
-pub fn map_level1(lvl1_cap: u32, vmem_cap: u32, vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
-    var msg: Message = .{
-        .arg0 = @intFromEnum(Lvl1CallId.map),
-        .arg1 = vmem_cap,
-        .arg2 = vaddr,
-        .arg3 = @as(u32, @bitCast(rights)),
-        .arg4 = @as(u40, @bitCast(flags)),
-    };
-    try call(lvl1_cap, &msg);
+    try call(vmem_cap, &msg);
 }
 
 // FRAME CAPABILITY CALLS
 
-pub const FrameCallId = enum(u8) {
-    map,
-};
-
-pub fn map_frame(frame_cap: u32, vmem_cap: u32, vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
-    var msg: Message = .{
-        .arg0 = @intFromEnum(FrameCallId.map),
-        .arg1 = vmem_cap,
-        .arg2 = vaddr,
-        .arg3 = @as(u32, @bitCast(rights)),
-        .arg4 = @as(u40, @bitCast(flags)),
-    };
-    try call(frame_cap, &msg);
-}
+pub const FrameCallId = enum(u8) {};
 
 // RECEIVER CAPABILITY CALLS
 

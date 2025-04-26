@@ -23,13 +23,8 @@ pub const LOG_OBJ_CALLS: bool = false;
 
 pub const Memory = caps_pmem.Memory;
 pub const Frame = caps_pmem.Frame;
-pub const HugeFrame = caps_pmem.HugeFrame;
-pub const GiantFrame = caps_pmem.GiantFrame;
 pub const Thread = caps_thread.Thread;
-pub const PageTableLevel4 = caps_vmem.PageTableLevel4;
-pub const PageTableLevel3 = caps_vmem.PageTableLevel3;
-pub const PageTableLevel2 = caps_vmem.PageTableLevel2;
-pub const PageTableLevel1 = caps_vmem.PageTableLevel1;
+pub const Vmem = caps_vmem.Vmem;
 pub const Receiver = caps_ipc.Receiver;
 pub const Sender = caps_ipc.Sender;
 
@@ -205,7 +200,7 @@ pub const Object = struct {
     /// physical address (or metadata for ZST) for the kernel object
     paddr: addr.Phys = .{ .raw = 0 },
     /// capability ownership is tied to virtual address spaces
-    owner: ?*PageTableLevel4 = null,
+    owner: ?*Vmem = null,
     /// capability kind, like memory, receiver, .. or thread
     type: abi.ObjectType = .null,
     /// lock for reading/writing the capability slot
@@ -223,13 +218,8 @@ pub const Object = struct {
         return switch (T) {
             Memory => .memory,
             Thread => .thread,
-            PageTableLevel4 => .page_table_level_4,
-            PageTableLevel3 => .page_table_level_3,
-            PageTableLevel2 => .page_table_level_2,
-            PageTableLevel1 => .page_table_level_1,
+            Vmem => .vmem,
             Frame => .frame,
-            HugeFrame => .huge_frame,
-            GiantFrame => .giant_frame,
             Receiver => .receiver,
             Sender => .sender,
             else => @compileError(std.fmt.comptimePrint("invalid Capability type: {}", .{@typeName(T)})),
@@ -250,13 +240,8 @@ pub const Object = struct {
             .null => Error.InvalidCapability,
             .memory => (try Ref(Memory).alloc()).object(owner),
             .thread => (try Ref(Thread).alloc()).object(owner),
-            .page_table_level_4 => (try Ref(PageTableLevel4).alloc()).object(owner),
-            .page_table_level_3 => (try Ref(PageTableLevel3).alloc()).object(owner),
-            .page_table_level_2 => (try Ref(PageTableLevel2).alloc()).object(owner),
-            .page_table_level_1 => (try Ref(PageTableLevel1).alloc()).object(owner),
+            .vmem => (try Ref(Vmem).alloc()).object(owner),
             .frame => (try Ref(Frame).alloc()).object(owner),
-            .huge_frame => (try Ref(HugeFrame).alloc()).object(owner),
-            .giant_frame => (try Ref(GiantFrame).alloc()).object(owner),
             .receiver => (try Ref(Receiver).alloc()).object(owner),
             .sender => Error.InvalidType, // receiver can be cloned to make senders
         };
@@ -268,13 +253,8 @@ pub const Object = struct {
             .null => Error.InvalidCapability,
             .memory => Memory.call(self.paddr, thread, trap),
             .thread => Thread.call(self.paddr, thread, trap),
-            .page_table_level_4 => Error.InvalidArgument,
-            .page_table_level_3 => PageTableLevel3.call(self.paddr, thread, trap),
-            .page_table_level_2 => PageTableLevel2.call(self.paddr, thread, trap),
-            .page_table_level_1 => PageTableLevel1.call(self.paddr, thread, trap),
-            .frame => Frame.call(self.paddr, thread, trap),
-            .huge_frame => HugeFrame.call(self.paddr, thread, trap),
-            .giant_frame => GiantFrame.call(self.paddr, thread, trap),
+            .vmem => Vmem.call(self.paddr, thread, trap),
+            .frame => Error.InvalidArgument,
             .receiver => Receiver.call(self.paddr, thread, trap),
             .sender => Sender.call(self.paddr, thread, trap),
         };
@@ -285,13 +265,8 @@ pub const Object = struct {
             .null => Error.InvalidCapability,
             .memory => Error.InvalidArgument,
             .thread => Error.InvalidArgument,
-            .page_table_level_4 => Error.InvalidArgument,
-            .page_table_level_3 => Error.InvalidArgument,
-            .page_table_level_2 => Error.InvalidArgument,
-            .page_table_level_1 => Error.InvalidArgument,
+            .vmem => Error.InvalidArgument,
             .frame => Error.InvalidArgument,
-            .huge_frame => Error.InvalidArgument,
-            .giant_frame => Error.InvalidArgument,
             .receiver => Receiver.recv(self.paddr, thread, trap),
             .sender => Error.InvalidArgument,
         };
@@ -302,13 +277,8 @@ pub const Object = struct {
             .null => Error.InvalidCapability,
             .memory => Error.InvalidArgument,
             .thread => Error.InvalidArgument,
-            .page_table_level_4 => Error.InvalidArgument,
-            .page_table_level_3 => Error.InvalidArgument,
-            .page_table_level_2 => Error.InvalidArgument,
-            .page_table_level_1 => Error.InvalidArgument,
+            .vmem => Error.InvalidArgument,
             .frame => Error.InvalidArgument,
-            .huge_frame => Error.InvalidArgument,
-            .giant_frame => Error.InvalidArgument,
             .receiver => Receiver.reply(self.paddr, thread, trap),
             .sender => Error.InvalidArgument,
         };

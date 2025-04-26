@@ -77,7 +77,7 @@ pub fn switchNow(trap: *arch.SyscallRegs) void {
 pub fn switchTo(trap: *arch.SyscallRegs, thread: *caps.Thread) void {
     const local = arch.cpu_local();
     local.current_thread = thread;
-    caps.PageTableLevel4.switchTo(thread.vmem.?);
+    caps.Vmem.switchTo(thread.vmem.?);
     trap.* = thread.trap;
 }
 

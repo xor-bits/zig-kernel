@@ -82,56 +82,13 @@ pub fn thread() !void {
 }
 
 pub fn map_naive(obj: u32, vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
-    const err = abi.sys.map_frame(obj, abi.BOOTSTRAP_SELF_VMEM, vaddr, .{
-        .writable = true,
-    }, .{});
-
-    if (err != error.EntryNotPresent) return err;
-
-    try map_naive_lvl1(vaddr, rights, flags);
-
-    return abi.sys.map_frame(obj, abi.BOOTSTRAP_SELF_VMEM, vaddr, .{
-        .writable = true,
-    }, .{});
-
-    // return map_naive_fn(abi.sys.map_frame, map_naive_lvl1, .frame, vaddr, rights, flags);
-}
-
-fn map_naive_lvl1(vaddr: usize, _: abi.sys.Rights, _: abi.sys.MapFlags) !void {
-    return map_naive_fn(abi.sys.map_level1, map_naive_lvl2, .page_table_level_1, vaddr, .{
-        .writable = true,
-    }, .{});
-}
-
-fn map_naive_lvl2(vaddr: usize, _: abi.sys.Rights, _: abi.sys.MapFlags) !void {
-    return map_naive_fn(abi.sys.map_level2, map_naive_lvl3, .page_table_level_2, vaddr, .{
-        .writable = true,
-    }, .{});
-}
-
-fn map_naive_lvl3(vaddr: usize, _: abi.sys.Rights, _: abi.sys.MapFlags) !void {
-    return map_naive_fn(abi.sys.map_level3, map_naive_fail, .page_table_level_3, vaddr, .{
-        .writable = true,
-    }, .{});
-}
-
-fn map_naive_fail(_: usize, _: abi.sys.Rights, _: abi.sys.MapFlags) !void {
-    return error.CannotMap;
-}
-
-fn map_naive_fn(comptime map_fn: anytype, comptime if_not_present: anytype, ty: abi.ObjectType, vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
-    const obj = try abi.sys.alloc(abi.BOOTSTRAP_MEMORY, ty);
-    const err = map_fn(obj, abi.BOOTSTRAP_SELF_VMEM, vaddr, .{
-        .writable = true,
-    }, .{});
-
-    if (err != error.EntryNotPresent) return err;
-
-    try if_not_present(vaddr, rights, flags);
-
-    return map_fn(obj, abi.BOOTSTRAP_SELF_VMEM, vaddr, .{
-        .writable = true,
-    }, .{});
+    try abi.sys.map(
+        abi.BOOTSTRAP_SELF_VMEM,
+        obj,
+        vaddr,
+        rights,
+        flags,
+    );
 }
 
 fn exec_elf(path: []const u8) !void {

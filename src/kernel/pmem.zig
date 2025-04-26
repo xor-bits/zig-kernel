@@ -144,7 +144,7 @@ var used = std.atomic.Value(u32).init(0);
 /// how many pages are usable
 var usable = std.atomic.Value(u32).init(0);
 
-const ChunkSize = enum(u5) {
+pub const ChunkSize = enum(u5) {
     @"4KiB",
     @"8KiB",
     @"16KiB",
@@ -165,11 +165,11 @@ const ChunkSize = enum(u5) {
     @"512MiB",
     @"1GiB",
 
-    fn next(self: @This()) ?@This() {
+    pub fn next(self: @This()) ?@This() {
         return std.meta.intToEnum(@This(), @intFromEnum(self) + 1) catch return null;
     }
 
-    fn sizeBytes(self: @This()) usize {
+    pub fn sizeBytes(self: @This()) usize {
         return @as(usize, 0x1000) << @intFromEnum(self);
     }
 };

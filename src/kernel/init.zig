@@ -18,15 +18,14 @@ const Error = abi.sys.Error;
 
 /// load and exec the bootstrap process
 pub fn exec(a: args.Args) !void {
-    const vmem = try caps.Ref(caps.PageTableLevel4).alloc();
-    const vmem_lvl4 = vmem.ptr();
-    vmem_lvl4.init();
+    const vmem = try caps.Ref(caps.Vmem).alloc();
+    vmem.ptr().init();
 
     (arch.Cr3{
         .pml4_phys_base = vmem.paddr.toParts().page,
     }).write();
 
-    const boot_info = try map_bootstrap(vmem_lvl4, a);
+    const boot_info = try map_bootstrap(vmem.ptr(), a);
 
     const init_thread = try caps.Ref(caps.Thread).alloc();
     init_thread.ptr().* = .{
@@ -51,7 +50,7 @@ pub fn exec(a: args.Args) !void {
     try proc.start(init_thread);
 }
 
-fn map_bootstrap(vmem_lvl4: *caps.PageTableLevel4, a: args.Args) !caps.Ref(caps.Frame) {
+fn map_bootstrap(vmem: *caps.Vmem, a: args.Args) !caps.Ref(caps.Frame) {
     const data_len = a.bootstrap_data.len + a.bootstrap_path.len + a.initfs_data.len + a.initfs_path.len;
 
     const low = addr.Virt.fromInt(abi.BOOTSTRAP_EXE);
@@ -84,59 +83,11 @@ fn map_bootstrap(vmem_lvl4: *caps.PageTableLevel4, a: args.Args) !caps.Ref(caps.
     log.info("initfs path:           '{s}'", .{a.initfs_path});
 
     var current = low;
-    while (current.raw < high.raw) : (current.raw += addr.Virt.fromParts(.{ .level4 = 1 }).raw) {
-        // log.info("mapping level 4 entry", .{});
-
-        try vmem_lvl4.map_level3(
-                (try caps.Ref(caps.Frame).alloc()).paddr,
-            current,
-            .{
-                .readable = true,
-                .writable = true,
-                .executable = true,
-            },
-            .{},
-        );
-    }
-
-    current = low;
-    while (current.raw < high.raw) : (current.raw += addr.Virt.fromParts(.{ .level3 = 1 }).raw) {
-        // log.info("mapping level 3 entry", .{});
-
-        try vmem_lvl4.map_level2(
-                (try caps.Ref(caps.Frame).alloc()).paddr,
-            current,
-            .{
-                .readable = true,
-                .writable = true,
-                .executable = true,
-            },
-            .{},
-        );
-    }
-
-    current = low;
-    while (current.raw < high.raw) : (current.raw += addr.Virt.fromParts(.{ .level2 = 1 }).raw) {
-        // log.info("mapping level 2 entry", .{});
-
-        try vmem_lvl4.map_level1(
-                (try caps.Ref(caps.Frame).alloc()).paddr,
-            current,
-            .{
-                .readable = true,
-                .writable = true,
-                .executable = true,
-            },
-            .{},
-        );
-    }
-
-    current = low;
     while (current.raw < high.raw) : (current.raw += addr.Virt.fromParts(.{ .level1 = 1 }).raw) {
         // log.info("mapping level 1 entry", .{});
 
-        try vmem_lvl4.map_frame(
-                (try caps.Ref(caps.Frame).alloc()).paddr,
+        try vmem.map_frame(
+            (try caps.Ref(caps.Frame).alloc()).paddr,
             current,
             .{
                 .readable = true,

@@ -16,11 +16,11 @@ const Error = abi.sys.Error;
 pub fn init() !void {
     const cr3 = arch.Cr3.read();
     const level4 = addr.Phys.fromInt(cr3.pml4_phys_base << 12)
-        .toHhdm().toPtr(*PageTableLevel4);
-    std.mem.copyForwards(Entry, kernel_table[0..], level4.entries[256..]);
+        .toHhdm().toPtr(*Vmem);
+    std.mem.copyForwards(Entry, kernel_table.entries[256..], level4.entries[256..]);
 }
 
-var kernel_table: [256]Entry = undefined;
+var kernel_table: Vmem = undefined;
 
 //
 
@@ -32,51 +32,20 @@ pub fn growCapArray() u32 {
     const last_byte_of_next = new_page_addr.raw + @sizeOf(caps.Object) - 1;
     const last_page = addr.Virt.fromInt(last_byte_of_next);
 
-    const lvl3 = (nextLevelFromEntry(kernel_table[255]) catch
-        std.debug.panic("invalid kernel page table", .{})).toHhdm().toPtr(*PageTableLevel3);
-
-    const SIZE_1GIB_MASK = ~(@as(usize, 0x40000000 - 1));
-    const SIZE_2MIB_MASK = ~(@as(usize, 0x00200000 - 1));
     const SIZE_4KIB_MASK = ~(@as(usize, 0x00001000 - 1));
-
-    const map_level2 = last_byte_of_prev & SIZE_1GIB_MASK != last_byte_of_next & SIZE_1GIB_MASK;
-    const map_level1 = last_byte_of_prev & SIZE_2MIB_MASK != last_byte_of_next & SIZE_2MIB_MASK;
     const map_frame = last_byte_of_prev & SIZE_4KIB_MASK != last_byte_of_next & SIZE_4KIB_MASK;
 
-    if (map_level2 or map_level1 or map_frame) {
-        @branchHint(.unlikely);
+    if (map_frame) {
         caps.array_grow_lock.lock();
         defer caps.array_grow_lock.unlock();
 
-        if (map_level2) {
-            @branchHint(.cold);
-            lvl3.map_level2(alloc_page(), last_page, .{
-                .readable = true,
-                .writable = true,
-                .user_accessible = false,
-            }, .{
-                .global = true,
-            }) catch std.debug.panic("invalid kernel page table L3", .{});
-        }
-        if (map_level1) {
-            @branchHint(.unlikely);
-            lvl3.map_level1(alloc_page(), last_page, .{
-                .readable = true,
-                .writable = true,
-                .user_accessible = false,
-            }, .{
-                .global = true,
-            }) catch std.debug.panic("invalid kernel page table L2", .{});
-        }
-        if (map_frame) {
-            lvl3.map_frame(alloc_page(), last_page, .{
-                .readable = true,
-                .writable = true,
-                .user_accessible = false,
-            }, .{
-                .global = true,
-            }) catch std.debug.panic("invalid kernel page table L1", .{});
-        }
+        kernel_table.map_frame(alloc_page(), last_page, .{
+            .readable = true,
+            .writable = true,
+            .user_accessible = false,
+        }, .{
+            .global = true,
+        }) catch std.debug.panic("invalid kernel page table", .{});
     }
 
     const next = caps.capability_array_len.fetchAdd(1, .acquire);
@@ -89,28 +58,85 @@ fn alloc_page() addr.Phys {
     return pmem.alloc(0x1000) orelse std.debug.panic("OOM", .{});
 }
 
-fn nextLevel(current: *[512]Entry, i: u9) Error!addr.Phys {
-    return nextLevelFromEntry(current[i]);
+fn alloc_table() addr.Phys {
+    const table = alloc_page();
+    const entries = table.toHhdm().toPtr([*]volatile Entry)[0..512];
+    @memset(entries, .{});
+    return table;
 }
 
-fn nextLevelFromEntry(entry: Entry) Error!addr.Phys {
-    if (entry.present == 0) return error.EntryNotPresent;
-    if (entry.huge_page == 1) return error.EntryIsHuge;
+fn nextLevel(comptime create: bool, current: *volatile [512]Entry, i: u9) Error!addr.Phys {
+    return nextLevelFromEntry(create, &current[i]);
+}
+
+fn nextLevelFromEntry(comptime create: bool, entry: *volatile Entry) Error!addr.Phys {
+    if (entry.present == 0 and create) {
+        entry.* = .{
+            .present = 1,
+            .writable = 1,
+            .user_accessible = 1,
+            .page_index = alloc_table().toParts().page,
+        };
+    } else if (entry.present == 0) {
+        return error.EntryNotPresent;
+    } else if (entry.huge_page == 1) {
+        return error.EntryIsHuge;
+    }
     return addr.Phys.fromParts(.{ .page = entry.page_index });
 }
 
 // FIXME: flush TLB + IPI other CPUs to prevent race conditions
 /// a `Thread` points to this
-pub const PageTableLevel4 = struct {
+pub const Vmem = struct {
     entries: [512]Entry align(0x1000) = std.mem.zeroes([512]Entry),
 
     pub fn init(self: *@This()) void {
         self.* = .{};
-        std.mem.copyForwards(Entry, self.entries[256..], kernel_table[0..]);
+        std.mem.copyForwards(Entry, self.entries[256..], kernel_table.entries[256..]);
     }
 
     pub fn canAlloc() bool {
         return true;
+    }
+
+    pub fn call(self_paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
+        const call_id = std.meta.intToEnum(abi.sys.VmemCallId, trap.arg1) catch {
+            return Error.InvalidArgument;
+        };
+
+        if (caps.LOG_OBJ_CALLS)
+            log.debug("lvl3 call \"{s}\"", .{@tagName(call_id)});
+
+        const self = (caps.Ref(@This()){ .paddr = self_paddr }).ptr();
+
+        switch (call_id) {
+            .map => {
+                // FIXME: try_lock and return an error on fail
+
+                const frame_obj = try caps.get_capability(thread, @truncate(trap.arg2));
+                const frame = try frame_obj.as(caps.Frame);
+                const paddr = frame.paddr;
+
+                const vaddr = try addr.Virt.fromUser(trap.arg3);
+                const rights: abi.sys.Rights = @bitCast(@as(u32, @truncate(trap.arg4)));
+                const flags: abi.sys.MapFlags = @bitCast(@as(u40, @truncate(trap.arg5)));
+
+                const size = caps.Frame.sizeOf(frame).sizeBytes();
+                const size_1gib = pmem.ChunkSize.@"1GiB".sizeBytes();
+                const size_2mib = pmem.ChunkSize.@"2MiB".sizeBytes();
+                // const size_1kib = pmem.ChunkSize.@"4KiB".sizeBytes();
+
+                // log.info("mapping {} from 0x{x} to 0x{x}", .{ size, paddr.raw, vaddr.raw });
+
+                if (size >= size_1gib) {
+                    try self.map_giant_frame(paddr, vaddr, rights, flags);
+                } else if (size >= size_2mib) {
+                    try self.map_huge_frame(paddr, vaddr, rights, flags);
+                } else {
+                    try self.map_frame(paddr, vaddr, rights, flags);
+                }
+            },
+        }
     }
 
     pub fn switchTo(self: caps.Ref(@This())) void {
@@ -120,36 +146,36 @@ pub const PageTableLevel4 = struct {
         cur.write();
     }
 
-    pub fn map(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
-        self.entries[vaddr.toParts().level4] = Entry.fromParts(rights, paddr, flags);
-    }
+    // pub fn map(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
+    //     self.entries[vaddr.toParts().level4] = Entry.fromParts(rights, paddr, flags);
+    // }
 
-    pub fn map_level3(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
-        try self.map(paddr, vaddr, rights, flags);
-    }
+    // pub fn map_level3(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
+    //     try self.map(paddr, vaddr, rights, flags);
+    // }
 
-    pub fn map_level2(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
-        const next = (try nextLevel(&self.entries, vaddr.toParts().level4)).toHhdm().toPtr(*PageTableLevel3);
-        try next.map_level2(paddr, vaddr, rights, flags);
-    }
+    // pub fn map_level2(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
+    //     const next = (try nextLevel(&self.entries, vaddr.toParts().level4)).toHhdm().toPtr(*PageTableLevel3);
+    //     try next.map_level2(paddr, vaddr, rights, flags);
+    // }
 
-    pub fn map_level1(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
-        const next = (try nextLevel(&self.entries, vaddr.toParts().level4)).toHhdm().toPtr(*PageTableLevel3);
-        try next.map_level1(paddr, vaddr, rights, flags);
-    }
+    // pub fn map_level1(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
+    //     const next = (try nextLevel(&self.entries, vaddr.toParts().level4)).toHhdm().toPtr(*PageTableLevel3);
+    //     try next.map_level1(paddr, vaddr, rights, flags);
+    // }
 
-    pub fn map_giant_frame(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
-        const next = (try nextLevel(&self.entries, vaddr.toParts().level4)).toHhdm().toPtr(*PageTableLevel3);
+    pub fn map_giant_frame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
+        const next = (try nextLevel(true, &self.entries, vaddr.toParts().level4)).toHhdm().toPtr(*volatile PageTableLevel3);
         try next.map_giant_frame(paddr, vaddr, rights, flags);
     }
 
-    pub fn map_huge_frame(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
-        const next = (try nextLevel(&self.entries, vaddr.toParts().level4)).toHhdm().toPtr(*PageTableLevel3);
+    pub fn map_huge_frame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
+        const next = (try nextLevel(true, &self.entries, vaddr.toParts().level4)).toHhdm().toPtr(*volatile PageTableLevel3);
         try next.map_huge_frame(paddr, vaddr, rights, flags);
     }
 
-    pub fn map_frame(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
-        const next = (try nextLevel(&self.entries, vaddr.toParts().level4)).toHhdm().toPtr(*PageTableLevel3);
+    pub fn map_frame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
+        const next = (try nextLevel(true, &self.entries, vaddr.toParts().level4)).toHhdm().toPtr(*volatile PageTableLevel3);
         try next.map_frame(paddr, vaddr, rights, flags);
     }
 };
@@ -158,58 +184,30 @@ pub const PageTableLevel4 = struct {
 pub const PageTableLevel3 = struct {
     entries: [512]Entry align(0x1000) = std.mem.zeroes([512]Entry),
 
-    pub fn init(self: *@This()) void {
-        self.* = .{};
-    }
-
-    pub fn canAlloc() bool {
-        return true;
-    }
-
-    pub fn call(paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
-        const call_id = std.meta.intToEnum(abi.sys.Lvl3CallId, trap.arg1) catch {
-            return Error.InvalidArgument;
-        };
-
-        if (caps.LOG_OBJ_CALLS)
-            log.debug("lvl3 call \"{s}\"", .{@tagName(call_id)});
-
-        switch (call_id) {
-            .map => {
-                const vmem = try (try caps.get_capability(thread, @truncate(trap.arg2))).as(PageTableLevel4);
-                const vaddr = try addr.Virt.fromUser(trap.arg3);
-                const rights: abi.sys.Rights = @bitCast(@as(u32, @truncate(trap.arg4)));
-                const flags: abi.sys.MapFlags = @bitCast(@as(u40, @truncate(trap.arg5)));
-
-                try vmem.ptr().map_level3(paddr, vaddr, rights, flags);
-            },
-        }
-    }
-
-    pub fn map(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) void {
+    pub fn map(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) void {
         self.entries[vaddr.toParts().level3] = Entry.fromParts(rights, paddr, flags);
     }
 
-    pub fn map_level2(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
+    pub fn map_level2(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
         self.map(paddr, vaddr, rights, flags);
     }
 
-    pub fn map_level1(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
-        const next = (try nextLevel(&self.entries, vaddr.toParts().level3)).toHhdm().toPtr(*PageTableLevel2);
+    pub fn map_level1(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
+        const next = (try nextLevel(&self.entries, vaddr.toParts().level3)).toHhdm().toPtr(*volatile PageTableLevel2);
         try next.map_level1(paddr, vaddr, rights, flags);
     }
 
-    pub fn map_giant_frame(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
+    pub fn map_giant_frame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
         self.map(paddr, vaddr, rights, flags);
     }
 
-    pub fn map_huge_frame(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
-        const next = (try nextLevel(&self.entries, vaddr.toParts().level3)).toHhdm().toPtr(*PageTableLevel2);
+    pub fn map_huge_frame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
+        const next = (try nextLevel(true, &self.entries, vaddr.toParts().level3)).toHhdm().toPtr(*volatile PageTableLevel2);
         try next.map_huge_frame(paddr, vaddr, rights, flags);
     }
 
-    pub fn map_frame(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
-        const next = (try nextLevel(&self.entries, vaddr.toParts().level3)).toHhdm().toPtr(*PageTableLevel2);
+    pub fn map_frame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
+        const next = (try nextLevel(true, &self.entries, vaddr.toParts().level3)).toHhdm().toPtr(*volatile PageTableLevel2);
         try next.map_frame(paddr, vaddr, rights, flags);
     }
 };
@@ -226,40 +224,20 @@ pub const PageTableLevel2 = struct {
         return true;
     }
 
-    pub fn call(paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
-        const call_id = std.meta.intToEnum(abi.sys.Lvl2CallId, trap.arg1) catch {
-            return Error.InvalidArgument;
-        };
-
-        if (caps.LOG_OBJ_CALLS)
-            log.debug("lvl2 call \"{s}\"", .{@tagName(call_id)});
-
-        switch (call_id) {
-            .map => {
-                const vmem = try (try caps.get_capability(thread, @truncate(trap.arg2))).as(PageTableLevel4);
-                const vaddr = try addr.Virt.fromUser(trap.arg3);
-                const rights: abi.sys.Rights = @bitCast(@as(u32, @truncate(trap.arg4)));
-                const flags: abi.sys.MapFlags = @bitCast(@as(u40, @truncate(trap.arg5)));
-
-                try vmem.ptr().map_level2(paddr, vaddr, rights, flags);
-            },
-        }
-    }
-
-    pub fn map(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) void {
+    pub fn map(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) void {
         self.entries[vaddr.toParts().level2] = Entry.fromParts(rights, paddr, flags);
     }
 
-    pub fn map_level1(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
+    pub fn map_level1(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
         self.map(paddr, vaddr, rights, flags);
     }
 
-    pub fn map_huge_frame(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
+    pub fn map_huge_frame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
         self.map(paddr, vaddr, rights, flags);
     }
 
-    pub fn map_frame(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
-        const next = (try nextLevel(&self.entries, vaddr.toParts().level2)).toHhdm().toPtr(*PageTableLevel1);
+    pub fn map_frame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
+        const next = (try nextLevel(true, &self.entries, vaddr.toParts().level2)).toHhdm().toPtr(*volatile PageTableLevel1);
         try next.map_frame(paddr, vaddr, rights, flags);
     }
 };
@@ -276,31 +254,11 @@ pub const PageTableLevel1 = struct {
         return true;
     }
 
-    pub fn call(paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
-        const call_id = std.meta.intToEnum(abi.sys.Lvl1CallId, trap.arg1) catch {
-            return Error.InvalidArgument;
-        };
-
-        if (caps.LOG_OBJ_CALLS)
-            log.debug("lvl1 call \"{s}\"", .{@tagName(call_id)});
-
-        switch (call_id) {
-            .map => {
-                const vmem = try (try caps.get_capability(thread, @truncate(trap.arg2))).as(PageTableLevel4);
-                const vaddr = try addr.Virt.fromUser(trap.arg3);
-                const rights: abi.sys.Rights = @bitCast(@as(u32, @truncate(trap.arg4)));
-                const flags: abi.sys.MapFlags = @bitCast(@as(u40, @truncate(trap.arg5)));
-
-                try vmem.ptr().map_level1(paddr, vaddr, rights, flags);
-            },
-        }
-    }
-
-    pub fn map(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) void {
+    pub fn map(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) void {
         self.entries[vaddr.toParts().level1] = Entry.fromParts(rights, paddr, flags);
     }
 
-    pub fn map_frame(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
+    pub fn map_frame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
         self.map(paddr, vaddr, rights, flags);
     }
 };

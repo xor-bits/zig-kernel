@@ -17,7 +17,7 @@ pub const Thread = struct {
     /// all context data
     trap: arch.SyscallRegs = .{},
     /// virtual address space
-    vmem: ?caps.Ref(caps.PageTableLevel4) = null,
+    vmem: ?caps.Ref(caps.Vmem) = null,
     /// capability space lock
     caps_lock: spin.Mutex = .new(),
     /// scheduler priority
@@ -99,7 +99,7 @@ pub const Thread = struct {
                 if (target_thread.ptr().status != .stopped) return Error.NotStopped;
 
                 // TODO: require stopping the thread or something
-                const vmem = try (try caps.get_capability(thread, @truncate(trap.arg2))).as(caps.PageTableLevel4);
+                const vmem = try (try caps.get_capability(thread, @truncate(trap.arg2))).as(caps.Vmem);
                 target_thread.ptr().vmem = vmem;
             },
             .set_prio => {
@@ -108,7 +108,7 @@ pub const Thread = struct {
         }
     }
 
-    pub fn vmemOf(thread: ?*Thread) ?*caps.PageTableLevel4 {
+    pub fn vmemOf(thread: ?*Thread) ?*caps.Vmem {
         const t = thread orelse return null;
         const vmem = t.vmem orelse return null;
         return vmem.ptr();
