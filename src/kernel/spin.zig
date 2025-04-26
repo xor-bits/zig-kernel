@@ -16,11 +16,15 @@ pub const Mutex = struct {
     }
 
     pub fn lock(self: *Self) void {
-        while (self.lock_state.cmpxchgWeak(0, 1, .acquire, .monotonic) != null) {
+        while (null != self.lock_state.cmpxchgWeak(0, 1, .acquire, .monotonic)) {
             while (self.isLocked()) {
                 std.atomic.spinLoopHint();
             }
         }
+    }
+
+    pub fn tryLock(self: *Self) bool {
+        return null == self.lock_state.cmpxchgStrong(0, 1, .acquire, .monotonic);
     }
 
     pub fn isLocked(self: *Self) bool {

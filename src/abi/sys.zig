@@ -56,6 +56,9 @@ pub const Error = error{
     NotStopped,
     IsStopped,
     NoVmem,
+    ThreadSafety,
+    AlreadyMapped,
+    MappingOverlap,
 
     UnknownError,
 };
@@ -83,6 +86,9 @@ pub fn encodeError(err: Error) usize {
         error.NotStopped => 11,
         error.IsStopped => 12,
         error.NoVmem => 13,
+        error.ThreadSafety => 14,
+        error.AlreadyMapped => 15,
+        error.MappingOverlap => 16,
 
         error.UnknownError => std.debug.panic("unknown error shouldn't be encoded", .{}),
     }));
@@ -107,6 +113,10 @@ pub fn decode(v: usize) Error!usize {
         11 => error.NotStopped,
         12 => error.IsStopped,
         13 => error.NoVmem,
+        14 => error.ThreadSafety,
+        15 => error.AlreadyMapped,
+        16 => error.MappingOverlap,
+
         else => return error.UnknownError,
     };
 }

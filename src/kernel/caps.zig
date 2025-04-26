@@ -38,7 +38,7 @@ pub fn init() !void {
     // push the null capability
     _ = push_capability(.{});
 
-    debug_type(Object);
+    // debug_type(Object);
 }
 
 /// create a capability out of an object
@@ -54,23 +54,23 @@ pub fn push_capability(obj: Object) u32 {
 }
 
 /// returns an object from a capability,
-/// some other thread might invalidate the capability during or after this
-pub fn get_capability(thread: *Thread, cap_id: u32) Error!Object {
+/// the returned object is locked
+pub fn get_capability(thread: *Thread, cap_id: u32) Error!*Object {
     const caps = capability_array();
     if (cap_id >= caps.len) return Error.InvalidCapability;
 
     const current = Thread.vmemOf(thread);
-    const cap = &caps[cap_id];
+    const obj = &caps[cap_id];
 
     // fast path fail if the capability is not owned or being modified
-    if (cap.owner != current)
+    if (obj.owner.load(.acquire) != current)
         return Error.InvalidCapability;
 
-    cap.lock.lock();
-    const obj = cap.*;
-    cap.lock.unlock();
+    if (!obj.lock.tryLock())
+        return Error.ThreadSafety;
+    errdefer obj.lock.unlock();
 
-    if (obj.owner != current)
+    if (obj.owner.load(.acquire) != current)
         return Error.InvalidCapability;
 
     return obj;
@@ -79,18 +79,24 @@ pub fn get_capability(thread: *Thread, cap_id: u32) Error!Object {
 /// a single bidirectional call
 pub fn call(thread: *Thread, cap_id: u32, trap: *arch.SyscallRegs) Error!void {
     const obj = try get_capability(thread, cap_id);
+    defer obj.lock.unlock();
+
     return obj.call(thread, trap);
 }
 
 /// Receiver specific unidirectional call
 pub fn recv(thread: *Thread, cap_id: u32, trap: *arch.SyscallRegs) Error!usize {
     const obj = try get_capability(thread, cap_id);
+    defer obj.lock.unlock();
+
     return obj.recv(thread, trap);
 }
 
 /// Receiver specific unidirectional call
 pub fn reply(thread: *Thread, cap_id: u32, trap: *arch.SyscallRegs) Error!usize {
     const obj = try get_capability(thread, cap_id);
+    defer obj.lock.unlock();
+
     return obj.reply(thread, trap);
 }
 
@@ -183,7 +189,7 @@ pub fn Ref(comptime T: type) type {
             return .{
                 .paddr = self.paddr,
                 .type = Object.objectTypeOf(T),
-                .owner = Thread.vmemOf(owner),
+                .owner = .init(Thread.vmemOf(owner)),
             };
         }
     };
@@ -193,7 +199,7 @@ pub const Object = struct {
     /// physical address (or metadata for ZST) for the kernel object
     paddr: addr.Phys = .{ .raw = 0 },
     /// capability ownership is tied to virtual address spaces
-    owner: ?*Vmem = null,
+    owner: std.atomic.Value(?*Vmem) = .init(null),
     /// capability kind, like memory, receiver, .. or thread
     type: abi.ObjectType = .null,
     /// lock for reading/writing the capability slot

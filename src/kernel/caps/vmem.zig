@@ -39,7 +39,7 @@ pub fn growCapArray() u32 {
         caps.array_grow_lock.lock();
         defer caps.array_grow_lock.unlock();
 
-        kernel_table.map_frame(alloc_page(), last_page, .{
+        kernel_table.mapFrame(alloc_page(), last_page, .{
             .readable = true,
             .writable = true,
             .user_accessible = false,
@@ -106,15 +106,19 @@ pub const Vmem = struct {
         };
 
         if (caps.LOG_OBJ_CALLS)
-            log.debug("lvl3 call \"{s}\"", .{@tagName(call_id)});
+            log.debug("vmem call \"{s}\"", .{@tagName(call_id)});
 
         const self = (caps.Ref(@This()){ .paddr = self_paddr }).ptr();
 
         switch (call_id) {
             .map => {
-                // FIXME: try_lock and return an error on fail
-
+                // lock the frame temporarily, mark it as mapped and unmark it if an error occurs
                 const frame_obj = try caps.get_capability(thread, @truncate(trap.arg2));
+                if (frame_obj.next != 0) return Error.AlreadyMapped;
+                frame_obj.next = @truncate(trap.arg0);
+                errdefer frame_obj.next = 0;
+                defer frame_obj.lock.unlock();
+
                 const frame = try frame_obj.as(caps.Frame);
                 var paddr = frame.paddr;
 
@@ -129,25 +133,36 @@ pub const Vmem = struct {
 
                 // log.info("mapping {} from 0x{x} to 0x{x}", .{ size, paddr.raw, vaddr.raw });
 
-                // FIXME: before mapping, make sure nothing is mapped
                 if (size >= size_1gib) {
                     const count = size / size_1gib;
+                    for (0..count) |_|
+                        if (!try self.canMapGiantFrame(vaddr))
+                            return Error.MappingOverlap;
+
                     for (0..count) |_| {
-                        try self.map_giant_frame(paddr, vaddr, rights, flags);
+                        try self.mapGiantFrame(paddr, vaddr, rights, flags);
                         paddr.raw += size_1gib;
                         vaddr.raw += size_1gib;
                     }
                 } else if (size >= size_2mib) {
                     const count = size / size_2mib;
+                    for (0..count) |_|
+                        if (!try self.canMapHugeFrame(vaddr))
+                            return Error.MappingOverlap;
+
                     for (0..count) |_| {
-                        try self.map_huge_frame(paddr, vaddr, rights, flags);
+                        try self.mapHugeFrame(paddr, vaddr, rights, flags);
                         paddr.raw += size_2mib;
                         vaddr.raw += size_2mib;
                     }
                 } else {
                     const count = size / size_4kib;
+                    for (0..count) |_|
+                        if (!try self.canMapFrame(vaddr))
+                            return Error.MappingOverlap;
+
                     for (0..count) |_| {
-                        try self.map_frame(paddr, vaddr, rights, flags);
+                        try self.mapFrame(paddr, vaddr, rights, flags);
                         paddr.raw += size_4kib;
                         vaddr.raw += size_4kib;
                     }
@@ -163,19 +178,34 @@ pub const Vmem = struct {
         cur.write();
     }
 
-    pub fn map_giant_frame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
+    pub fn mapGiantFrame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
         const next = (try nextLevel(true, &self.entries, vaddr.toParts().level4)).toHhdm().toPtr(*volatile PageTableLevel3);
-        try next.map_giant_frame(paddr, vaddr, rights, flags);
+        try next.mapGiantFrame(paddr, vaddr, rights, flags);
     }
 
-    pub fn map_huge_frame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
+    pub fn mapHugeFrame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
         const next = (try nextLevel(true, &self.entries, vaddr.toParts().level4)).toHhdm().toPtr(*volatile PageTableLevel3);
-        try next.map_huge_frame(paddr, vaddr, rights, flags);
+        try next.mapHugeFrame(paddr, vaddr, rights, flags);
     }
 
-    pub fn map_frame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
+    pub fn mapFrame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
         const next = (try nextLevel(true, &self.entries, vaddr.toParts().level4)).toHhdm().toPtr(*volatile PageTableLevel3);
-        try next.map_frame(paddr, vaddr, rights, flags);
+        try next.mapFrame(paddr, vaddr, rights, flags);
+    }
+
+    pub fn canMapGiantFrame(self: *volatile @This(), vaddr: addr.Virt) Error!bool {
+        const next = (try nextLevel(true, &self.entries, vaddr.toParts().level4)).toHhdm().toPtr(*volatile PageTableLevel3);
+        return next.canMapGiantFrame(vaddr);
+    }
+
+    pub fn canMapHugeFrame(self: *volatile @This(), vaddr: addr.Virt) Error!bool {
+        const next = (try nextLevel(true, &self.entries, vaddr.toParts().level4)).toHhdm().toPtr(*volatile PageTableLevel3);
+        return next.canMapHugeFrame(vaddr);
+    }
+
+    pub fn canMapFrame(self: *volatile @This(), vaddr: addr.Virt) Error!bool {
+        const next = (try nextLevel(true, &self.entries, vaddr.toParts().level4)).toHhdm().toPtr(*volatile PageTableLevel3);
+        return next.canMapFrame(vaddr);
     }
 };
 
@@ -187,27 +217,33 @@ pub const PageTableLevel3 = struct {
         self.entries[vaddr.toParts().level3] = Entry.fromParts(rights, paddr, flags);
     }
 
-    pub fn map_level2(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
+    pub fn mapGiantFrame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
         self.map(paddr, vaddr, rights, flags);
     }
 
-    pub fn map_level1(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
-        const next = (try nextLevel(&self.entries, vaddr.toParts().level3)).toHhdm().toPtr(*volatile PageTableLevel2);
-        try next.map_level1(paddr, vaddr, rights, flags);
-    }
-
-    pub fn map_giant_frame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
-        self.map(paddr, vaddr, rights, flags);
-    }
-
-    pub fn map_huge_frame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
+    pub fn mapHugeFrame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
         const next = (try nextLevel(true, &self.entries, vaddr.toParts().level3)).toHhdm().toPtr(*volatile PageTableLevel2);
-        try next.map_huge_frame(paddr, vaddr, rights, flags);
+        try next.mapHugeFrame(paddr, vaddr, rights, flags);
     }
 
-    pub fn map_frame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
+    pub fn mapFrame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
         const next = (try nextLevel(true, &self.entries, vaddr.toParts().level3)).toHhdm().toPtr(*volatile PageTableLevel2);
-        try next.map_frame(paddr, vaddr, rights, flags);
+        try next.mapFrame(paddr, vaddr, rights, flags);
+    }
+
+    pub fn canMapGiantFrame(self: *volatile @This(), vaddr: addr.Virt) bool {
+        const entry = self.entries[vaddr.toParts().level3];
+        return entry.present == 0;
+    }
+
+    pub fn canMapHugeFrame(self: *volatile @This(), vaddr: addr.Virt) Error!bool {
+        const next = (try nextLevel(true, &self.entries, vaddr.toParts().level3)).toHhdm().toPtr(*volatile PageTableLevel2);
+        return next.canMapHugeFrame(vaddr);
+    }
+
+    pub fn canMapFrame(self: *volatile @This(), vaddr: addr.Virt) Error!bool {
+        const next = (try nextLevel(true, &self.entries, vaddr.toParts().level3)).toHhdm().toPtr(*volatile PageTableLevel2);
+        return next.canMapFrame(vaddr);
     }
 };
 
@@ -216,20 +252,28 @@ pub const PageTableLevel2 = struct {
     entries: [512]Entry align(0x1000) = std.mem.zeroes([512]Entry),
 
     pub fn map(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) void {
-        self.entries[vaddr.toParts().level2] = Entry.fromParts(rights, paddr, flags);
+        var entry = Entry.fromParts(rights, paddr, flags);
+        entry.huge_page = 1;
+        self.entries[vaddr.toParts().level2] = entry;
     }
 
-    pub fn map_level1(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
+    pub fn mapHugeFrame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
         self.map(paddr, vaddr, rights, flags);
     }
 
-    pub fn map_huge_frame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
-        self.map(paddr, vaddr, rights, flags);
-    }
-
-    pub fn map_frame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
+    pub fn mapFrame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
         const next = (try nextLevel(true, &self.entries, vaddr.toParts().level2)).toHhdm().toPtr(*volatile PageTableLevel1);
-        try next.map_frame(paddr, vaddr, rights, flags);
+        next.mapFrame(paddr, vaddr, rights, flags);
+    }
+
+    pub fn canMapHugeFrame(self: *volatile @This(), vaddr: addr.Virt) bool {
+        const entry = self.entries[vaddr.toParts().level2];
+        return entry.present == 0;
+    }
+
+    pub fn canMapFrame(self: *volatile @This(), vaddr: addr.Virt) Error!bool {
+        const next = (try nextLevel(true, &self.entries, vaddr.toParts().level2)).toHhdm().toPtr(*volatile PageTableLevel1);
+        return next.canMapFrame(vaddr);
     }
 };
 
@@ -237,20 +281,19 @@ pub const PageTableLevel2 = struct {
 pub const PageTableLevel1 = struct {
     entries: [512]Entry align(0x1000) = std.mem.zeroes([512]Entry),
 
-    pub fn init(self: *@This()) void {
-        self.* = .{};
-    }
-
-    pub fn canAlloc() bool {
-        return true;
-    }
-
     pub fn map(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) void {
-        self.entries[vaddr.toParts().level1] = Entry.fromParts(rights, paddr, flags);
+        var entry = Entry.fromParts(rights, paddr, flags);
+        entry.huge_page = 1;
+        self.entries[vaddr.toParts().level1] = entry;
     }
 
-    pub fn map_frame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
+    pub fn mapFrame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) void {
         self.map(paddr, vaddr, rights, flags);
+    }
+
+    pub fn canMapFrame(self: *volatile @This(), vaddr: addr.Virt) bool {
+        const entry = self.entries[vaddr.toParts().level1];
+        return entry.present == 0;
     }
 };
 

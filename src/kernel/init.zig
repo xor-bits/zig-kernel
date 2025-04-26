@@ -85,7 +85,7 @@ fn map_bootstrap(vmem: *caps.Vmem, a: args.Args) !caps.Ref(caps.Frame) {
     while (current.raw < high.raw) : (current.raw += addr.Virt.fromParts(.{ .level1 = 1 }).raw) {
         // log.info("mapping level 1 entry", .{});
 
-        try vmem.map_frame(
+        try vmem.mapFrame(
             (try caps.Ref(caps.Frame).alloc(.@"4KiB")).paddr,
             current,
             .{

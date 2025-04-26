@@ -213,6 +213,7 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
         .debug => {
             const cap_id: u32 = @truncate(trap.arg0);
             if (caps.get_capability(thread, cap_id)) |obj| {
+                defer obj.lock.unlock();
                 trap.syscall_id = abi.sys.encode(@intFromEnum(obj.type));
             } else |err| {
                 trap.syscall_id = abi.sys.encode(err);

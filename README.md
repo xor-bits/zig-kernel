@@ -48,7 +48,7 @@ zig build run --prominent-compile-errors --summary none -freference-trace \
 - [x] kernel
   - [x] PMM
   - [x] VMM
-    - [ ] VMM arch implementation back in the kernel,
+    - [x] VMM arch implementation back in the kernel,
           user-space vmm manages mapping of capabilities
           to the (single per thread) vmem capability.
           Frame should be the only mappable capability
@@ -68,7 +68,8 @@ zig build run --prominent-compile-errors --summary none -freference-trace \
     - [x] map capabilities
     - [ ] unmap capabilities
     - [ ] send capabilities
-    - [ ] disallow mapping a frame twice without cloning the cap
+    - [x] disallow mapping a frame twice without cloning the cap
+    - [x] disallow overlapping maps
   - [x] syscalls
 
 - [x] bootstrap/initfsd process
