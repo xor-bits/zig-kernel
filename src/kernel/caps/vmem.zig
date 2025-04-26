@@ -43,7 +43,7 @@ pub fn growCapArray() u32 {
     const map_level1 = last_byte_of_prev & SIZE_2MIB_MASK != last_byte_of_next & SIZE_2MIB_MASK;
     const map_frame = last_byte_of_prev & SIZE_4KIB_MASK != last_byte_of_next & SIZE_4KIB_MASK;
 
-    if (map_level2 or map_level1 or map_level1) {
+    if (map_level2 or map_level1 or map_frame) {
         @branchHint(.unlikely);
         caps.array_grow_lock.lock();
         defer caps.array_grow_lock.unlock();
