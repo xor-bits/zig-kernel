@@ -81,61 +81,10 @@ pub fn get_capability(thread: *Thread, cap_id: u32) Error!Object {
     return obj;
 }
 
-/// removes a capability and returns the object
-/// some other thread might invalidate the capability during this
-/// `dealloc`
-pub fn take_capability(comptime dealloc: bool, thread: *Thread, cap_id: u32) Error!Object {
-    const caps = capability_array();
-    if (cap_id >= caps.len) return Error.InvalidCapability;
-
-    const current = Thread.vmemOf(thread);
-    const cap = &caps[cap_id];
-
-    // fast path fail if the capability is not owned or being modified
-    if (cap.owner != current)
-        return Error.InvalidCapability;
-
-    cap.lock.lock();
-    defer cap.lock.unlock();
-
-    const obj = cap.*;
-    if (obj.owner != current)
-        return Error.InvalidCapability;
-    cap.* = .{};
-
-    if (dealloc)
-        deallocate(cap_id);
-
-    return obj;
-}
-
-/// assumes that the capability is from `take_capability` without `dealloc`
-///
-/// some consuming calls use this combined with `take_capability(false, ..)`
-/// to 'return back' the capability if the operation failed
-pub fn set_capability(cap_id: u32, obj: Object) void {
-    const cap = &capability_array_unchecked()[cap_id];
-    cap.lock.lock();
-    cap.* = obj;
-    cap.lock.unlock();
-}
-
 /// a single bidirectional call
 pub fn call(thread: *Thread, cap_id: u32, trap: *arch.SyscallRegs) Error!void {
     const obj = try get_capability(thread, cap_id);
     return obj.call(thread, trap);
-}
-
-/// a single consuming bidirectional call
-pub fn consume(thread: *Thread, cap_id: u32, trap: *arch.SyscallRegs) Error!void {
-    const obj = try take_capability(false, thread, cap_id);
-    obj.consume(thread, trap) catch |err| {
-        // place the capability back on error
-        set_capability(cap_id, obj);
-        return err;
-    };
-    // deallocate the capability on success
-    deallocate(cap_id);
 }
 
 /// Receiver specific unidirectional call
@@ -314,6 +263,7 @@ pub const Object = struct {
     }
 
     pub fn call(self: Self, thread: *Thread, trap: *arch.SyscallRegs) Error!void {
+        // log.debug("call {}", .{self.type});
         return switch (self.type) {
             .null => Error.InvalidCapability,
             .memory => Memory.call(self.paddr, thread, trap),
@@ -327,23 +277,6 @@ pub const Object = struct {
             .giant_frame => GiantFrame.call(self.paddr, thread, trap),
             .receiver => Receiver.call(self.paddr, thread, trap),
             .sender => Sender.call(self.paddr, thread, trap),
-        };
-    }
-
-    pub fn consume(self: Self, thread: *Thread, trap: *arch.SyscallRegs) Error!void {
-        return switch (self.type) {
-            .null => Error.InvalidCapability,
-            .memory => Error.InvalidArgument,
-            .thread => Error.InvalidArgument,
-            .page_table_level_4 => Error.InvalidArgument,
-            .page_table_level_3 => PageTableLevel3.consume(self.paddr, thread, trap),
-            .page_table_level_2 => PageTableLevel2.consume(self.paddr, thread, trap),
-            .page_table_level_1 => PageTableLevel1.consume(self.paddr, thread, trap),
-            .frame => Frame.consume(self.paddr, thread, trap),
-            .huge_frame => HugeFrame.consume(self.paddr, thread, trap),
-            .giant_frame => GiantFrame.consume(self.paddr, thread, trap),
-            .receiver => Error.InvalidArgument,
-            .sender => Error.InvalidArgument,
         };
     }
 

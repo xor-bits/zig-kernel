@@ -167,11 +167,6 @@ pub const PageTableLevel3 = struct {
     }
 
     pub fn call(paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
-        _ = .{ paddr, thread, trap };
-        return Error.InvalidArgument;
-    }
-
-    pub fn consume(paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
         const call_id = std.meta.intToEnum(abi.sys.Lvl3CallId, trap.arg1) catch {
             return Error.InvalidArgument;
         };
@@ -232,11 +227,6 @@ pub const PageTableLevel2 = struct {
     }
 
     pub fn call(paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
-        _ = .{ paddr, thread, trap };
-        return Error.InvalidArgument;
-    }
-
-    pub fn consume(paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
         const call_id = std.meta.intToEnum(abi.sys.Lvl2CallId, trap.arg1) catch {
             return Error.InvalidArgument;
         };
@@ -287,11 +277,6 @@ pub const PageTableLevel1 = struct {
     }
 
     pub fn call(paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
-        _ = .{ paddr, thread, trap };
-        return Error.InvalidArgument;
-    }
-
-    pub fn consume(paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
         const call_id = std.meta.intToEnum(abi.sys.Lvl1CallId, trap.arg1) catch {
             return Error.InvalidArgument;
         };

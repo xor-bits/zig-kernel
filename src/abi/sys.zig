@@ -11,9 +11,9 @@ pub const Id = enum(usize) {
     /// identify the object type of a capability
     debug = 2,
     call = 3,
-    consume = 4,
-    recv = 5,
-    reply = 6,
+    recv = 4,
+    reply = 5,
+    // replyRecv = 6,
     /// give up the CPU for other tasks
     yield = 8,
 };
@@ -233,7 +233,7 @@ pub fn map_level3(lvl3_cap: u32, vmem_cap: u32, vaddr: usize, rights: abi.sys.Ri
         .arg3 = @as(u32, @bitCast(rights)),
         .arg4 = @as(u40, @bitCast(flags)),
     };
-    try consume(lvl3_cap, &msg);
+    try call(lvl3_cap, &msg);
 }
 
 // LVL2 CAPABILITY CALLS
@@ -250,7 +250,7 @@ pub fn map_level2(lvl2_cap: u32, vmem_cap: u32, vaddr: usize, rights: abi.sys.Ri
         .arg3 = @as(u32, @bitCast(rights)),
         .arg4 = @as(u40, @bitCast(flags)),
     };
-    try consume(lvl2_cap, &msg);
+    try call(lvl2_cap, &msg);
 }
 
 // LVL1 CAPABILITY CALLS
@@ -267,7 +267,7 @@ pub fn map_level1(lvl1_cap: u32, vmem_cap: u32, vaddr: usize, rights: abi.sys.Ri
         .arg3 = @as(u32, @bitCast(rights)),
         .arg4 = @as(u40, @bitCast(flags)),
     };
-    try consume(lvl1_cap, &msg);
+    try call(lvl1_cap, &msg);
 }
 
 // FRAME CAPABILITY CALLS
@@ -284,7 +284,7 @@ pub fn map_frame(frame_cap: u32, vmem_cap: u32, vaddr: usize, rights: abi.sys.Ri
         .arg3 = @as(u32, @bitCast(rights)),
         .arg4 = @as(u40, @bitCast(flags)),
     };
-    try consume(frame_cap, &msg);
+    try call(frame_cap, &msg);
 }
 
 // RECEIVER CAPABILITY CALLS
@@ -336,13 +336,6 @@ pub fn debug(cap: u32) !abi.ObjectType {
 pub fn call(cap: u32, msg: *Message) !void {
     msg.cap = cap;
     _ = try rwcall(.call, msg);
-}
-
-/// like `call` but for operations that consume the capability
-/// (not thread safe, can error with InvalidCapacity)
-pub fn consume(cap: u32, msg: *Message) !void {
-    msg.cap = cap;
-    _ = try rwcall(.consume, msg);
 }
 
 pub fn recv(cap: u32, msg: *Message) !usize {

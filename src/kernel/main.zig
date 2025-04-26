@@ -155,6 +155,7 @@ fn proc_enter() noreturn {
 pub fn syscall(trap: *arch.SyscallRegs) void {
     const log = std.log.scoped(.syscall);
     // log.info("syscall from cpu={} ip=0x{x} sp=0x{x}", .{ arch.cpu_local().id, trap.user_instr_ptr, trap.user_stack_ptr });
+    // defer log.info("syscall done", .{});
 
     // TODO: once every CPU has reached this, bootloader_reclaimable memory could be freed
     // just some few things need to be copied, but the page map(s) and stack(s) are already copied
@@ -223,15 +224,6 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
 
             trap.syscall_id = abi.sys.encode(0);
             caps.call(thread, cap_id, trap) catch |err| {
-                trap.syscall_id = abi.sys.encode(err);
-            };
-        },
-        .consume => {
-            const cap_id: u32 = @truncate(trap.arg0);
-            if (caps.capAssertNotNull(cap_id, trap)) return;
-
-            trap.syscall_id = abi.sys.encode(0);
-            caps.consume(thread, cap_id, trap) catch |err| {
                 trap.syscall_id = abi.sys.encode(err);
             };
         },

@@ -393,7 +393,6 @@ pub fn alloc(size: usize) ?addr.Phys {
 
     const _size = chunkSize(size) orelse return null;
     const paddr = allocChunk(_size) orelse return null;
-    // log.info("alloc {} @ 0x{x}", .{ _size, paddr.raw });
 
     if (IS_DEBUG) {
         std.debug.assert(isInUsable(paddr, size));
