@@ -90,13 +90,14 @@ fn nextLevelFromEntry(comptime create: bool, entry: *volatile Entry) Error!addr.
 pub const Vmem = struct {
     entries: [512]Entry align(0x1000) = std.mem.zeroes([512]Entry),
 
-    pub fn init(self: *@This()) void {
-        self.* = .{};
-        std.mem.copyForwards(Entry, self.entries[256..], kernel_table.entries[256..]);
+    pub fn init(self: caps.Ref(@This())) void {
+        const ptr = self.ptr();
+        ptr.* = .{};
+        std.mem.copyForwards(Entry, ptr.entries[256..], kernel_table.entries[256..]);
     }
 
-    pub fn canAlloc() bool {
-        return true;
+    pub fn alloc(_: ?abi.ChunkSize) Error!addr.Phys {
+        return pmem.alloc(@sizeOf(@This())) orelse return Error.OutOfMemory;
     }
 
     pub fn call(self_paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
@@ -115,25 +116,41 @@ pub const Vmem = struct {
 
                 const frame_obj = try caps.get_capability(thread, @truncate(trap.arg2));
                 const frame = try frame_obj.as(caps.Frame);
-                const paddr = frame.paddr;
+                var paddr = frame.paddr;
 
-                const vaddr = try addr.Virt.fromUser(trap.arg3);
+                var vaddr = try addr.Virt.fromUser(trap.arg3);
                 const rights: abi.sys.Rights = @bitCast(@as(u32, @truncate(trap.arg4)));
                 const flags: abi.sys.MapFlags = @bitCast(@as(u40, @truncate(trap.arg5)));
 
                 const size = caps.Frame.sizeOf(frame).sizeBytes();
-                const size_1gib = abi.ChunkSize.@"1GiB".sizeBytes();
-                const size_2mib = abi.ChunkSize.@"2MiB".sizeBytes();
-                // const size_1kib = pmem.ChunkSize.@"4KiB".sizeBytes();
+                const size_1gib = comptime abi.ChunkSize.@"1GiB".sizeBytes();
+                const size_2mib = comptime abi.ChunkSize.@"2MiB".sizeBytes();
+                const size_4kib = comptime abi.ChunkSize.@"4KiB".sizeBytes();
 
                 // log.info("mapping {} from 0x{x} to 0x{x}", .{ size, paddr.raw, vaddr.raw });
 
+                // FIXME: before mapping, make sure nothing is mapped
                 if (size >= size_1gib) {
-                    try self.map_giant_frame(paddr, vaddr, rights, flags);
+                    const count = size / size_1gib;
+                    for (0..count) |_| {
+                        try self.map_giant_frame(paddr, vaddr, rights, flags);
+                        paddr.raw += size_1gib;
+                        vaddr.raw += size_1gib;
+                    }
                 } else if (size >= size_2mib) {
-                    try self.map_huge_frame(paddr, vaddr, rights, flags);
+                    const count = size / size_2mib;
+                    for (0..count) |_| {
+                        try self.map_huge_frame(paddr, vaddr, rights, flags);
+                        paddr.raw += size_2mib;
+                        vaddr.raw += size_2mib;
+                    }
                 } else {
-                    try self.map_frame(paddr, vaddr, rights, flags);
+                    const count = size / size_4kib;
+                    for (0..count) |_| {
+                        try self.map_frame(paddr, vaddr, rights, flags);
+                        paddr.raw += size_4kib;
+                        vaddr.raw += size_4kib;
+                    }
                 }
             },
         }
@@ -145,24 +162,6 @@ pub const Vmem = struct {
         cur.pml4_phys_base = self.paddr.toParts().page;
         cur.write();
     }
-
-    // pub fn map(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
-    //     self.entries[vaddr.toParts().level4] = Entry.fromParts(rights, paddr, flags);
-    // }
-
-    // pub fn map_level3(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
-    //     try self.map(paddr, vaddr, rights, flags);
-    // }
-
-    // pub fn map_level2(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
-    //     const next = (try nextLevel(&self.entries, vaddr.toParts().level4)).toHhdm().toPtr(*PageTableLevel3);
-    //     try next.map_level2(paddr, vaddr, rights, flags);
-    // }
-
-    // pub fn map_level1(self: *@This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
-    //     const next = (try nextLevel(&self.entries, vaddr.toParts().level4)).toHhdm().toPtr(*PageTableLevel3);
-    //     try next.map_level1(paddr, vaddr, rights, flags);
-    // }
 
     pub fn map_giant_frame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
         const next = (try nextLevel(true, &self.entries, vaddr.toParts().level4)).toHhdm().toPtr(*volatile PageTableLevel3);
@@ -215,14 +214,6 @@ pub const PageTableLevel3 = struct {
 /// a `PageTableLevel3` points to multiple of these
 pub const PageTableLevel2 = struct {
     entries: [512]Entry align(0x1000) = std.mem.zeroes([512]Entry),
-
-    pub fn init(self: *@This()) void {
-        self.* = .{};
-    }
-
-    pub fn canAlloc() bool {
-        return true;
-    }
 
     pub fn map(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) void {
         self.entries[vaddr.toParts().level2] = Entry.fromParts(rights, paddr, flags);

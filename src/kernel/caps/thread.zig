@@ -4,6 +4,7 @@ const std = @import("std");
 const addr = @import("../addr.zig");
 const arch = @import("../arch.zig");
 const caps = @import("../caps.zig");
+const pmem = @import("../pmem.zig");
 const proc = @import("../proc.zig");
 const spin = @import("../spin.zig");
 
@@ -29,12 +30,12 @@ pub const Thread = struct {
     /// scheduler linked list
     prev: ?caps.Ref(Thread) = null,
 
-    pub fn init(self: *@This()) void {
-        self.* = .{};
+    pub fn init(self: caps.Ref(@This())) void {
+        self.ptr().* = .{};
     }
 
-    pub fn canAlloc() bool {
-        return true;
+    pub fn alloc(_: ?abi.ChunkSize) Error!addr.Phys {
+        return pmem.alloc(@sizeOf(@This())) orelse return Error.OutOfMemory;
     }
 
     // FIXME: pass Ref(Self) instead of addr.Phys

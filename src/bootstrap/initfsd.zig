@@ -7,8 +7,6 @@ const log = std.log.scoped(.initfsd);
 
 //
 
-// 0x1000_0000_0000;
-
 const vmm_vector = std.mem.Allocator{
     .ptr = &vmm_vector_top,
     .vtable = &.{
@@ -21,15 +19,13 @@ const vmm_vector = std.mem.Allocator{
 
 var vmm_vector_top: usize = 0x1000_0000_0000;
 
-// const vmm_vector_vtable = std.mem.Allocator.VTable {};
-
 fn vmm_vector_alloc(_top: *anyopaque, len: usize, _: std.mem.Alignment, _: usize) ?[*]u8 {
     const top: *usize = @alignCast(@ptrCast(_top));
     const ptr: [*]u8 = @ptrFromInt(top.*);
     vmm_vector_grow(top, std.math.divCeil(
         usize,
         len,
-        0x1000,
+        0x10000,
     ) catch return null) catch return null;
     return ptr;
 }
@@ -43,7 +39,7 @@ fn vmm_vector_remap(_top: *anyopaque, memory: []u8, _: std.mem.Alignment, new_le
     vmm_vector_grow(top, std.math.divCeil(
         usize,
         new_len,
-        0x1000,
+        0x10000,
     ) catch return null) catch return null;
     return memory.ptr;
 }
@@ -53,12 +49,12 @@ fn vmm_vector_free(_: *anyopaque, _: []u8, _: std.mem.Alignment, _: usize) void 
 fn vmm_vector_grow(top: *usize, n_pages: usize) !void {
     for (0..n_pages) |_| {
         try main.map_naive(
-            try abi.sys.alloc(abi.BOOTSTRAP_MEMORY, .frame),
+            try abi.sys.alloc(abi.BOOTSTRAP_MEMORY, .frame, .@"64KiB"),
             top.*,
             .{ .writable = true },
             .{},
         );
-        top.* += 0x1000;
+        top.* += 0x10000;
     }
 }
 

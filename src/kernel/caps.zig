@@ -167,17 +167,10 @@ pub fn Ref(comptime T: type) type {
 
         const Self = @This();
 
-        pub fn alloc() Error!Self {
-            std.debug.assert(std.mem.isAligned(0x1000, @alignOf(T)));
-
-            if (!T.canAlloc())
-                return Error.InvalidType;
-
-            const obj = Self{
-                .paddr = pmem.alloc(@sizeOf(T)) orelse return Error.OutOfMemory,
-            };
-            obj.ptr().init();
-
+        pub fn alloc(dyn_size: ?abi.ChunkSize) Error!Self {
+            const paddr = try T.alloc(dyn_size);
+            const obj = Self{ .paddr = paddr };
+            T.init(obj);
             return obj;
         }
 
@@ -235,14 +228,14 @@ pub const Object = struct {
         }
     }
 
-    pub fn alloc(ty: abi.ObjectType, owner: *Thread) Error!Self {
+    pub fn alloc(ty: abi.ObjectType, owner: *Thread, dyn_size: abi.ChunkSize) Error!Self {
         return switch (ty) {
             .null => Error.InvalidCapability,
-            .memory => (try Ref(Memory).alloc()).object(owner),
-            .thread => (try Ref(Thread).alloc()).object(owner),
-            .vmem => (try Ref(Vmem).alloc()).object(owner),
-            .frame => (try Ref(Frame).alloc()).object(owner),
-            .receiver => (try Ref(Receiver).alloc()).object(owner),
+            .memory => (try Ref(Memory).alloc(dyn_size)).object(owner),
+            .thread => (try Ref(Thread).alloc(dyn_size)).object(owner),
+            .vmem => (try Ref(Vmem).alloc(dyn_size)).object(owner),
+            .frame => (try Ref(Frame).alloc(dyn_size)).object(owner),
+            .receiver => (try Ref(Receiver).alloc(dyn_size)).object(owner),
             .sender => Error.InvalidType, // receiver can be cloned to make senders
         };
     }

@@ -5,6 +5,7 @@ const addr = @import("../addr.zig");
 const arch = @import("../arch.zig");
 const caps = @import("../caps.zig");
 const proc = @import("../proc.zig");
+const pmem = @import("../pmem.zig");
 
 const log = std.log.scoped(.caps);
 const Error = abi.sys.Error;
@@ -15,12 +16,12 @@ pub const Receiver = struct {
     receiver: std.atomic.Value(?*caps.Thread) = .init(null),
     sender: std.atomic.Value(?*caps.Thread) = .init(null),
 
-    pub fn init(self: *@This()) void {
-        self.* = .{};
+    pub fn init(self: caps.Ref(@This())) void {
+        self.ptr().* = .{};
     }
 
-    pub fn canAlloc() bool {
-        return true;
+    pub fn alloc(_: ?abi.ChunkSize) Error!addr.Phys {
+        return pmem.alloc(@sizeOf(@This())) orelse return Error.OutOfMemory;
     }
 
     pub fn call(paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
@@ -86,10 +87,8 @@ pub const Receiver = struct {
 };
 
 pub const Sender = struct {
-    pub fn init(_: *@This()) void {}
-
-    pub fn canAlloc() bool {
-        return false;
+    pub fn alloc(_: ?abi.ChunkSize) Error!addr.Phys {
+        return Error.InvalidArgument;
     }
 
     // block until the receiver is free, then switch to the receiver

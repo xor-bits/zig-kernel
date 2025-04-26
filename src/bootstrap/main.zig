@@ -40,14 +40,14 @@ pub fn main() !void {
     // log.info("regs='{}'", .{regs});
     // regs = .{};
 
-    new_thread = try abi.sys.alloc(abi.BOOTSTRAP_MEMORY, .thread);
+    new_thread = try abi.sys.alloc(abi.BOOTSTRAP_MEMORY, .thread, null);
     regs.user_stack_ptr = @intFromPtr(&__thread_stack_end);
     regs.user_instr_ptr = @intFromPtr(&thread_main);
     try abi.sys.thread_write_regs(new_thread, &regs);
     try abi.sys.thread_set_vmem(new_thread, abi.BOOTSTRAP_SELF_VMEM);
     try abi.sys.thread_start(new_thread);
 
-    const recv = try abi.sys.alloc(abi.BOOTSTRAP_MEMORY, .receiver);
+    const recv = try abi.sys.alloc(abi.BOOTSTRAP_MEMORY, .receiver, null);
     send = try abi.sys.receiver_subscribe(recv);
 
     var msg: abi.sys.Message = undefined;
@@ -198,15 +198,9 @@ export fn zig_main() noreturn {
 
     // switch to a bigger stack (256KiB, because the initfs deflate takes up over 128KiB on its own)
     const stack_top: usize = 0x8000_0000_0000 - 0x2000;
-    var stack_base = stack_top - 0x40000;
-    for (0..0x40) |_| {
-        // log.info("mapping 0x{x}", .{stack_base});
-        map_4kib(stack_base) catch |err| {
-            std.debug.panic("not enough memory for a stack: {}", .{err});
-        };
-        stack_base += 0x1000;
-    }
-    log.info("stack mapping complete 0x{x}..0x{x}", .{ stack_top - 0x40000, stack_top });
+    map_stack(stack_top) catch |err| {
+        std.debug.panic("not enough memory for a stack: {}", .{err});
+    };
 
     asm volatile (
         \\ jmp zig_main_realstack
@@ -216,13 +210,12 @@ export fn zig_main() noreturn {
     unreachable;
 }
 
-fn map_4kib(vaddr: usize) !void {
-    try map_naive(
-        try abi.sys.alloc(abi.BOOTSTRAP_MEMORY, .frame),
-        vaddr,
-        .{ .writable = true },
-        .{},
-    );
+fn map_stack(stack_top: usize) !void {
+    const stack_base = stack_top - 0x40000;
+    const frame = try abi.sys.alloc(abi.BOOTSTRAP_MEMORY, .frame, .@"256KiB");
+    log.info("256KiB stack frame allocated", .{});
+    try map_naive(frame, stack_base, .{ .writable = true }, .{});
+    log.info("stack mapping complete 0x{x}..0x{x}", .{ stack_top - 0x40000, stack_top });
 }
 
 export fn zig_main_realstack() noreturn {

@@ -145,7 +145,7 @@ var used = std.atomic.Value(u32).init(0);
 /// how many pages are usable
 var usable = std.atomic.Value(u32).init(0);
 
-fn allocChunk(size: abi.ChunkSize) ?addr.Phys {
+pub fn allocChunk(size: abi.ChunkSize) ?addr.Phys {
     if (debug_assert_initialized()) return null;
 
     const bitmap: []std.atomic.Value(u64) = bitmaps[@intFromEnum(size)].bitmap;
@@ -162,7 +162,12 @@ fn allocChunk(size: abi.ChunkSize) ?addr.Phys {
 
         if (now2 & lowest != 0) {
             // success: bit set to 0 from 1 before anyone else
-            return addr.Phys.fromInt((std.math.log2_int(u64, lowest) + 64 * i) * size.sizeBytes());
+            const result = addr.Phys.fromInt((std.math.log2_int(u64, lowest) + 64 * i) * size.sizeBytes());
+            if (IS_DEBUG) {
+                std.debug.assert(isInUsable(result, size.sizeBytes()));
+                std.crypto.secureZero(u64, result.toHhdm().toPtr([*]volatile u64)[0..512]);
+            }
+            return result;
         }
     }
 
@@ -177,10 +182,15 @@ fn allocChunk(size: abi.ChunkSize) ?addr.Phys {
     const bucket = &bitmap[bucket_id];
     _ = bucket.fetchOr(@as(usize, 1) << bit_id, .monotonic); // maybe monotonic instead of release, because nothing is written into it
 
-    return addr.Phys.fromInt(parent_chunk.raw + size.sizeBytes());
+    const result = addr.Phys.fromInt(parent_chunk.raw + size.sizeBytes());
+    if (IS_DEBUG) {
+        std.debug.assert(isInUsable(result, size.sizeBytes()));
+        std.crypto.secureZero(u64, result.toHhdm().toPtr([*]volatile u64)[0..512]);
+    }
+    return result;
 }
 
-fn deallocChunk(ptr: addr.Phys, size: abi.ChunkSize) void {
+pub fn deallocChunk(ptr: addr.Phys, size: abi.ChunkSize) void {
     // if the buddy chunk is also free, allocate it and free the parent chunk
     // if the buddy chunk is not free, then just free the current chunk
     //
@@ -356,21 +366,18 @@ pub fn alloc(size: usize) ?addr.Phys {
         return addr.Phys.fromInt(0);
 
     const _size = abi.ChunkSize.of(size) orelse return null;
-    const paddr = allocChunk(_size) orelse return null;
-
-    if (IS_DEBUG) {
-        std.debug.assert(isInUsable(paddr, size));
-        std.crypto.secureZero(u64, paddr.toHhdm().toPtr([*]volatile u64)[0..512]);
-    }
-
-    return paddr;
+    return allocChunk(_size);
 }
 
 pub fn free(chunk: addr.Phys, size: usize) void {
-    return deallocChunk(chunk, abi.ChunkSize.of(size) orelse {
+    if (size == 0)
+        return;
+
+    const _size = abi.ChunkSize.of(size) orelse {
         log.err("trying to free a chunk that could not have been allocated", .{});
         return;
-    });
+    };
+    return deallocChunk(chunk, _size);
 }
 
 fn isInUsable(paddr: addr.Phys, size: usize) bool {

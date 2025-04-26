@@ -18,8 +18,7 @@ const Error = abi.sys.Error;
 
 /// load and exec the bootstrap process
 pub fn exec(a: args.Args) !void {
-    const vmem = try caps.Ref(caps.Vmem).alloc();
-    vmem.ptr().init();
+    const vmem = try caps.Ref(caps.Vmem).alloc(null);
 
     (arch.Cr3{
         .pml4_phys_base = vmem.paddr.toParts().page,
@@ -27,7 +26,7 @@ pub fn exec(a: args.Args) !void {
 
     const boot_info = try map_bootstrap(vmem.ptr(), a);
 
-    const init_thread = try caps.Ref(caps.Thread).alloc();
+    const init_thread = try caps.Ref(caps.Thread).alloc(null);
     init_thread.ptr().* = .{
         .trap = .{
             .user_instr_ptr = abi.BOOTSTRAP_EXE,
@@ -35,7 +34,7 @@ pub fn exec(a: args.Args) !void {
         .vmem = vmem,
     };
 
-    const init_memory = try caps.Ref(caps.Memory).alloc();
+    const init_memory = try caps.Ref(caps.Memory).alloc(null);
 
     var id: u32 = undefined;
     id = caps.push_capability(vmem.object(init_thread.ptr()));
@@ -56,7 +55,7 @@ fn map_bootstrap(vmem: *caps.Vmem, a: args.Args) !caps.Ref(caps.Frame) {
     const low = addr.Virt.fromInt(abi.BOOTSTRAP_EXE);
     const high = addr.Virt.fromInt(abi.BOOTSTRAP_EXE + data_len);
 
-    const boot_info = try caps.Ref(caps.Frame).alloc();
+    const boot_info = try caps.Ref(caps.Frame).alloc(abi.ChunkSize.of(@sizeOf(abi.BootInfo)));
     const boot_info_ptr: *volatile abi.BootInfo = @ptrCast(boot_info.ptr());
 
     boot_info_ptr.* = .{
@@ -87,7 +86,7 @@ fn map_bootstrap(vmem: *caps.Vmem, a: args.Args) !caps.Ref(caps.Frame) {
         // log.info("mapping level 1 entry", .{});
 
         try vmem.map_frame(
-            (try caps.Ref(caps.Frame).alloc()).paddr,
+            (try caps.Ref(caps.Frame).alloc(.@"4KiB")).paddr,
             current,
             .{
                 .readable = true,

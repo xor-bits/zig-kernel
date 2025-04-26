@@ -120,10 +120,11 @@ pub const MemoryCallId = enum(u8) {
 };
 
 // allocate a new capability using a memory capability
-pub fn alloc(mem_cap: u32, ty: abi.ObjectType) !u32 {
+pub fn alloc(mem_cap: u32, ty: abi.ObjectType, dyn_size: ?abi.ChunkSize) !u32 {
     var msg: Message = .{
         .arg0 = @intFromEnum(MemoryCallId.alloc),
         .arg1 = @intFromEnum(ty),
+        .arg2 = @intFromEnum(dyn_size orelse .@"4KiB"),
     };
     try call(mem_cap, &msg);
     return @truncate(msg.cap);
