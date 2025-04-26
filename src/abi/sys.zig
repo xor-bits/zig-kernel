@@ -58,6 +58,7 @@ pub const Error = error{
     NoVmem,
     ThreadSafety,
     AlreadyMapped,
+    NotMapped,
     MappingOverlap,
 
     UnknownError,
@@ -88,7 +89,8 @@ pub fn encodeError(err: Error) usize {
         error.NoVmem => 13,
         error.ThreadSafety => 14,
         error.AlreadyMapped => 15,
-        error.MappingOverlap => 16,
+        error.NotMapped => 16,
+        error.MappingOverlap => 17,
 
         error.UnknownError => std.debug.panic("unknown error shouldn't be encoded", .{}),
     }));
@@ -115,7 +117,8 @@ pub fn decode(v: usize) Error!usize {
         13 => error.NoVmem,
         14 => error.ThreadSafety,
         15 => error.AlreadyMapped,
-        16 => error.MappingOverlap,
+        16 => error.NotMapped,
+        17 => error.MappingOverlap,
 
         else => return error.UnknownError,
     };
@@ -230,6 +233,7 @@ pub fn thread_set_prio(thread_cap: u32, priority: u2) !void {
 
 pub const VmemCallId = enum(u8) {
     map,
+    unmap,
 };
 
 pub fn map(vmem_cap: u32, frame_cap: u32, vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
@@ -239,6 +243,15 @@ pub fn map(vmem_cap: u32, frame_cap: u32, vaddr: usize, rights: abi.sys.Rights, 
         .arg2 = vaddr,
         .arg3 = @as(u32, @bitCast(rights)),
         .arg4 = @as(u40, @bitCast(flags)),
+    };
+    try call(vmem_cap, &msg);
+}
+
+pub fn unmap(vmem_cap: u32, frame_cap: u32, vaddr: usize) !void {
+    var msg: Message = .{
+        .arg0 = @intFromEnum(VmemCallId.unmap),
+        .arg1 = frame_cap,
+        .arg2 = vaddr,
     };
     try call(vmem_cap, &msg);
 }

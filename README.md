@@ -66,7 +66,7 @@ zig build run --prominent-compile-errors --summary none -freference-trace \
     - [x] allocate capabilities
     - [ ] deallocate capabilities
     - [x] map capabilities
-    - [ ] unmap capabilities
+    - [x] unmap capabilities
     - [ ] send capabilities
     - [x] disallow mapping a frame twice without cloning the cap
     - [x] disallow overlapping maps
