@@ -62,7 +62,14 @@ zig build run --prominent-compile-errors --summary none -freference-trace \
   - [x] binary loader
   - [ ] message IPC, shared memory IPC
   - [ ] figure out userland interrupts (ps2 keyboard, ..)
-  - [x] syscalls:
+  - [x] capabilities
+    - [x] allocate capabilities
+    - [ ] deallocate capabilities
+    - [x] map capabilities
+    - [ ] unmap capabilities
+    - [ ] send capabilities
+    - [ ] disallow mapping a frame twice without cloning the cap
+  - [x] syscalls
 
 - [x] bootstrap/initfsd process
   - [x] decompress initfs.tar.gz
