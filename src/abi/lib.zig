@@ -51,6 +51,7 @@ pub fn panic(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace, ret_
 
 //
 
+/// kernel object variant that a capability points to
 pub const ObjectType = enum(u8) {
     /// an unallocated/invalid capability
     null = 0,
@@ -70,6 +71,45 @@ pub const ObjectType = enum(u8) {
     sender,
 };
 
+/// kernel object size in bit-width (minus 12)
+pub const ChunkSize = enum(u5) {
+    @"4KiB",
+    @"8KiB",
+    @"16KiB",
+    @"32KiB",
+    @"64KiB",
+    @"128KiB",
+    @"256KiB",
+    @"512KiB",
+    @"1MiB",
+    @"2MiB",
+    @"4MiB",
+    @"8MiB",
+    @"16MiB",
+    @"32MiB",
+    @"64MiB",
+    @"128MiB",
+    @"256MiB",
+    @"512MiB",
+    @"1GiB",
+
+    pub fn of(n_bytes: usize) ?ChunkSize {
+        // 0 = 4KiB, 1 = 8KiB, ..
+        const page_size = @max(12, std.math.log2_int_ceil(usize, n_bytes)) - 12;
+        if (page_size >= 18) return null;
+        return @enumFromInt(page_size);
+    }
+
+    pub fn next(self: @This()) ?@This() {
+        return std.meta.intToEnum(@This(), @intFromEnum(self) + 1) catch return null;
+    }
+
+    pub fn sizeBytes(self: @This()) usize {
+        return @as(usize, 0x1000) << @intFromEnum(self);
+    }
+};
+
+/// data structure in the boot info frame provided to the bootstrap process
 pub const BootInfo = extern struct {
     bootstrap_data: [*]u8,
     bootstrap_data_len: usize,

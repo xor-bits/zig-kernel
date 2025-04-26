@@ -4,7 +4,6 @@ const std = @import("std");
 const addr = @import("../addr.zig");
 const arch = @import("../arch.zig");
 const caps = @import("../caps.zig");
-const pmem = @import("../pmem.zig");
 
 const log = std.log.scoped(.caps);
 const Error = abi.sys.Error;
@@ -57,7 +56,7 @@ pub const Frame = struct {
         std.crypto.secureZero(u64, @ptrCast(self.data[0..]));
     }
 
-    pub fn sizeOf(self: caps.Ref(@This())) pmem.ChunkSize {
+    pub fn sizeOf(self: caps.Ref(@This())) abi.ChunkSize {
         return @enumFromInt(self.paddr.toParts().offset);
     }
 };

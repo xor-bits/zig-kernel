@@ -1,4 +1,5 @@
 const std = @import("std");
+const abi = @import("abi");
 const builtin = @import("builtin");
 const limine = @import("limine");
 
@@ -144,44 +145,7 @@ var used = std.atomic.Value(u32).init(0);
 /// how many pages are usable
 var usable = std.atomic.Value(u32).init(0);
 
-pub const ChunkSize = enum(u5) {
-    @"4KiB",
-    @"8KiB",
-    @"16KiB",
-    @"32KiB",
-    @"64KiB",
-    @"128KiB",
-    @"256KiB",
-    @"512KiB",
-    @"1MiB",
-    @"2MiB",
-    @"4MiB",
-    @"8MiB",
-    @"16MiB",
-    @"32MiB",
-    @"64MiB",
-    @"128MiB",
-    @"256MiB",
-    @"512MiB",
-    @"1GiB",
-
-    pub fn next(self: @This()) ?@This() {
-        return std.meta.intToEnum(@This(), @intFromEnum(self) + 1) catch return null;
-    }
-
-    pub fn sizeBytes(self: @This()) usize {
-        return @as(usize, 0x1000) << @intFromEnum(self);
-    }
-};
-
-fn chunkSize(n_bytes: usize) ?ChunkSize {
-    // 0 = 4KiB, 1 = 8KiB, ..
-    const page_size = @max(12, std.math.log2_int_ceil(usize, n_bytes)) - 12;
-    if (page_size >= 18) return null;
-    return @enumFromInt(page_size);
-}
-
-fn allocChunk(size: ChunkSize) ?addr.Phys {
+fn allocChunk(size: abi.ChunkSize) ?addr.Phys {
     if (debug_assert_initialized()) return null;
 
     const bitmap: []std.atomic.Value(u64) = bitmaps[@intFromEnum(size)].bitmap;
@@ -216,7 +180,7 @@ fn allocChunk(size: ChunkSize) ?addr.Phys {
     return addr.Phys.fromInt(parent_chunk.raw + size.sizeBytes());
 }
 
-fn deallocChunk(ptr: addr.Phys, size: ChunkSize) void {
+fn deallocChunk(ptr: addr.Phys, size: abi.ChunkSize) void {
     // if the buddy chunk is also free, allocate it and free the parent chunk
     // if the buddy chunk is not free, then just free the current chunk
     //
@@ -391,7 +355,7 @@ pub fn alloc(size: usize) ?addr.Phys {
     if (size == 0)
         return addr.Phys.fromInt(0);
 
-    const _size = chunkSize(size) orelse return null;
+    const _size = abi.ChunkSize.of(size) orelse return null;
     const paddr = allocChunk(_size) orelse return null;
 
     if (IS_DEBUG) {
@@ -403,7 +367,7 @@ pub fn alloc(size: usize) ?addr.Phys {
 }
 
 pub fn free(chunk: addr.Phys, size: usize) void {
-    return deallocChunk(chunk, chunkSize(size) orelse {
+    return deallocChunk(chunk, abi.ChunkSize.of(size) orelse {
         log.err("trying to free a chunk that could not have been allocated", .{});
         return;
     });
@@ -427,7 +391,7 @@ fn _alloc(_: *anyopaque, len: usize, _: std.mem.Alignment, _: usize) ?[*]u8 {
 }
 
 fn _resize(_: *anyopaque, buf: []u8, _: std.mem.Alignment, new_len: usize, _: usize) bool {
-    const chunk_size = chunkSize(buf.len) orelse return false;
+    const chunk_size = abi.ChunkSize.of(buf.len) orelse return false;
     if (chunk_size.sizeBytes() >= new_len) return true;
     return false;
 }
@@ -439,7 +403,7 @@ fn _free(_: *anyopaque, buf: []u8, _: std.mem.Alignment, _: usize) void {
 fn _remap(_: *anyopaque, buf: []u8, _: std.mem.Alignment, new_len: usize, _: usize) ?[*]u8 {
     // physical memory cant be remapped
 
-    const chunk_size = chunkSize(buf.len) orelse return null;
+    const chunk_size = abi.ChunkSize.of(buf.len) orelse return null;
     if (chunk_size.sizeBytes() >= new_len) return buf.ptr;
 
     return null;

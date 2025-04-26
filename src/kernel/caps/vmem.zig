@@ -122,8 +122,8 @@ pub const Vmem = struct {
                 const flags: abi.sys.MapFlags = @bitCast(@as(u40, @truncate(trap.arg5)));
 
                 const size = caps.Frame.sizeOf(frame).sizeBytes();
-                const size_1gib = pmem.ChunkSize.@"1GiB".sizeBytes();
-                const size_2mib = pmem.ChunkSize.@"2MiB".sizeBytes();
+                const size_1gib = abi.ChunkSize.@"1GiB".sizeBytes();
+                const size_2mib = abi.ChunkSize.@"2MiB".sizeBytes();
                 // const size_1kib = pmem.ChunkSize.@"4KiB".sizeBytes();
 
                 // log.info("mapping {} from 0x{x} to 0x{x}", .{ size, paddr.raw, vaddr.raw });
