@@ -1,22 +1,16 @@
 const std = @import("std");
 const root = @import("root");
 
-pub const sys = @import("sys.zig");
+pub const btree = @import("btree.zig");
+pub const caps = @import("caps.zig");
 pub const ring = @import("ring.zig");
 pub const rt = @import("rt.zig");
-pub const btree = @import("btree.zig");
+pub const sys = @import("sys.zig");
 
 //
 
 /// where the kernel places the root binary
 pub const ROOT_EXE = 0x200_0000;
-
-// some hardcoded capability handles
-
-pub const ROOT_SELF_VMEM: u32 = 1;
-pub const ROOT_SELF_THREAD: u32 = 2;
-pub const ROOT_MEMORY: u32 = 3;
-pub const ROOT_BOOT_INFO: u32 = 4;
 
 //
 
@@ -62,7 +56,7 @@ pub const ObjectType = enum(u8) {
     thread,
     /// capability to the virtual memory structure
     vmem,
-    /// capability to a 4KiB physical page
+    /// capability to a physical memory region (sized `ChunkSize`)
     frame,
     /// capability to **the** receiver end of an endpoint,
     /// there can only be a single receiver

@@ -29,7 +29,7 @@ pub fn main() !void {
     log.info("I am root", .{});
 
     try map_naive(
-        abi.ROOT_BOOT_INFO,
+        abi.caps.ROOT_BOOT_INFO,
         BOOT_INFO,
         .{ .writable = true },
         .{},
@@ -70,14 +70,13 @@ pub fn main() !void {
     // try exec_with_vm("/sbin/init");
 
     log.info("root dead", .{});
-    try abi.sys.thread_stop(abi.ROOT_SELF_THREAD);
+    try abi.caps.ROOT_SELF_THREAD.stop();
     unreachable;
 }
 
-pub fn map_naive(obj: u32, vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
-    try abi.sys.map(
-        abi.ROOT_SELF_VMEM,
-        obj,
+pub fn map_naive(frame: abi.caps.Frame, vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
+    try abi.caps.ROOT_SELF_VMEM.map(
+        frame,
         vaddr,
         rights,
         flags,
@@ -98,7 +97,7 @@ fn exec_elf(path: []const u8) !void {
     const header = try std.elf.Header.read(&elf);
     var program_headers = header.program_header_iterator(&elf);
 
-    const new_vmem = try abi.sys.alloc(abi.ROOT_MEMORY, .vmem, null);
+    const new_vmem = try abi.caps.ROOT_MEMORY.alloc(abi.caps.Vmem);
 
     // try abi.sys.vmem_transfer_cap(
     //     new_vmem,
@@ -147,11 +146,11 @@ fn exec_elf(path: []const u8) !void {
         // because frame caps use huge and giant pages automatically
 
         const size = segment_vaddr_top - segment_vaddr_bottom;
-        const frames = try allocVector(abi.ROOT_MEMORY, size);
+        const frames = try allocVector(abi.caps.ROOT_MEMORY, size);
 
         try mapVector(
             &frames,
-            abi.ROOT_SELF_VMEM,
+            abi.caps.ROOT_SELF_VMEM,
             LOADER_TMP,
             .{ .writable = true },
             .{},
@@ -169,7 +168,7 @@ fn exec_elf(path: []const u8) !void {
 
         try unmapVector(
             &frames,
-            abi.ROOT_SELF_VMEM,
+            abi.caps.ROOT_SELF_VMEM,
             LOADER_TMP,
         );
 
@@ -184,9 +183,9 @@ fn exec_elf(path: []const u8) !void {
 
     // map a stack
     // log.info("mapping a stack", .{});
-    try abi.sys.map(
-        new_vmem,
-        try abi.sys.alloc(abi.ROOT_MEMORY, .frame, .@"256KiB"),
+    const stack = try abi.caps.ROOT_MEMORY.allocSized(abi.caps.Frame, .@"256KiB");
+    try new_vmem.map(
+        stack,
         0x7FFF_FFF0_0000,
         .{
             .writable = true,
@@ -196,9 +195,9 @@ fn exec_elf(path: []const u8) !void {
 
     // map an initial heap
     // log.info("mapping a heap", .{});
-    try abi.sys.map(
-        new_vmem,
-        try abi.sys.alloc(abi.ROOT_MEMORY, .frame, .@"256KiB"),
+    const heap = try abi.caps.ROOT_MEMORY.allocSized(abi.caps.Frame, .@"256KiB");
+    try new_vmem.map(
+        heap,
         heap_bottom,
         .{
             .writable = true,
@@ -207,11 +206,11 @@ fn exec_elf(path: []const u8) !void {
     );
 
     // log.info("creating a new thread", .{});
-    const new_thread = try abi.sys.alloc(abi.ROOT_MEMORY, .thread, null);
+    const new_thread = try abi.caps.ROOT_MEMORY.alloc(abi.caps.Thread);
 
-    try abi.sys.thread_set_vmem(new_thread, new_vmem);
-    try abi.sys.thread_set_prio(new_thread, 3);
-    try abi.sys.thread_write_regs(new_thread, &.{
+    try new_thread.setVmem(new_vmem);
+    try new_thread.setPrio(3);
+    try new_thread.writeRegs(&.{
         .user_instr_ptr = header.entry,
         .user_stack_ptr = 0x7FFF_FFF4_0000,
     });
@@ -219,21 +218,21 @@ fn exec_elf(path: []const u8) !void {
     // log.info("ip=0x{x} sp=0x{x}", .{ header.entry, 0x7FFF_FFF4_0000 });
 
     log.info("everything ready, exec", .{});
-    try abi.sys.thread_start(new_thread);
+    try new_thread.start();
 }
 
-const FrameVector = std.EnumArray(abi.ChunkSize, u32);
+const FrameVector = std.EnumArray(abi.ChunkSize, abi.caps.Frame);
 
-fn allocVector(mem_cap: u32, size: usize) !FrameVector {
+fn allocVector(mem: abi.caps.Memory, size: usize) !FrameVector {
     if (size > abi.ChunkSize.@"1GiB".sizeBytes()) return error.SegmentTooBig;
-    var frames: FrameVector = .initFill(0);
+    var frames: FrameVector = .initFill(.{ .cap = 0 });
 
     inline for (std.meta.fields(abi.ChunkSize)) |f| {
         const variant: abi.ChunkSize = @enumFromInt(f.value);
         const specific_size: usize = variant.sizeBytes();
 
         if (size & specific_size != 0) {
-            const frame = try abi.sys.alloc(mem_cap, .frame, variant);
+            const frame = try mem.allocSized(abi.caps.Frame, variant);
             frames.set(variant, frame);
         }
     }
@@ -241,15 +240,14 @@ fn allocVector(mem_cap: u32, size: usize) !FrameVector {
     return frames;
 }
 
-fn mapVector(v: *const FrameVector, vmem_cap: u32, _vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
+fn mapVector(v: *const FrameVector, vmem: abi.caps.Vmem, _vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
     var vaddr = _vaddr;
 
     var iter = @constCast(v).iterator();
     while (iter.next()) |e| {
-        if (e.value.* == 0) continue;
+        if (e.value.*.cap == 0) continue;
 
-        try abi.sys.map(
-            vmem_cap,
+        try vmem.map(
             e.value.*,
             vaddr,
             rights,
@@ -260,15 +258,14 @@ fn mapVector(v: *const FrameVector, vmem_cap: u32, _vaddr: usize, rights: abi.sy
     }
 }
 
-fn unmapVector(v: *const FrameVector, vmem_cap: u32, _vaddr: usize) !void {
+fn unmapVector(v: *const FrameVector, vmem: abi.caps.Vmem, _vaddr: usize) !void {
     var vaddr = _vaddr;
 
     var iter = @constCast(v).iterator();
     while (iter.next()) |e| {
-        if (e.value.* == 0) continue;
+        if (e.value.*.cap == 0) continue;
 
-        try abi.sys.unmap(
-            vmem_cap,
+        try vmem.unmap(
             e.value.*,
             vaddr,
         );
@@ -307,7 +304,7 @@ export fn zig_main() noreturn {
 }
 
 fn map_stack() !void {
-    const frame = try abi.sys.alloc(abi.ROOT_MEMORY, .frame, .@"256KiB");
+    const frame = try abi.caps.ROOT_MEMORY.allocSized(abi.caps.Frame, .@"256KiB");
     // log.info("256KiB stack frame allocated", .{});
     try map_naive(frame, STACK_BOTTOM, .{ .writable = true }, .{});
     // log.info("stack mapping complete 0x{x}..0x{x}", .{ STACK_BOTTOM, STACK_TOP });

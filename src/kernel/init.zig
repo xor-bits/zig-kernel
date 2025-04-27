@@ -38,13 +38,13 @@ pub fn exec(a: args.Args) !void {
 
     var id: u32 = undefined;
     id = caps.push_capability(vmem.object(init_thread.ptr()));
-    std.debug.assert(id == abi.ROOT_SELF_VMEM);
+    std.debug.assert(id == abi.caps.ROOT_SELF_VMEM.cap);
     id = caps.push_capability(init_thread.object(init_thread.ptr()));
-    std.debug.assert(id == abi.ROOT_SELF_THREAD);
+    std.debug.assert(id == abi.caps.ROOT_SELF_THREAD.cap);
     id = caps.push_capability(init_memory.object(init_thread.ptr()));
-    std.debug.assert(id == abi.ROOT_MEMORY);
+    std.debug.assert(id == abi.caps.ROOT_MEMORY.cap);
     id = caps.push_capability(boot_info.object(init_thread.ptr()));
-    std.debug.assert(id == abi.ROOT_BOOT_INFO);
+    std.debug.assert(id == abi.caps.ROOT_BOOT_INFO.cap);
 
     try proc.start(init_thread);
 }
