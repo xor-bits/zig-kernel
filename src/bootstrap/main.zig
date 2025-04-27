@@ -135,10 +135,10 @@ fn exec_elf(path: []const u8) !void {
             .{},
         );
 
-        log.info("copying to [ 0x{x}..0x{x} ]", .{
-            segment_vaddr_bottom + segment_data_bottom_offset,
-            segment_vaddr_bottom + segment_data_bottom_offset + program_header.p_filesz,
-        });
+        // log.info("copying to [ 0x{x}..0x{x} ]", .{
+        //     segment_vaddr_bottom + segment_data_bottom_offset,
+        //     segment_vaddr_bottom + segment_data_bottom_offset + program_header.p_filesz,
+        // });
         copyForwardsVolatile(
             u8,
             @as([*]volatile u8, @ptrFromInt(LOADER_TMP + segment_data_bottom_offset))[0..program_header.p_filesz],
@@ -161,7 +161,7 @@ fn exec_elf(path: []const u8) !void {
     }
 
     // map a stack
-    log.info("mapping a stack", .{});
+    // log.info("mapping a stack", .{});
     try abi.sys.map(
         new_vmem,
         try abi.sys.alloc(abi.BOOTSTRAP_MEMORY, .frame, .@"256KiB"),
@@ -173,7 +173,7 @@ fn exec_elf(path: []const u8) !void {
     );
 
     // map an initial heap
-    log.info("mapping a heap", .{});
+    // log.info("mapping a heap", .{});
     try abi.sys.map(
         new_vmem,
         try abi.sys.alloc(abi.BOOTSTRAP_MEMORY, .frame, .@"256KiB"),
@@ -184,7 +184,7 @@ fn exec_elf(path: []const u8) !void {
         .{},
     );
 
-    log.info("creating a new thread", .{});
+    // log.info("creating a new thread", .{});
     const new_thread = try abi.sys.alloc(abi.BOOTSTRAP_MEMORY, .thread, null);
 
     try abi.sys.thread_set_vmem(new_thread, new_vmem);
@@ -194,7 +194,7 @@ fn exec_elf(path: []const u8) !void {
         .user_stack_ptr = 0x7FFF_FFF4_0000,
     });
 
-    log.info("ip=0x{x} sp=0x{x}", .{ header.entry, 0x7FFF_FFF4_0000 });
+    // log.info("ip=0x{x} sp=0x{x}", .{ header.entry, 0x7FFF_FFF4_0000 });
 
     log.info("everything ready, exec", .{});
     try abi.sys.thread_start(new_thread);
