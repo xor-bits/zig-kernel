@@ -60,7 +60,10 @@ pub fn yield(trap: *arch.SyscallRegs) void {
         prev_thread.trap = trap.*;
 
         switch (prev_thread.status) {
-            .ready, .running => ready(prev_thread),
+            .ready, .running => {
+                prev_thread.status = .waiting;
+                ready(prev_thread);
+            },
             .stopped, .waiting => {},
         }
     }
