@@ -183,21 +183,21 @@ pub const ThreadRegs = extern struct {
     user_stack_ptr: u64 = 0,
 };
 
-pub fn thread_start(thread_cap: u32) !void {
+pub fn threadStart(thread_cap: u32) !void {
     var msg: Message = .{
         .arg0 = @intFromEnum(ThreadCallId.start),
     };
     try call(thread_cap, &msg);
 }
 
-pub fn thread_stop(thread_cap: u32) !void {
+pub fn threadStop(thread_cap: u32) !void {
     var msg: Message = .{
         .arg0 = @intFromEnum(ThreadCallId.stop),
     };
     try call(thread_cap, &msg);
 }
 
-pub fn thread_read_regs(thread_cap: u32, regs: *ThreadRegs) !void {
+pub fn threadReadRegs(thread_cap: u32, regs: *ThreadRegs) !void {
     var msg: Message = .{
         .arg0 = @intFromEnum(ThreadCallId.read_regs),
         .arg1 = @intFromPtr(regs),
@@ -205,7 +205,7 @@ pub fn thread_read_regs(thread_cap: u32, regs: *ThreadRegs) !void {
     try call(thread_cap, &msg);
 }
 
-pub fn thread_write_regs(thread_cap: u32, regs: *const ThreadRegs) !void {
+pub fn threadWriteRegs(thread_cap: u32, regs: *const ThreadRegs) !void {
     var msg: Message = .{
         .arg0 = @intFromEnum(ThreadCallId.write_regs),
         .arg1 = @intFromPtr(regs),
@@ -213,7 +213,7 @@ pub fn thread_write_regs(thread_cap: u32, regs: *const ThreadRegs) !void {
     try call(thread_cap, &msg);
 }
 
-pub fn thread_set_vmem(thread_cap: u32, vmem_cap: u32) !void {
+pub fn threadSetVmem(thread_cap: u32, vmem_cap: u32) !void {
     var msg: Message = .{
         .arg0 = @intFromEnum(ThreadCallId.set_vmem),
         .arg1 = vmem_cap,
@@ -221,7 +221,7 @@ pub fn thread_set_vmem(thread_cap: u32, vmem_cap: u32) !void {
     try call(thread_cap, &msg);
 }
 
-pub fn thread_set_prio(thread_cap: u32, priority: u2) !void {
+pub fn threadSetPrio(thread_cap: u32, priority: u2) !void {
     var msg: Message = .{
         .arg0 = @intFromEnum(ThreadCallId.set_prio),
         .arg1 = priority,
@@ -237,7 +237,7 @@ pub const VmemCallId = enum(u8) {
     transfer_cap,
 };
 
-pub fn map(vmem_cap: u32, frame_cap: u32, vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
+pub fn vmemMap(vmem_cap: u32, frame_cap: u32, vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
     var msg: Message = .{
         .arg0 = @intFromEnum(VmemCallId.map),
         .arg1 = frame_cap,
@@ -248,7 +248,7 @@ pub fn map(vmem_cap: u32, frame_cap: u32, vaddr: usize, rights: abi.sys.Rights, 
     try call(vmem_cap, &msg);
 }
 
-pub fn unmap(vmem_cap: u32, frame_cap: u32, vaddr: usize) !void {
+pub fn vmemUnmap(vmem_cap: u32, frame_cap: u32, vaddr: usize) !void {
     var msg: Message = .{
         .arg0 = @intFromEnum(VmemCallId.unmap),
         .arg1 = frame_cap,
@@ -257,7 +257,7 @@ pub fn unmap(vmem_cap: u32, frame_cap: u32, vaddr: usize) !void {
     try call(vmem_cap, &msg);
 }
 
-pub fn vmem_transfer_cap(vmem_cap: u32, cap: u32) !void {
+pub fn vmemTransferCap(vmem_cap: u32, cap: u32) !void {
     var msg: Message = .{
         .arg0 = @intFromEnum(VmemCallId.transfer_cap),
         .arg1 = cap,
@@ -275,7 +275,7 @@ pub const ReceiverCallId = enum(u8) {
     subscribe,
 };
 
-pub fn receiver_subscribe(recv_cap: u32) Error!u32 {
+pub fn receiverSubscribe(recv_cap: u32) Error!u32 {
     var msg: Message = .{
         .arg0 = @intFromEnum(ReceiverCallId.subscribe),
     };

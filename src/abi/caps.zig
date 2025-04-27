@@ -34,27 +34,27 @@ pub const Thread = struct {
     pub const Type: abi.ObjectType = .thread;
 
     pub fn start(self: @This()) sys.Error!void {
-        return sys.thread_start(self.cap);
+        return sys.threadStart(self.cap);
     }
 
     pub fn stop(self: @This()) sys.Error!void {
-        return sys.thread_stop(self.cap);
+        return sys.threadStop(self.cap);
     }
 
     pub fn readRegs(self: @This(), regs: *sys.ThreadRegs) sys.Error!void {
-        return sys.thread_read_regs(self.cap, regs);
+        return sys.threadReadRegs(self.cap, regs);
     }
 
     pub fn writeRegs(self: @This(), regs: *const sys.ThreadRegs) sys.Error!void {
-        return sys.thread_write_regs(self.cap, regs);
+        return sys.threadWriteRegs(self.cap, regs);
     }
 
     pub fn setVmem(self: @This(), vmem: Vmem) sys.Error!void {
-        return sys.thread_set_vmem(self.cap, vmem.cap);
+        return sys.threadSetVmem(self.cap, vmem.cap);
     }
 
     pub fn setPrio(self: @This(), priority: u2) sys.Error!void {
-        return sys.thread_set_prio(self.cap, priority);
+        return sys.threadSetPrio(self.cap, priority);
     }
 };
 
@@ -65,11 +65,11 @@ pub const Vmem = struct {
     pub const Type: abi.ObjectType = .vmem;
 
     pub fn map(self: @This(), frame: Frame, vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) sys.Error!void {
-        return sys.map(self.cap, frame.cap, vaddr, rights, flags);
+        return sys.vmemMap(self.cap, frame.cap, vaddr, rights, flags);
     }
 
     pub fn unmap(self: @This(), frame: Frame, vaddr: usize) sys.Error!void {
-        return sys.unmap(self.cap, frame.cap, vaddr);
+        return sys.vmemUnmap(self.cap, frame.cap, vaddr);
     }
 };
 
@@ -88,7 +88,7 @@ pub const Receiver = struct {
     pub const Type: abi.ObjectType = .receiver;
 
     pub fn subscribe(self: @This()) sys.Error!Sender {
-        const cap = try sys.receiver_subscribe(self.cap);
+        const cap = try sys.receiverSubscribe(self.cap);
         return .{ .cap = cap };
     }
 };
