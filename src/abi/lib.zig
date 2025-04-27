@@ -8,6 +8,7 @@ pub const btree = @import("btree.zig");
 
 //
 
+/// where the kernel places the bootstrap binary
 pub const BOOTSTRAP_EXE = 0x200_0000;
 
 // some hardcoded capability handles

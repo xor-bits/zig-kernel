@@ -288,16 +288,21 @@ pub const Vmem = struct {
                 log.err("canUnmap() returned true but doUnmap() failed: {}", .{err});
                 unreachable;
             };
-            arch.flush_tlb_addr(vaddr.raw);
+            arch.flush_tlb_addr(vaddr.raw); // FIXME: this is not enough with SMP
             vaddr.raw += page_size;
         }
     }
 
     pub fn switchTo(self: caps.Ref(@This())) void {
         const cur = arch.Cr3.read();
-        if (cur.pml4_phys_base == self.paddr.raw) return;
+        if (cur.pml4_phys_base == self.paddr.raw) {
+            // log.info("context switch avoided", .{});
+            return;
+        }
 
-        (arch.Cr3{ .pml4_phys_base = self.paddr.toParts().page }).write();
+        (arch.Cr3{
+            .pml4_phys_base = self.paddr.toParts().page,
+        }).write();
     }
 
     pub fn mapGiantFrame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {

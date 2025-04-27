@@ -17,7 +17,7 @@ const vmm_vector = std.mem.Allocator{
     },
 };
 
-var vmm_vector_top: usize = 0x1000_0000_0000;
+var vmm_vector_top: usize = main.INITFS_TAR;
 
 fn vmm_vector_alloc(_top: *anyopaque, len: usize, _: std.mem.Alignment, _: usize) ?[*]u8 {
     const top: *usize = @alignCast(@ptrCast(_top));
