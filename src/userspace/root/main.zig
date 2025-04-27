@@ -54,7 +54,8 @@ pub fn main() !void {
     // virtual memory manager (system) (server)
     // maps new processes to memory and manages page faults,
     // heaps, lazy alloc, shared memory, swapping, etc.
-    try exec_elf("/sbin/vm", try recv.subscribe());
+    const vm_sender = try recv.subscribe();
+    const vm = try exec_elf("/sbin/vm", vm_sender);
 
     // process manager (system) (server)
     // manages unix-like process stuff like permissions, cli args, etc.
@@ -71,13 +72,49 @@ pub fn main() !void {
     // launches stuff like the window manager and virtual TTYs
     // try exec_with_vm("/sbin/init");
 
+    var system: System = .{
+        .vm = vm,
+        .vm_sender = vm_sender,
+    };
+
     var msg: abi.sys.Message = undefined;
     while (true) {
         try recv.recv(&msg);
-
         log.info("root received: {}", .{msg});
 
+        processRootRequest(&system, &msg);
+
         try recv.reply(&msg);
+    }
+}
+
+const System = struct {
+    vm: abi.caps.Thread,
+    vm_sender: abi.caps.Sender,
+};
+
+fn processRootRequest(system: *const System, msg: *abi.sys.Message) void {
+    const req = std.meta.intToEnum(abi.RootRequest, msg.arg0) catch {
+        msg.arg0 = abi.sys.encode(abi.sys.Error.InvalidArgument);
+        return;
+    };
+
+    switch (req) {
+        .memory => {
+            // only system processes can get access to the physical memory allocator
+            if (system.vm_sender.cap != msg.cap) return;
+
+            const memory = abi.caps.ROOT_MEMORY.alloc(abi.caps.Memory) catch |err| {
+                msg.arg0 = abi.sys.encode(err);
+                return;
+            };
+
+            msg.arg0 = abi.sys.encode(memory.cap);
+        },
+        .vm, .pm, .vfs => {
+            msg.arg0 = abi.sys.encode(abi.sys.Error.Unimplemented);
+            return;
+        },
     }
 }
 
@@ -90,7 +127,7 @@ pub fn map_naive(frame: abi.caps.Frame, vaddr: usize, rights: abi.sys.Rights, fl
     );
 }
 
-fn exec_elf(path: []const u8, sender: abi.caps.Sender) !void {
+fn exec_elf(path: []const u8, sender: abi.caps.Sender) !abi.caps.Thread {
     const elf_file = initfsd.openFile(path).?;
     const elf_bytes = initfsd.readFile(elf_file);
     var elf = std.io.fixedBufferStream(elf_bytes);
@@ -224,6 +261,8 @@ fn exec_elf(path: []const u8, sender: abi.caps.Sender) !void {
 
     log.info("everything ready, exec", .{});
     try new_thread.start();
+
+    return new_thread;
 }
 
 const FrameVector = std.EnumArray(abi.ChunkSize, abi.caps.Frame);

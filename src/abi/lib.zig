@@ -145,3 +145,20 @@ pub const SysLog = struct {
     }
     pub fn flush(_: @This()) Error!void {}
 };
+
+//
+
+pub const RootRequest = enum(u8) {
+    /// request a physical memory allocator capability
+    /// only system processes are allowed request this
+    memory,
+
+    /// request a sender to the vm server
+    vm,
+
+    /// request a sender to the pm server
+    pm,
+
+    /// request a sender to the vfs server
+    vfs,
+};
