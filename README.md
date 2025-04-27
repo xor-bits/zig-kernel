@@ -73,9 +73,15 @@ zig build run --prominent-compile-errors --summary none -freference-trace \
     - [x] disallow overlapping maps
   - [x] syscalls
 
-- [x] bootstrap/initfsd process
+- [x] bootstrap(root)/initfsd process
   - [x] decompress initfs.tar.gz
   - [ ] execute initfs:///sbin/init and give it a capability to IPC with the initfs
+
+- [ ] vmm server process
+  - [ ] handles virtual memory for everything
+
+- [ ] proc server process
+  - [ ] handles individual processes and their threads
 
 - [ ] initfs:///sbin/initd process
   - [ ] launch initfs:///sbin/rngd

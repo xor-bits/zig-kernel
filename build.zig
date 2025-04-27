@@ -78,7 +78,7 @@ fn runQemu(b: *std.Build, opts: *const Opts, os_iso: std.Build.LazyPath) void {
         // "-smp",
         // "4",
         "-m",
-        "1g",
+        "1g", // 3m is the absolute minimum right now
         // "-M",
         // "smm=off,accel=kvm",
         "-no-reboot",
@@ -153,7 +153,7 @@ fn createIso(
     // tool that generates the ISO file with everything
     const wrapper = b.addExecutable(.{
         .name = "xorriso_limine_wrapper",
-        .root_source_file = b.path("./tools/xorriso_limine_wrapper.zig"),
+        .root_source_file = b.path("src/tools/xorriso_limine_wrapper.zig"),
         .target = b.graph.host,
     });
 
@@ -162,7 +162,7 @@ fn createIso(
     _ = wf.addCopyFile(kernel_elf, "boot/kernel.elf");
     _ = wf.addCopyFile(initfs_tar_gz, "boot/initfs.tar.gz");
     _ = wf.addCopyFile(bootstrap_bin, "boot/bootstrap.bin");
-    _ = wf.addCopyFile(b.path("limine.conf"), "boot/limine/limine.conf");
+    _ = wf.addCopyFile(b.path("cfg/limine.conf"), "boot/limine/limine.conf");
     _ = wf.addCopyFile(limine_bootloader_pkg.path("limine-bios.sys"), "boot/limine/limine-bios.sys");
     _ = wf.addCopyFile(limine_bootloader_pkg.path("limine-bios-cd.bin"), "boot/limine/limine-bios-cd.bin");
     _ = wf.addCopyFile(limine_bootloader_pkg.path("limine-uefi-cd.bin"), "boot/limine/limine-uefi-cd.bin");
@@ -190,7 +190,7 @@ fn createInitfsTarGz(
     // create initfs:///sbin/init
     const init = b.addExecutable(.{
         .name = "init",
-        .root_source_file = b.path("./src/init/main.zig"),
+        .root_source_file = b.path("src/userspace/init/main.zig"),
         .target = opts.target,
         .optimize = opts.optimize,
     });
@@ -254,7 +254,7 @@ fn createKernelElf(
             .root_module = kernel_module,
         });
 
-        testkernel_elf_step.setLinkerScript(b.path("linker/x86_64.ld"));
+        testkernel_elf_step.setLinkerScript(b.path("src/kernel/link/x86_64.ld"));
         testkernel_elf_step.want_lto = false;
         testkernel_elf_step.pie = false;
         testkernel_elf_step.root_module.addImport("kernel", kernel_module);
@@ -268,7 +268,7 @@ fn createKernelElf(
             .root_module = kernel_module,
         });
 
-        kernel_elf_step.setLinkerScript(b.path("linker/x86_64.ld"));
+        kernel_elf_step.setLinkerScript(b.path("src/kernel/link/x86_64.ld"));
         kernel_elf_step.want_lto = false;
         kernel_elf_step.pie = false;
 
@@ -286,12 +286,12 @@ fn createBootstrapBin(
 ) std.Build.LazyPath {
     const bootstrap_elf_step = b.addExecutable(.{
         .name = "bootstrap.elf",
-        .root_source_file = b.path("./src/bootstrap/main.zig"),
+        .root_source_file = b.path("src/userspace/bootstrap/main.zig"),
         .target = opts.target,
         .optimize = opts.optimize,
     });
     bootstrap_elf_step.root_module.addImport("abi", abi);
-    bootstrap_elf_step.setLinkerScript(b.path("./src/bootstrap/link.ld"));
+    bootstrap_elf_step.setLinkerScript(b.path("src/userspace/bootstrap/link.ld"));
 
     const bootstrap_bin_step = b.addObjCopy(bootstrap_elf_step.getEmittedBin(), .{
         .format = .bin,
@@ -310,7 +310,7 @@ fn createBootstrapBin(
 // create the shared ABI library
 fn createAbi(b: *std.Build, opts: *const Opts) *std.Build.Module {
     const mod = b.createModule(.{
-        .root_source_file = b.path("./src/abi/lib.zig"),
+        .root_source_file = b.path("src/abi/lib.zig"),
         .target = opts.target,
         .optimize = opts.optimize,
     });
@@ -326,12 +326,12 @@ fn createAbi(b: *std.Build, opts: *const Opts) *std.Build.Module {
 fn createFont(b: *std.Build) *std.Build.Module {
     const font_tool = b.addExecutable(.{
         .name = "generate_font",
-        .root_source_file = b.path("tools/generate_font.zig"),
+        .root_source_file = b.path("src/tools/generate_font.zig"),
         .target = b.graph.host,
     });
 
     const font_tool_run = b.addRunArtifact(font_tool);
-    font_tool_run.addFileArg(b.path("./tools/font.bmp"));
+    font_tool_run.addFileArg(b.path("asset/font.bmp"));
     const font_zig = font_tool_run.addOutputFileArg("font.zig");
     font_tool_run.has_side_effects = false;
 
