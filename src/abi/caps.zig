@@ -71,6 +71,10 @@ pub const Vmem = struct {
     pub fn unmap(self: @This(), frame: Frame, vaddr: usize) sys.Error!void {
         return sys.vmemUnmap(self.cap, frame.cap, vaddr);
     }
+
+    pub fn transferCap(self: @This(), cap: u32) sys.Error!void {
+        return sys.vmemTransferCap(self.cap, cap);
+    }
 };
 
 /// capability to a physical memory region (sized `ChunkSize`)
@@ -86,6 +90,14 @@ pub const Receiver = struct {
     cap: u32,
 
     pub const Type: abi.ObjectType = .receiver;
+
+    pub fn recv(self: @This(), msg: *sys.Message) sys.Error!void {
+        return sys.recv(self.cap, msg);
+    }
+
+    pub fn reply(self: @This(), msg: *sys.Message) sys.Error!void {
+        return sys.reply(self.cap, msg);
+    }
 
     pub fn subscribe(self: @This()) sys.Error!Sender {
         const cap = try sys.receiverSubscribe(self.cap);

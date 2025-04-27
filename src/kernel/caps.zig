@@ -85,7 +85,7 @@ pub fn call(thread: *Thread, cap_id: u32, trap: *arch.SyscallRegs) Error!void {
 }
 
 /// Receiver specific unidirectional call
-pub fn recv(thread: *Thread, cap_id: u32, trap: *arch.SyscallRegs) Error!usize {
+pub fn recv(thread: *Thread, cap_id: u32, trap: *arch.SyscallRegs) Error!void {
     const obj = try get_capability(thread, cap_id);
     defer obj.lock.unlock();
 
@@ -93,7 +93,7 @@ pub fn recv(thread: *Thread, cap_id: u32, trap: *arch.SyscallRegs) Error!usize {
 }
 
 /// Receiver specific unidirectional call
-pub fn reply(thread: *Thread, cap_id: u32, trap: *arch.SyscallRegs) Error!usize {
+pub fn reply(thread: *Thread, cap_id: u32, trap: *arch.SyscallRegs) Error!void {
     const obj = try get_capability(thread, cap_id);
     defer obj.lock.unlock();
 
@@ -259,7 +259,7 @@ pub const Object = struct {
         };
     }
 
-    pub fn recv(self: Self, thread: *Thread, trap: *arch.SyscallRegs) Error!usize {
+    pub fn recv(self: Self, thread: *Thread, trap: *arch.SyscallRegs) Error!void {
         return switch (self.type) {
             .null => Error.InvalidCapability,
             .memory => Error.InvalidArgument,
@@ -271,7 +271,7 @@ pub const Object = struct {
         };
     }
 
-    pub fn reply(self: Self, thread: *Thread, trap: *arch.SyscallRegs) Error!usize {
+    pub fn reply(self: Self, thread: *Thread, trap: *arch.SyscallRegs) Error!void {
         return switch (self.type) {
             .null => Error.InvalidCapability,
             .memory => Error.InvalidArgument,

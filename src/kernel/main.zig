@@ -223,22 +223,31 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
             const cap_id: u32 = @truncate(trap.arg0);
             if (caps.capAssertNotNull(cap_id, trap)) return;
 
-            trap.syscall_id = abi.sys.encode(0);
-            caps.call(thread, cap_id, trap) catch |err| {
+            if (caps.call(thread, cap_id, trap)) |_| {
+                trap.syscall_id = abi.sys.encode(0);
+            } else |err| {
                 trap.syscall_id = abi.sys.encode(err);
-            };
+            }
         },
         .recv => {
             const cap_id: u32 = @truncate(trap.arg0);
             if (caps.capAssertNotNull(cap_id, trap)) return;
 
-            trap.syscall_id = abi.sys.encode(caps.recv(thread, cap_id, trap));
+            if (caps.recv(thread, cap_id, trap)) |_| {
+                trap.syscall_id = abi.sys.encode(0);
+            } else |err| {
+                trap.syscall_id = abi.sys.encode(err);
+            }
         },
         .reply => {
             const cap_id: u32 = @truncate(trap.arg0);
             if (caps.capAssertNotNull(cap_id, trap)) return;
 
-            trap.syscall_id = abi.sys.encode(caps.reply(thread, cap_id, trap));
+            if (caps.reply(thread, cap_id, trap)) |_| {
+                trap.syscall_id = abi.sys.encode(0);
+            } else |err| {
+                trap.syscall_id = abi.sys.encode(err);
+            }
         },
         .yield => {
             proc.yield(trap);

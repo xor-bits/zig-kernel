@@ -320,9 +320,9 @@ pub fn call(cap: u32, msg: *Message) !void {
     _ = try rwcall(.call, msg);
 }
 
-pub fn recv(cap: u32, msg: *Message) !usize {
+pub fn recv(cap: u32, msg: *Message) !void {
     msg.cap = cap;
-    return rwcall(.recv, msg);
+    _ = try rwcall(.recv, msg);
 }
 
 pub fn reply(cap: u32, msg: *Message) !void {
