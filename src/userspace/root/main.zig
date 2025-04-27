@@ -47,12 +47,14 @@ pub fn main() !void {
 
     try initfsd.init(boot_info.initfsData());
 
+    const recv = try abi.caps.ROOT_MEMORY.alloc(abi.caps.Receiver);
+
     // FIXME: figure out a way to reclaim capabilities from crashed processes
 
     // virtual memory manager (system) (server)
     // maps new processes to memory and manages page faults,
     // heaps, lazy alloc, shared memory, swapping, etc.
-    try exec_elf("/sbin/vm");
+    try exec_elf("/sbin/vm", try recv.subscribe());
 
     // process manager (system) (server)
     // manages unix-like process stuff like permissions, cli args, etc.
@@ -69,9 +71,14 @@ pub fn main() !void {
     // launches stuff like the window manager and virtual TTYs
     // try exec_with_vm("/sbin/init");
 
-    log.info("root dead", .{});
-    try abi.caps.ROOT_SELF_THREAD.stop();
-    unreachable;
+    var msg: abi.sys.Message = undefined;
+    while (true) {
+        try recv.recv(&msg);
+
+        log.info("root received: {}", .{msg});
+
+        try recv.reply(&msg);
+    }
 }
 
 pub fn map_naive(frame: abi.caps.Frame, vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
@@ -83,7 +90,7 @@ pub fn map_naive(frame: abi.caps.Frame, vaddr: usize, rights: abi.sys.Rights, fl
     );
 }
 
-fn exec_elf(path: []const u8) !void {
+fn exec_elf(path: []const u8, sender: abi.caps.Sender) !void {
     const elf_file = initfsd.openFile(path).?;
     const elf_bytes = initfsd.readFile(elf_file);
     var elf = std.io.fixedBufferStream(elf_bytes);
@@ -98,10 +105,7 @@ fn exec_elf(path: []const u8) !void {
     var program_headers = header.program_header_iterator(&elf);
 
     const new_vmem = try abi.caps.ROOT_MEMORY.alloc(abi.caps.Vmem);
-
-    // try abi.sys.vmem_transfer_cap(
-    //     new_vmem,
-    // );
+    try new_vmem.transferCap(sender.cap);
 
     var heap_bottom: usize = 0;
 
@@ -211,6 +215,7 @@ fn exec_elf(path: []const u8) !void {
     try new_thread.setVmem(new_vmem);
     try new_thread.setPrio(3);
     try new_thread.writeRegs(&.{
+        .arg0 = sender.cap, // set RDI to
         .user_instr_ptr = header.entry,
         .user_stack_ptr = 0x7FFF_FFF4_0000,
     });

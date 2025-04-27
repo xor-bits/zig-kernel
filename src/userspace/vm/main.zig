@@ -11,6 +11,11 @@ pub const panic = abi.panic;
 
 pub fn main() !void {
     log.info("hello from vm", .{});
+
+    var msg: abi.sys.Message = .{ .arg2 = 5 };
+    try abi.rt.root_ipc.call(&msg);
+
+    log.info("got reply: {}", .{msg});
 }
 
 comptime {
