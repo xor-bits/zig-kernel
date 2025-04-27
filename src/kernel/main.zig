@@ -211,8 +211,7 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
             }
         },
         .debug => {
-            const cap_id: u32 = @truncate(trap.arg0);
-            if (caps.get_capability(thread, cap_id)) |obj| {
+            if (caps.get_capability(thread, @truncate(trap.arg0))) |obj| {
                 defer obj.lock.unlock();
                 trap.syscall_id = abi.sys.encode(@intFromEnum(obj.type));
             } else |err| {
@@ -220,30 +219,21 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
             }
         },
         .call => {
-            const cap_id: u32 = @truncate(trap.arg0);
-            if (caps.capAssertNotNull(cap_id, trap)) return;
-
-            if (caps.call(thread, cap_id, trap)) |_| {
+            if (caps.call(thread, @truncate(trap.arg0), trap)) |_| {
                 trap.syscall_id = abi.sys.encode(0);
             } else |err| {
                 trap.syscall_id = abi.sys.encode(err);
             }
         },
         .recv => {
-            const cap_id: u32 = @truncate(trap.arg0);
-            if (caps.capAssertNotNull(cap_id, trap)) return;
-
-            if (caps.recv(thread, cap_id, trap)) |_| {
+            if (caps.recv(thread, @truncate(trap.arg0), trap)) |_| {
                 trap.syscall_id = abi.sys.encode(0);
             } else |err| {
                 trap.syscall_id = abi.sys.encode(err);
             }
         },
         .reply => {
-            const cap_id: u32 = @truncate(trap.arg0);
-            if (caps.capAssertNotNull(cap_id, trap)) return;
-
-            if (caps.reply(thread, cap_id, trap)) |_| {
+            if (caps.reply(thread, @truncate(trap.arg0), trap)) |_| {
                 trap.syscall_id = abi.sys.encode(0);
             } else |err| {
                 trap.syscall_id = abi.sys.encode(err);
