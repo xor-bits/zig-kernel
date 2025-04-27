@@ -58,6 +58,7 @@ zig build run --prominent-compile-errors --summary none -freference-trace \
   - [ ] SMP
   - [x] user space
   - [ ] HPET
+  - [ ] TSC
   - [x] scheduler
   - [x] binary loader
   - [ ] message IPC, shared memory IPC
