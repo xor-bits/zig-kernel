@@ -13,15 +13,27 @@ pub const panic = abi.panic;
 
 //
 
+/// elf loader temporary mapping location
+pub const LOADER_TMP = 0x2000_0000_0000;
+/// uncompressed initfs.tar location
+pub const INITFS_TAR = 0x3000_0000_0000;
+pub const STACK_SIZE = 0x40000;
+pub const STACK_TOP = 0x8000_0000_0000 - 0x2000;
+pub const STACK_BOTTOM = STACK_TOP - STACK_SIZE;
+/// boot info location
+pub const BOOT_INFO = 0x8000_0000_0000 - 0x1000;
+
+//
+
 pub fn main() !void {
     try map_naive(
         abi.BOOTSTRAP_BOOT_INFO,
-        0x8000_0000_0000 - 0x1000,
+        BOOT_INFO,
         .{ .writable = true },
         .{},
     );
     log.info("boot info mapped", .{});
-    const boot_info = @as(*volatile abi.BootInfo, @ptrFromInt(0x8000_0000_0000 - 0x1000));
+    const boot_info = @as(*volatile abi.BootInfo, @ptrFromInt(BOOT_INFO));
     // log.info("boot info {}", .{boot_info.*});
 
     log.info("bootstrap binary addr: {*}", .{boot_info.bootstrapData().ptr});
@@ -33,51 +45,10 @@ pub fn main() !void {
 
     try initfsd.init(boot_info.initfsData());
 
-    // try exec_elf("/sbin/init");
+    try exec_elf("/sbin/init");
 
-    var regs: abi.sys.ThreadRegs = .{};
-    // try abi.sys.thread_read_regs(abi.BOOTSTRAP_SELF_THREAD, &regs);
-    // log.info("regs='{}'", .{regs});
-    // regs = .{};
-
-    new_thread = try abi.sys.alloc(abi.BOOTSTRAP_MEMORY, .thread, null);
-    regs.user_stack_ptr = @intFromPtr(&__thread_stack_end);
-    regs.user_instr_ptr = @intFromPtr(&thread_main);
-    try abi.sys.thread_write_regs(new_thread, &regs);
-    try abi.sys.thread_set_vmem(new_thread, abi.BOOTSTRAP_SELF_VMEM);
-    try abi.sys.thread_start(new_thread);
-
-    const recv = try abi.sys.alloc(abi.BOOTSTRAP_MEMORY, .receiver, null);
-    send = try abi.sys.receiver_subscribe(recv);
-
-    var msg: abi.sys.Message = undefined;
-    const from = try abi.sys.recv(recv, &msg);
-    log.info("got call msg={any} from={}", .{ msg, from });
-    msg = .{ .arg0 = 3, .arg1 = 4, .arg2 = 5, .arg3 = 6, .arg4 = 7 };
-    try abi.sys.reply(recv, &msg);
-
-    abi.sys.yield();
-
+    log.info("bootstrap dead", .{});
     try abi.sys.thread_stop(abi.BOOTSTRAP_SELF_THREAD);
-    unreachable;
-}
-
-var new_thread: u32 = 0;
-var send: u32 = 0;
-
-export fn thread_main() noreturn {
-    thread() catch |err| {
-        std.debug.panic("{}", .{err});
-    };
-    while (true) {}
-}
-
-pub fn thread() !void {
-    abi.sys.log("hello from secondary thread");
-    var msg: abi.sys.Message = .{ .arg0 = 2, .arg1 = 3, .arg2 = 4, .arg3 = 5, .arg4 = 6 };
-    try abi.sys.call(send, &msg);
-    log.info("got reply msg={}", .{msg});
-    try abi.sys.thread_stop(new_thread);
     unreachable;
 }
 
@@ -105,28 +76,16 @@ fn exec_elf(path: []const u8) !void {
     const header = try std.elf.Header.read(&elf);
     var program_headers = header.program_header_iterator(&elf);
 
-    const new_vmem = try abi.sys.alloc(abi.BOOTSTRAP_MEMORY, .page_table_level_4);
+    const new_vmem = try abi.sys.alloc(abi.BOOTSTRAP_MEMORY, .vmem, null);
 
-    const maps = 0;
-    _ = new_vmem;
+    // try abi.sys.vmem_transfer_cap(
+    //     new_vmem,
+    // );
 
-    try maps.append(abi.sys.Map{
-        .dst = 0x7FFF_FFF0_0000,
-        .src = abi.sys.MapSource.newLazy(64 * 0x1000),
-        .flags = .{
-            .write = true,
-            .execute = false,
-        },
-    });
+    var heap_bottom: usize = 0;
 
-    try maps.append(abi.sys.Map{
-        .dst = abi.BOOTSTRAP_HEAP,
-        .src = abi.sys.MapSource.newLazy(abi.BOOTSTRAP_HEAP_SIZE),
-        .flags = .{
-            .write = true,
-            .execute = false,
-        },
-    });
+    // var frames: std.BoundedArray(u32, 1000) = .init(0);
+    // frames.append(item: T);
 
     while (try program_headers.next()) |program_header| {
         if (program_header.p_type != std.elf.PT_LOAD) {
@@ -139,47 +98,165 @@ fn exec_elf(path: []const u8) !void {
 
         const bytes: []const u8 = elf.buffer[program_header.p_offset..][0..program_header.p_filesz];
 
-        const flags = abi.sys.MapFlags{
-            .write = program_header.p_flags & std.elf.PF_W != 0,
-            .execute = program_header.p_flags & std.elf.PF_X != 0,
+        const rights = abi.sys.Rights{
+            .writable = program_header.p_flags & std.elf.PF_W != 0,
+            .executable = program_header.p_flags & std.elf.PF_X != 0,
         };
 
         const segment_vaddr_bottom = std.mem.alignBackward(usize, program_header.p_vaddr, 0x1000);
         const segment_vaddr_top = std.mem.alignForward(usize, program_header.p_vaddr + program_header.p_memsz, 0x1000);
-        const data_vaddr_bottom = program_header.p_vaddr;
-        const data_vaddr_top = data_vaddr_bottom + program_header.p_filesz;
-        const zero_vaddr_bottom = std.mem.alignForward(usize, data_vaddr_top, 0x1000);
-        const zero_vaddr_top = segment_vaddr_top;
+        const segment_data_bottom_offset = program_header.p_vaddr - segment_vaddr_bottom;
+        // const data_vaddr_bottom = program_header.p_vaddr;
+        // const data_vaddr_top = data_vaddr_bottom + program_header.p_filesz;
+        // const zero_vaddr_bottom = std.mem.alignForward(usize, data_vaddr_top, 0x1000);
+        // const zero_vaddr_top = segment_vaddr_top;
 
-        try maps.append(abi.sys.Map{
-            .dst = data_vaddr_bottom,
-            .src = abi.sys.MapSource.newBytes(bytes),
-            .flags = flags,
-        });
+        heap_bottom = @max(heap_bottom, segment_vaddr_top + 0x1000);
 
-        if (zero_vaddr_bottom != zero_vaddr_top) {
-            try maps.append(abi.sys.Map{
-                .dst = zero_vaddr_bottom,
-                .src = abi.sys.MapSource.newLazy(zero_vaddr_top - segment_vaddr_bottom),
-                .flags = flags,
-            });
-        }
-
-        // log.info("flags: {any}, vaddrs: {any}", .{
-        //     flags,
-        //     .{
-        //         segment_vaddr_bottom,
-        //         segment_vaddr_top,
-        //         data_vaddr_bottom,
-        //         data_vaddr_top,
-        //         zero_vaddr_bottom,
-        //         zero_vaddr_top,
-        //     },
+        // log.info("flags: {}, segment_vaddr_bottom=0x{x} segment_vaddr_top=0x{x} data_vaddr_bottom=0x{x} data_vaddr_top=0x{x}", .{
+        //     rights,
+        //     segment_vaddr_bottom,
+        //     segment_vaddr_top,
+        //     data_vaddr_bottom,
+        //     data_vaddr_top,
         // });
+
+        // FIXME: potential alignment errors when segments are bigger than 2MiB,
+        // because frame caps use huge and giant pages automatically
+
+        const size = segment_vaddr_top - segment_vaddr_bottom;
+        const frames = try allocVector(abi.BOOTSTRAP_MEMORY, size);
+
+        try mapVector(
+            &frames,
+            abi.BOOTSTRAP_SELF_VMEM,
+            LOADER_TMP,
+            .{ .writable = true },
+            .{},
+        );
+
+        log.info("copying to [ 0x{x}..0x{x} ]", .{
+            segment_vaddr_bottom + segment_data_bottom_offset,
+            segment_vaddr_bottom + segment_data_bottom_offset + program_header.p_filesz,
+        });
+        copyForwardsVolatile(
+            u8,
+            @as([*]volatile u8, @ptrFromInt(LOADER_TMP + segment_data_bottom_offset))[0..program_header.p_filesz],
+            bytes,
+        );
+
+        try unmapVector(
+            &frames,
+            abi.BOOTSTRAP_SELF_VMEM,
+            LOADER_TMP,
+        );
+
+        try mapVector(
+            &frames,
+            new_vmem,
+            segment_vaddr_bottom,
+            rights,
+            .{},
+        );
     }
 
-    abi.sys.system_map(1, maps.items);
-    abi.sys.system_exec(1, header.entry, 0x7FFF_FFF4_0000);
+    // map a stack
+    log.info("mapping a stack", .{});
+    try abi.sys.map(
+        new_vmem,
+        try abi.sys.alloc(abi.BOOTSTRAP_MEMORY, .frame, .@"256KiB"),
+        0x7FFF_FFF0_0000,
+        .{
+            .writable = true,
+        },
+        .{},
+    );
+
+    // map an initial heap
+    log.info("mapping a heap", .{});
+    try abi.sys.map(
+        new_vmem,
+        try abi.sys.alloc(abi.BOOTSTRAP_MEMORY, .frame, .@"256KiB"),
+        heap_bottom,
+        .{
+            .writable = true,
+        },
+        .{},
+    );
+
+    log.info("creating a new thread", .{});
+    const new_thread = try abi.sys.alloc(abi.BOOTSTRAP_MEMORY, .thread, null);
+
+    try abi.sys.thread_set_vmem(new_thread, new_vmem);
+    try abi.sys.thread_set_prio(new_thread, 3);
+    try abi.sys.thread_write_regs(new_thread, &.{
+        .user_instr_ptr = header.entry,
+        .user_stack_ptr = 0x7FFF_FFF4_0000,
+    });
+
+    log.info("ip=0x{x} sp=0x{x}", .{ header.entry, 0x7FFF_FFF4_0000 });
+
+    log.info("everything ready, exec", .{});
+    try abi.sys.thread_start(new_thread);
+}
+
+const FrameVector = std.EnumArray(abi.ChunkSize, u32);
+
+fn allocVector(mem_cap: u32, size: usize) !FrameVector {
+    if (size > abi.ChunkSize.@"1GiB".sizeBytes()) return error.SegmentTooBig;
+    var frames: FrameVector = .initFill(0);
+
+    inline for (std.meta.fields(abi.ChunkSize)) |f| {
+        const variant: abi.ChunkSize = @enumFromInt(f.value);
+        const specific_size: usize = variant.sizeBytes();
+
+        if (size & specific_size != 0) {
+            const frame = try abi.sys.alloc(mem_cap, .frame, variant);
+            frames.set(variant, frame);
+        }
+    }
+
+    return frames;
+}
+
+fn mapVector(v: *const FrameVector, vmem_cap: u32, _vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
+    var vaddr = _vaddr;
+
+    var iter = @constCast(v).iterator();
+    while (iter.next()) |e| {
+        if (e.value.* == 0) continue;
+
+        try abi.sys.map(
+            vmem_cap,
+            e.value.*,
+            vaddr,
+            rights,
+            flags,
+        );
+
+        vaddr += e.key.sizeBytes();
+    }
+}
+
+fn unmapVector(v: *const FrameVector, vmem_cap: u32, _vaddr: usize) !void {
+    var vaddr = _vaddr;
+
+    var iter = @constCast(v).iterator();
+    while (iter.next()) |e| {
+        if (e.value.* == 0) continue;
+
+        try abi.sys.unmap(
+            vmem_cap,
+            e.value.*,
+            vaddr,
+        );
+
+        vaddr += e.key.sizeBytes();
+    }
+}
+
+pub fn copyForwardsVolatile(comptime T: type, dest: []volatile T, source: []const T) void {
+    for (dest[0..source.len], source) |*d, s| d.* = s;
 }
 
 pub extern var __stack_end: u8;
@@ -197,25 +274,23 @@ export fn zig_main() noreturn {
     log.info("hello from bootstrap", .{});
 
     // switch to a bigger stack (256KiB, because the initfs deflate takes up over 128KiB on its own)
-    const stack_top: usize = 0x8000_0000_0000 - 0x2000;
-    map_stack(stack_top) catch |err| {
+    map_stack() catch |err| {
         std.debug.panic("not enough memory for a stack: {}", .{err});
     };
 
     asm volatile (
         \\ jmp zig_main_realstack
         :
-        : [sp] "{rsp}" (comptime stack_top),
+        : [sp] "{rsp}" (STACK_TOP),
     );
     unreachable;
 }
 
-fn map_stack(stack_top: usize) !void {
-    const stack_base = stack_top - 0x40000;
+fn map_stack() !void {
     const frame = try abi.sys.alloc(abi.BOOTSTRAP_MEMORY, .frame, .@"256KiB");
-    log.info("256KiB stack frame allocated", .{});
-    try map_naive(frame, stack_base, .{ .writable = true }, .{});
-    log.info("stack mapping complete 0x{x}..0x{x}", .{ stack_top - 0x40000, stack_top });
+    // log.info("256KiB stack frame allocated", .{});
+    try map_naive(frame, STACK_BOTTOM, .{ .writable = true }, .{});
+    log.info("stack mapping complete 0x{x}..0x{x}", .{ STACK_BOTTOM, STACK_TOP });
 }
 
 export fn zig_main_realstack() noreturn {

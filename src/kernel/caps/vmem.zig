@@ -215,6 +215,11 @@ pub const Vmem = struct {
                     );
                 }
             },
+            .transfer_cap => {
+                const cap = try caps.get_capability(thread, @truncate(trap.arg2));
+                defer cap.lock.unlock();
+                cap.owner.store(self, .seq_cst);
+            },
         }
     }
 
@@ -248,6 +253,7 @@ pub const Vmem = struct {
                 log.err("canMap() returned true but doMap() failed: {}", .{err});
                 unreachable;
             };
+            arch.flush_tlb_addr(vaddr.raw);
             paddr.raw += page_size;
             vaddr.raw += page_size;
         }
@@ -282,15 +288,16 @@ pub const Vmem = struct {
                 log.err("canUnmap() returned true but doUnmap() failed: {}", .{err});
                 unreachable;
             };
+            arch.flush_tlb_addr(vaddr.raw);
             vaddr.raw += page_size;
         }
     }
 
     pub fn switchTo(self: caps.Ref(@This())) void {
-        var cur = arch.Cr3.read();
+        const cur = arch.Cr3.read();
         if (cur.pml4_phys_base == self.paddr.raw) return;
-        cur.pml4_phys_base = self.paddr.toParts().page;
-        cur.write();
+
+        (arch.Cr3{ .pml4_phys_base = self.paddr.toParts().page }).write();
     }
 
     pub fn mapGiantFrame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {

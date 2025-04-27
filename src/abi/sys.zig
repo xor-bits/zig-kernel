@@ -234,6 +234,7 @@ pub fn thread_set_prio(thread_cap: u32, priority: u2) !void {
 pub const VmemCallId = enum(u8) {
     map,
     unmap,
+    transfer_cap,
 };
 
 pub fn map(vmem_cap: u32, frame_cap: u32, vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
@@ -252,6 +253,14 @@ pub fn unmap(vmem_cap: u32, frame_cap: u32, vaddr: usize) !void {
         .arg0 = @intFromEnum(VmemCallId.unmap),
         .arg1 = frame_cap,
         .arg2 = vaddr,
+    };
+    try call(vmem_cap, &msg);
+}
+
+pub fn vmem_transfer_cap(vmem_cap: u32, cap: u32) !void {
+    var msg: Message = .{
+        .arg0 = @intFromEnum(VmemCallId.transfer_cap),
+        .arg1 = cap,
     };
     try call(vmem_cap, &msg);
 }
