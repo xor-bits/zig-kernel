@@ -113,10 +113,10 @@ pub fn main() noreturn {
         };
     }
 
-    // initialize and execute the bootstrap process
-    log.info("initializing bootstrap", .{});
+    // initialize and execute the root process
+    log.info("initializing root", .{});
     init.exec(a) catch |err| {
-        std.debug.panic("failed to set up bootstrap: {}", .{err});
+        std.debug.panic("failed to set up root: {}", .{err});
     };
 
     log.info("entering user-space", .{});

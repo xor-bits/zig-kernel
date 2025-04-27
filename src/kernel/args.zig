@@ -28,8 +28,8 @@ pub fn parse() !Args {
         };
         const second = arg.rest();
 
-        if (std.mem.eql(u8, first, "bootstrap")) {
-            args.bootstrap_path = second;
+        if (std.mem.eql(u8, first, "root")) {
+            args.root_path = second;
         } else if (std.mem.eql(u8, first, "initfs")) {
             args.initfs_path = second;
         }
@@ -42,8 +42,8 @@ pub fn parse() !Args {
     for (modules_response.modules()) |module| {
         const path = std.mem.sliceTo(module.path, 0);
 
-        if (std.mem.eql(u8, args.bootstrap_path, path)) {
-            args.bootstrap_data = module.data();
+        if (std.mem.eql(u8, args.root_path, path)) {
+            args.root_data = module.data();
         } else if (std.mem.eql(u8, args.initfs_path, path)) {
             args.initfs_data = module.data();
         }
@@ -51,8 +51,8 @@ pub fn parse() !Args {
 
     if (args.initfs_data.len == 0) {
         return error.MissingInitfs;
-    } else if (args.bootstrap_data.len == 0) {
-        return error.MissingBootstrap;
+    } else if (args.root_data.len == 0) {
+        return error.MissingRoot;
     }
 
     return args;
@@ -61,8 +61,8 @@ pub fn parse() !Args {
 //
 
 pub const Args = struct {
-    bootstrap_path: []const u8 = "",
-    bootstrap_data: []const u8 = "",
+    root_path: []const u8 = "",
+    root_data: []const u8 = "",
     initfs_path: []const u8 = "",
     initfs_data: []const u8 = "",
 };

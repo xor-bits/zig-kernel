@@ -38,8 +38,8 @@ zig build run --prominent-compile-errors --summary none -freference-trace \
 ## Stuff included here
 
  - kernel: [src/kernel](/src/kernel)
- - bootstrap process: [src/bootstrap](src/bootstrap)
  - kernel/user interface: [src/abi](src/abi)
+ - root process: [src/userspace/root](src/userspace/root)
 
 ## TODOs and roadmap
 
@@ -73,7 +73,7 @@ zig build run --prominent-compile-errors --summary none -freference-trace \
     - [x] disallow overlapping maps
   - [x] syscalls
 
-- [x] bootstrap(root)/initfsd process
+- [x] root + initfsd process
   - [x] decompress initfs.tar.gz
   - [ ] execute initfs:///sbin/init and give it a capability to IPC with the initfs
 

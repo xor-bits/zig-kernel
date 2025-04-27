@@ -8,15 +8,15 @@ pub const btree = @import("btree.zig");
 
 //
 
-/// where the kernel places the bootstrap binary
-pub const BOOTSTRAP_EXE = 0x200_0000;
+/// where the kernel places the root binary
+pub const ROOT_EXE = 0x200_0000;
 
 // some hardcoded capability handles
 
-pub const BOOTSTRAP_SELF_VMEM: u32 = 1;
-pub const BOOTSTRAP_SELF_THREAD: u32 = 2;
-pub const BOOTSTRAP_MEMORY: u32 = 3;
-pub const BOOTSTRAP_BOOT_INFO: u32 = 4;
+pub const ROOT_SELF_VMEM: u32 = 1;
+pub const ROOT_SELF_THREAD: u32 = 2;
+pub const ROOT_MEMORY: u32 = 3;
+pub const ROOT_BOOT_INFO: u32 = 4;
 
 //
 
@@ -110,23 +110,23 @@ pub const ChunkSize = enum(u5) {
     }
 };
 
-/// data structure in the boot info frame provided to the bootstrap process
+/// data structure in the boot info frame provided to the root process
 pub const BootInfo = extern struct {
-    bootstrap_data: [*]u8,
-    bootstrap_data_len: usize,
-    bootstrap_path: [*]u8,
-    bootstrap_path_len: usize,
+    root_data: [*]u8,
+    root_data_len: usize,
+    root_path: [*]u8,
+    root_path_len: usize,
     initfs_data: [*]u8,
     initfs_data_len: usize,
     initfs_path: [*]u8,
     initfs_path_len: usize,
 
-    pub fn bootstrapData(self: @This()) []u8 {
-        return self.bootstrap_data[0..self.bootstrap_data_len];
+    pub fn rootData(self: @This()) []u8 {
+        return self.root_data[0..self.root_data_len];
     }
 
-    pub fn bootstrapPath(self: @This()) []u8 {
-        return self.bootstrap_path[0..self.bootstrap_path_len];
+    pub fn rootPath(self: @This()) []u8 {
+        return self.root_path[0..self.root_path_len];
     }
 
     pub fn initfsData(self: @This()) []u8 {

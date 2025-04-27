@@ -28,10 +28,10 @@ pub fn build(b: *std.Build) !void {
     }));
 
     const abi = createAbi(b, &opts);
-    const bootstrap_bin = createBootstrapBin(b, &opts, abi);
+    const root_bin = createRootBin(b, &opts, abi);
     const kernel_elf = createKernelElf(b, &opts, abi);
     const initfs_tar_gz = createInitfsTarGz(b, &opts, abi);
-    const os_iso = createIso(b, kernel_elf, initfs_tar_gz, bootstrap_bin);
+    const os_iso = createIso(b, kernel_elf, initfs_tar_gz, root_bin);
 
     runQemu(b, &opts, os_iso);
 }
@@ -138,7 +138,7 @@ fn createIso(
     b: *std.Build,
     kernel_elf: std.Build.LazyPath,
     initfs_tar_gz: std.Build.LazyPath,
-    bootstrap_bin: std.Build.LazyPath,
+    root_bin: std.Build.LazyPath,
 ) std.Build.LazyPath {
 
     // clone & configure limine (WARNING: this runs a Makefile from a dependency at compile time)
@@ -161,7 +161,7 @@ fn createIso(
     const wf = b.addNamedWriteFiles("create virtual iso root");
     _ = wf.addCopyFile(kernel_elf, "boot/kernel.elf");
     _ = wf.addCopyFile(initfs_tar_gz, "boot/initfs.tar.gz");
-    _ = wf.addCopyFile(bootstrap_bin, "boot/bootstrap.bin");
+    _ = wf.addCopyFile(root_bin, "boot/root.bin");
     _ = wf.addCopyFile(b.path("cfg/limine.conf"), "boot/limine/limine.conf");
     _ = wf.addCopyFile(limine_bootloader_pkg.path("limine-bios.sys"), "boot/limine/limine-bios.sys");
     _ = wf.addCopyFile(limine_bootloader_pkg.path("limine-bios-cd.bin"), "boot/limine/limine-bios-cd.bin");
@@ -278,33 +278,33 @@ fn createKernelElf(
     }
 }
 
-// create the embedded bootstrap.bin
-fn createBootstrapBin(
+// create the embedded root.bin
+fn createRootBin(
     b: *std.Build,
     opts: *const Opts,
     abi: *std.Build.Module,
 ) std.Build.LazyPath {
-    const bootstrap_elf_step = b.addExecutable(.{
-        .name = "bootstrap.elf",
-        .root_source_file = b.path("src/userspace/bootstrap/main.zig"),
+    const root_elf_step = b.addExecutable(.{
+        .name = "root.elf",
+        .root_source_file = b.path("src/userspace/root/main.zig"),
         .target = opts.target,
         .optimize = opts.optimize,
     });
-    bootstrap_elf_step.root_module.addImport("abi", abi);
-    bootstrap_elf_step.setLinkerScript(b.path("src/userspace/bootstrap/link.ld"));
+    root_elf_step.root_module.addImport("abi", abi);
+    root_elf_step.setLinkerScript(b.path("src/userspace/root/link.ld"));
 
-    const bootstrap_bin_step = b.addObjCopy(bootstrap_elf_step.getEmittedBin(), .{
+    const root_bin_step = b.addObjCopy(root_elf_step.getEmittedBin(), .{
         .format = .bin,
     });
-    bootstrap_bin_step.step.dependOn(&bootstrap_elf_step.step);
+    root_bin_step.step.dependOn(&root_elf_step.step);
 
-    const bootstrap_elf_install = b.addInstallFile(bootstrap_elf_step.getEmittedBin(), "bootstrap.elf");
-    b.getInstallStep().dependOn(&bootstrap_elf_install.step);
+    const root_elf_install = b.addInstallFile(root_elf_step.getEmittedBin(), "root.elf");
+    b.getInstallStep().dependOn(&root_elf_install.step);
 
-    const install_bootstrap_bin = b.addInstallFile(bootstrap_bin_step.getOutput(), "bootstrap.bin");
-    b.getInstallStep().dependOn(&install_bootstrap_bin.step);
+    const install_root_bin = b.addInstallFile(root_bin_step.getOutput(), "root.bin");
+    b.getInstallStep().dependOn(&install_root_bin.step);
 
-    return bootstrap_bin_step.getOutput();
+    return root_bin_step.getOutput();
 }
 
 // create the shared ABI library

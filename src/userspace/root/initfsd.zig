@@ -49,7 +49,7 @@ fn vmm_vector_free(_: *anyopaque, _: []u8, _: std.mem.Alignment, _: usize) void 
 fn vmm_vector_grow(top: *usize, n_pages: usize) !void {
     for (0..n_pages) |_| {
         try main.map_naive(
-            try abi.sys.alloc(abi.BOOTSTRAP_MEMORY, .frame, .@"64KiB"),
+            try abi.sys.alloc(abi.ROOT_MEMORY, .frame, .@"64KiB"),
             top.*,
             .{ .writable = true },
             .{},

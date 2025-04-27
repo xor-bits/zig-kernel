@@ -3,7 +3,7 @@ const abi = @import("abi");
 
 const initfsd = @import("initfsd.zig");
 
-const log = std.log.scoped(.bootstrap);
+const log = std.log.scoped(.root);
 const Error = abi.sys.Error;
 
 //
@@ -26,8 +26,10 @@ pub const BOOT_INFO = 0x8000_0000_0000 - 0x1000;
 //
 
 pub fn main() !void {
+    log.info("I am root", .{});
+
     try map_naive(
-        abi.BOOTSTRAP_BOOT_INFO,
+        abi.ROOT_BOOT_INFO,
         BOOT_INFO,
         .{ .writable = true },
         .{},
@@ -36,9 +38,9 @@ pub fn main() !void {
     const boot_info = @as(*volatile abi.BootInfo, @ptrFromInt(BOOT_INFO));
     // log.info("boot info {}", .{boot_info.*});
 
-    log.info("bootstrap binary addr: {*}", .{boot_info.bootstrapData().ptr});
-    log.info("bootstrap binary size: {}", .{boot_info.bootstrapData().len});
-    log.info("bootstrap binary path: '{s}'", .{boot_info.bootstrapPath()});
+    log.info("root binary addr: {*}", .{boot_info.rootData().ptr});
+    log.info("root binary size: {}", .{boot_info.rootData().len});
+    log.info("root binary path: '{s}'", .{boot_info.rootPath()});
     log.info("initfs addr: {*}", .{boot_info.initfsData().ptr});
     log.info("initfs size: {}", .{boot_info.initfsData().len});
     log.info("initfs path: '{s}'", .{boot_info.initfsPath()});
@@ -47,14 +49,14 @@ pub fn main() !void {
 
     try exec_elf("/sbin/init");
 
-    log.info("bootstrap dead", .{});
-    try abi.sys.thread_stop(abi.BOOTSTRAP_SELF_THREAD);
+    log.info("root dead", .{});
+    try abi.sys.thread_stop(abi.ROOT_SELF_THREAD);
     unreachable;
 }
 
 pub fn map_naive(obj: u32, vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
     try abi.sys.map(
-        abi.BOOTSTRAP_SELF_VMEM,
+        abi.ROOT_SELF_VMEM,
         obj,
         vaddr,
         rights,
@@ -76,7 +78,7 @@ fn exec_elf(path: []const u8) !void {
     const header = try std.elf.Header.read(&elf);
     var program_headers = header.program_header_iterator(&elf);
 
-    const new_vmem = try abi.sys.alloc(abi.BOOTSTRAP_MEMORY, .vmem, null);
+    const new_vmem = try abi.sys.alloc(abi.ROOT_MEMORY, .vmem, null);
 
     // try abi.sys.vmem_transfer_cap(
     //     new_vmem,
@@ -125,11 +127,11 @@ fn exec_elf(path: []const u8) !void {
         // because frame caps use huge and giant pages automatically
 
         const size = segment_vaddr_top - segment_vaddr_bottom;
-        const frames = try allocVector(abi.BOOTSTRAP_MEMORY, size);
+        const frames = try allocVector(abi.ROOT_MEMORY, size);
 
         try mapVector(
             &frames,
-            abi.BOOTSTRAP_SELF_VMEM,
+            abi.ROOT_SELF_VMEM,
             LOADER_TMP,
             .{ .writable = true },
             .{},
@@ -147,7 +149,7 @@ fn exec_elf(path: []const u8) !void {
 
         try unmapVector(
             &frames,
-            abi.BOOTSTRAP_SELF_VMEM,
+            abi.ROOT_SELF_VMEM,
             LOADER_TMP,
         );
 
@@ -164,7 +166,7 @@ fn exec_elf(path: []const u8) !void {
     // log.info("mapping a stack", .{});
     try abi.sys.map(
         new_vmem,
-        try abi.sys.alloc(abi.BOOTSTRAP_MEMORY, .frame, .@"256KiB"),
+        try abi.sys.alloc(abi.ROOT_MEMORY, .frame, .@"256KiB"),
         0x7FFF_FFF0_0000,
         .{
             .writable = true,
@@ -176,7 +178,7 @@ fn exec_elf(path: []const u8) !void {
     // log.info("mapping a heap", .{});
     try abi.sys.map(
         new_vmem,
-        try abi.sys.alloc(abi.BOOTSTRAP_MEMORY, .frame, .@"256KiB"),
+        try abi.sys.alloc(abi.ROOT_MEMORY, .frame, .@"256KiB"),
         heap_bottom,
         .{
             .writable = true,
@@ -185,7 +187,7 @@ fn exec_elf(path: []const u8) !void {
     );
 
     // log.info("creating a new thread", .{});
-    const new_thread = try abi.sys.alloc(abi.BOOTSTRAP_MEMORY, .thread, null);
+    const new_thread = try abi.sys.alloc(abi.ROOT_MEMORY, .thread, null);
 
     try abi.sys.thread_set_vmem(new_thread, new_vmem);
     try abi.sys.thread_set_prio(new_thread, 3);
@@ -271,8 +273,6 @@ pub export fn _start() linksection(".text._start") callconv(.Naked) noreturn {
 }
 
 export fn zig_main() noreturn {
-    log.info("hello from bootstrap", .{});
-
     // switch to a bigger stack (256KiB, because the initfs deflate takes up over 128KiB on its own)
     map_stack() catch |err| {
         std.debug.panic("not enough memory for a stack: {}", .{err});
@@ -287,10 +287,10 @@ export fn zig_main() noreturn {
 }
 
 fn map_stack() !void {
-    const frame = try abi.sys.alloc(abi.BOOTSTRAP_MEMORY, .frame, .@"256KiB");
+    const frame = try abi.sys.alloc(abi.ROOT_MEMORY, .frame, .@"256KiB");
     // log.info("256KiB stack frame allocated", .{});
     try map_naive(frame, STACK_BOTTOM, .{ .writable = true }, .{});
-    log.info("stack mapping complete 0x{x}..0x{x}", .{ STACK_BOTTOM, STACK_TOP });
+    // log.info("stack mapping complete 0x{x}..0x{x}", .{ STACK_BOTTOM, STACK_TOP });
 }
 
 export fn zig_main_realstack() noreturn {
