@@ -47,7 +47,27 @@ pub fn main() !void {
 
     try initfsd.init(boot_info.initfsData());
 
-    try exec_elf("/sbin/init");
+    // FIXME: figure out a way to reclaim capabilities from crashed processes
+
+    // virtual memory manager (system) (server)
+    // maps new processes to memory and manages page faults,
+    // heaps, lazy alloc, shared memory, swapping, etc.
+    try exec_elf("/sbin/vm");
+
+    // process manager (system) (server)
+    // manages unix-like process stuff like permissions, cli args, etc.
+    // try exec_with_vm("/sbin/pm");
+
+    // virtual filesystem (system) (server)
+    // manages the main VFS tree, everything mounted into it and file descriptors
+    // try exec_with_vm("/sbin/vfs");
+
+    // init (normal) (process)
+    // all the critial system servers are running, so now "normal" Linux-like init can run
+    // gets a Sender capability to access the initfs part of this root process
+    // just runs normal processes according to the init configuration
+    // launches stuff like the window manager and virtual TTYs
+    // try exec_with_vm("/sbin/init");
 
     log.info("root dead", .{});
     try abi.sys.thread_stop(abi.ROOT_SELF_THREAD);

@@ -187,20 +187,29 @@ fn createInitfsTarGz(
     opts: *const Opts,
     abi: *std.Build.Module,
 ) std.Build.LazyPath {
-    // create initfs:///sbin/init
-    const init = b.addExecutable(.{
-        .name = "init",
-        .root_source_file = b.path("src/userspace/init/main.zig"),
-        .target = opts.target,
-        .optimize = opts.optimize,
-    });
-    init.root_module.addImport("abi", abi);
-    b.installArtifact(init);
+    const initfs_processes = .{
+        "vm",
+        "init",
+    };
 
     // create virtual initfs.tar.gz root
     const initfs = b.addNamedWriteFiles("create virtual initfs root");
-    _ = initfs.addCopyFile(init.getEmittedBin(), "sbin/init");
-    initfs.step.dependOn(&init.step);
+
+    inline for (initfs_processes) |name| {
+        const source = std.fmt.comptimePrint("src/userspace/{s}/main.zig", .{name});
+        const path = std.fmt.comptimePrint("sbin/{s}", .{name});
+
+        const compile = b.addExecutable(.{
+            .name = name,
+            .root_source_file = b.path(source),
+            .target = opts.target,
+            .optimize = opts.optimize,
+        });
+        compile.root_module.addImport("abi", abi);
+        b.installArtifact(compile);
+
+        _ = initfs.addCopyFile(compile.getEmittedBin(), path);
+    }
 
     const initfs_tar_gz = b.addSystemCommand(&.{
         "tar",
@@ -210,8 +219,6 @@ fn createInitfsTarGz(
     initfs_tar_gz.addArg("-C");
     initfs_tar_gz.addDirectoryArg(initfs.getDirectory());
     initfs_tar_gz.addArg(".");
-    initfs_tar_gz.step.dependOn(&init.step);
-    initfs_tar_gz.step.dependOn(&initfs.step);
 
     const install_initfs_tar_gz = b.addInstallFile(initfs_tar_gz_file, "initfs.tar.gz");
     b.getInstallStep().dependOn(&install_initfs_tar_gz.step);
