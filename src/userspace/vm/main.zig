@@ -3,7 +3,7 @@ const abi = @import("abi");
 
 //
 
-const log = std.log.scoped(.init);
+const log = std.log.scoped(.vm);
 pub const std_options = abi.std_options;
 pub const panic = abi.panic;
 
