@@ -56,8 +56,12 @@ pub fn push_capability(obj: Object) u32 {
 /// returns an object from a capability,
 /// the returned object is locked
 pub fn get_capability(thread: *Thread, cap_id: u32) Error!*Object {
+    if (cap_id == 0)
+        return Error.InvalidCapability;
+
     const caps = capability_array();
-    if (cap_id >= caps.len) return Error.InvalidCapability;
+    if (cap_id >= caps.len)
+        return Error.InvalidCapability;
 
     const current = Thread.vmemOf(thread);
     const obj = &caps[cap_id];
