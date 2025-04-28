@@ -22,9 +22,20 @@ fn logFn(comptime message_level: std.log.Level, comptime scope: @TypeOf(.enum_li
         .warn => "\x1B[93m",
         .err => "\x1B[91m",
     };
-    const fmt = "\x1B[90m[ " ++ level_col ++ level_txt ++ "\x1B[90m" ++ scope_txt ++ " ]: \x1B[0m" ++ format;
 
-    print(fmt, args);
+    log_lock.lock();
+    defer log_lock.unlock();
+
+    if (arch.cpu_id_safe()) |id| {
+        const fmt = "\x1B[90m[ " ++ level_col ++ level_txt ++ "\x1B[90m" ++ scope_txt ++ " #{} ]: \x1B[0m";
+
+        uart.print(fmt, .{id});
+        uart.print(format ++ "\n", args);
+    } else {
+        const fmt = "\x1B[90m[ " ++ level_col ++ level_txt ++ "\x1B[90m" ++ scope_txt ++ " #? ]: \x1B[0m" ++ format;
+
+        uart.print(fmt ++ "\n", args);
+    }
 }
 
 var log_lock: spin.Mutex = .{};

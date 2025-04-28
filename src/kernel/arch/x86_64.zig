@@ -28,6 +28,20 @@ var next: std.atomic.Value(usize) = .init(0);
 
 //
 
+pub fn earlyInit() void {
+    // interrupts are always disabled in the kernel
+    // there is just one exception to this:
+    // waiting while the CPU is out of tasks
+    //
+    // initializing GDT also requires interrupts to be disabled
+    ints.disable();
+
+    // logging uses the GS register to print the cpu id
+    // and the GS register contents might be undefined on boot
+    // so quickly reset it to 0 temporarily
+    wrmsr(GS_BASE, 0);
+}
+
 pub fn init_cpu(id: u32) !void {
     const tls = try pmem.page_allocator.create(main.CpuLocalStorage);
     tls.* = .{
@@ -60,7 +74,7 @@ pub fn smp_init() void {
 }
 
 export fn _smpstart(_: *limine.SmpInfo) callconv(.C) noreturn {
-    ints.disable();
+    earlyInit();
     main.smpmain();
 }
 
@@ -334,6 +348,12 @@ pub fn flush_tlb_addr(vaddr: usize) void {
 
 /// processor ID
 pub fn cpu_id() u32 {
+    return cpu_local().id;
+}
+
+pub fn cpu_id_safe() ?u32 {
+    const gs = rdmsr(GS_BASE);
+    if (gs == 0) return null;
     return cpu_local().id;
 }
 

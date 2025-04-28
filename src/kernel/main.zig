@@ -41,15 +41,13 @@ pub const CpuLocalStorage = struct {
 
 //
 
-pub export fn _start() callconv(.C) noreturn {
-    const log = std.log.scoped(.critical);
+export fn _start() callconv(.C) noreturn {
+    arch.earlyInit();
+    main();
+}
 
-    // interrupts are always disabled in the kernel
-    // there is just one exception to this:
-    // waiting while the CPU is out of tasks
-    //
-    // initializing GDT also requires interrupts to be disabled
-    arch.x86_64.ints.disable();
+pub fn main() noreturn {
+    const log = std.log.scoped(.main);
 
     // crash if bootloader is unsupported
     if (!base_revision.is_supported()) {
@@ -57,17 +55,12 @@ pub export fn _start() callconv(.C) noreturn {
         arch.hcf();
     }
 
+    // the HHDM should be at 0xFFFF_FFFF_8000_0000
     const hhdm_response = hhdm.response orelse {
         log.err("no HHDM", .{});
         arch.hcf();
     };
-    hhdm_offset = hhdm_response.offset;
-
-    main();
-}
-
-pub fn main() noreturn {
-    const log = std.log.scoped(.main);
+    std.debug.assert(0xFFFF_FFFF_8000_0000 == hhdm_response.offset);
 
     log.info("kernel main", .{});
     log.info("zig version: {s}", .{builtin.zig_version_string});
@@ -123,6 +116,7 @@ pub fn main() noreturn {
     proc_enter();
 }
 
+// the actual _smpstart is in arch/x86_64.zig
 pub fn smpmain() noreturn {
     const log = std.log.scoped(.main);
 
