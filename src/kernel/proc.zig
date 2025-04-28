@@ -91,6 +91,7 @@ pub fn switchTo(trap: *arch.SyscallRegs, thread: *caps.Thread) void {
     local.current_thread = thread;
     caps.Vmem.switchTo(thread.vmem.?);
     trap.* = thread.trap;
+    thread.status = .running;
 }
 
 /// stop the thread and (TODO) interrupt a processor that might be running it

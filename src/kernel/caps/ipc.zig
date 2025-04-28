@@ -76,8 +76,12 @@ pub const Receiver = struct {
 
         try thread.moveExtra(sender, @truncate(msg.extra));
 
+        // set the current thread as ready to run again
+        thread.status = .waiting;
         thread.trap = trap.*;
         proc.ready(thread);
+
+        // switch to the caller thread
         proc.switchTo(trap, sender);
 
         trap.writeMessage(msg);
@@ -94,8 +98,6 @@ pub const Receiver = struct {
             return Error.Unimplemented;
         }
 
-        thread.status = .waiting;
-
         const sender = self.sender.swap(null, .seq_cst) orelse {
             // TODO: not listening
             return Error.Unimplemented;
@@ -111,9 +113,11 @@ pub const Receiver = struct {
 
         try thread.moveExtra(sender, @truncate(msg.extra));
 
+        // save the current thread, it is already set as the receiver
         thread.status = .waiting;
         thread.trap = trap.*;
-        self.sender.store(thread, .seq_cst);
+
+        // switch to the caller thread
         proc.switchTo(trap, sender);
 
         trap.writeMessage(msg);
