@@ -61,14 +61,15 @@ zig build run --prominent-compile-errors --summary none -freference-trace \
   - [ ] TSC
   - [x] scheduler
   - [x] binary loader
-  - [ ] message IPC, shared memory IPC
+  - [x] message IPC, shared memory IPC
+  - [ ] signaling system (IPC without messages)
   - [ ] figure out userland interrupts (ps2 keyboard, ..)
   - [x] capabilities
     - [x] allocate capabilities
     - [ ] deallocate capabilities
     - [x] map capabilities
     - [x] unmap capabilities
-    - [ ] send capabilities
+    - [x] send capabilities
     - [x] disallow mapping a frame twice without cloning the cap
     - [x] disallow overlapping maps
   - [x] syscalls
