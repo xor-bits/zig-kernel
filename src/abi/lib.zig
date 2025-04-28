@@ -175,8 +175,6 @@ pub const RootRequest = enum(u8) {
 };
 
 pub const VmRequest = enum(u8) {
-    /// create a new address space and load an ELF into it
-    /// returns an index number that can be used to create threads
     ///
     /// input:
     /// - extra: 1
@@ -189,11 +187,10 @@ pub const VmRequest = enum(u8) {
     /// - arg0: Error!handle
     load_elf,
 
-    /// create a new thread from an address space
     ///
     /// input:
     ///  - extra: 0
-    ///  - arg0: Error!handle
+    ///  - arg0: handle
     ///
     /// output:
     ///  - extra: 1
@@ -201,3 +198,193 @@ pub const VmRequest = enum(u8) {
     ///  - arg0: Error!void
     exec,
 };
+
+// TODO: some RCP style prototype thing that generates
+// a serializer and a deserializer for messages and also
+// a functions to call the server and server loop
+//
+// most servers are just:
+// ```
+// recv(&msg);
+// while (true) {
+//   handle(&msg)
+//   replyRecv(&msg);
+// }
+// ```
+
+// pub fn Protocol(comptime spec: type) type {
+//     const info = comptime @typeInfo(spec);
+//     if (info != .@"struct")
+//         @compileError("Protocol input has to be a struct");
+
+//     if (info.@"struct".is_tuple)
+//         @compileError("Protocol input has to be a struct");
+
+//     var input_msg: MessageUsage = .{};
+//     var output_msg: MessageUsage = .{};
+
+//     var server_fields: [info.@"struct".fields.len + 1]struct { [:0]const u8, type } = undefined;
+//     server_fields[0] = .{ "rx", caps.Receiver };
+
+//     var message_variant_fields: [info.@"struct".fields.len]std.builtin.Type.EnumField = undefined;
+//     for (&message_variant_fields, info.@"struct".fields) |*enum_field, *spec_field| {
+//         enum_field.name = spec_field.name;
+//     }
+//     const message_variant_enum = std.builtin.Type.Enum{
+//         .tag_type = if (message_variant_fields.len == 0) void else u8,
+//         .fields = &message_variant_fields,
+//     };
+
+//     output_msg;
+
+//     inline for (info.@"struct".fields, 0..) |field, i| {
+//         const field_info = comptime @typeInfo(field.type);
+//         if (field_info != .@"fn")
+//             @compileError("Protocol input struct fields have to be of type fn");
+
+//         if (field_info.@"fn".is_generic)
+//             @compileError("Protocol input functions cannot be generic");
+
+//         server_fields[i] = .{ field.name, field_info.@"fn" };
+
+//         inline for (field_info.@"fn".params) |param| {
+//             if (param.is_generic)
+//                 @compileError("Protocol input functions cannot be generic");
+
+//             const param_ty = param.type orelse
+//                 @compileError("Protocol input function parameters have to have types");
+
+//             param_ty;
+//         }
+
+//         output_msg;
+//     }
+
+//     return struct {
+//         pub fn Client() type {
+//             return struct {
+//                 tx: caps.Sender,
+//             };
+//         }
+
+//         pub fn Server() type {
+//             return struct {
+//                 rx: caps.Receiver,
+//             };
+//         }
+//     };
+// }
+
+// const MessageUsage = struct {
+//     // number of capabilities in the extra regs that the single message transfers
+//     caps: u7 = 0,
+//     // number of raw data registers that the single message transfers
+//     // (over 5 regs starts using extra regs)
+//     data: [200]DataEntry,
+//     data_cnt: u8 = 0,
+
+//     const DataEntry = struct { usize, type };
+
+//     fn addType(comptime self: @This(), comptime ty: type) usize {
+//         // caps.Memory,
+//         // caps.Thread,
+//         // caps.Vmem,
+//         // caps.Frame,
+//         // caps.Receiver,
+//         // caps.Sender,
+//         self.data[self.data_cnt] = .{ self.data_cnt, ty };
+//         self.data_cnt;
+//     }
+
+//     fn finish(comptime self: @This()) void {
+//         // make message register use more efficient
+//         std.sort.pdq(DataEntry, self.data[0..self.data_cnt], void{}, struct {
+//             fn lessThanFn(_: void, lhs: DataEntry, rhs: DataEntry) bool {
+//                 return @sizeOf(lhs.@"1") < @sizeOf(rhs.@"1");
+//             }
+//         }.lessThanFn);
+//     }
+
+//     fn Blob(comptime self: @This()) type {
+//         var fields: [self.data_cnt]std.builtin.Type.StructField = undefined;
+//         for (&self.data, 0..) |s, i| {
+//             fields[i] = .{
+//                 .name = std.fmt.comptimePrint("{}", .{s.@"0"}),
+//                 .type = s.@"1",
+
+//                 .default_value_ptr = null,
+//                 .is_comptime = false,
+//                 .alignment = @alignOf(s.@"1"),
+//             };
+//         }
+
+//         const blob: std.builtin.Type.Struct = .{
+//             .layout = .@"extern",
+//             .fields = &fields,
+//         };
+
+//         return @Type(blob);
+//     }
+
+//     fn makeSerializer(comptime self: @This()) type {
+//         const _Blob = self.Blob();
+
+//         // const func: std.builtin.Type.Fn = .{
+//         //     .return_type =
+//         // };
+//         return struct {
+//             fn serialize(inputs: anytype) sys.Error!void {
+//                 var blob: _Blob = undefined;
+//                 blob;
+
+//                 const blob_info = @typeInfo(_Blob);
+
+//                 inline for (blob_info.@"struct".fields) |f| {
+//                     @field(blob, f.name) = @field(blob, inputs.name);
+//                 }
+//             }
+//         };
+//     }
+// };
+
+// fn allocType(comptime T: type, comptime msg: *MessageUsage) void {
+//     const info = @typeInfo(T);
+
+//     switch (info) {
+//         .error_union => |v| {
+//             if (v.error_set != sys.Error)
+//                 @compileError("Error sets must be abi.sys.Error");
+
+//             _ = msg.addType(v.error_set);
+
+//             allocType(v.payload, msg);
+//             return;
+//         },
+//         else => {},
+//     }
+
+//     switch (T) {
+//         caps.Memory,
+//         caps.Thread,
+//         caps.Vmem,
+//         caps.Frame,
+//         caps.Receiver,
+//         caps.Sender,
+//         => {
+//             msg.caps += 1;
+//         },
+
+//         void => {},
+//     }
+// }
+
+// const VmProtocol = Protocol(struct {
+//     // TODO: make sure there is only one copy of
+//     // this frame so that the vm can read it in peace
+//     /// create a new address space and load an ELF into it
+//     /// returns an index number that can be used to create threads
+//     loadElf: fn (frame: caps.Frame, offset: usize, length: usize) sys.Error!usize,
+
+//     /// create a new thread from an address space
+//     exec: fn (vm_handle: usize) sys.Error!caps.Thread,
+// });
