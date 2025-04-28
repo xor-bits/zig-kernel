@@ -41,7 +41,7 @@ pub const Receiver = struct {
     }
 
     // block until something sends
-    pub fn recv(paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
+    pub fn recv(paddr: addr.Phys, thread: *caps.Thread, _: *arch.SyscallRegs) Error!void {
         if (caps.LOG_OBJ_CALLS)
             log.debug("receiver recv", .{});
 
@@ -53,7 +53,6 @@ pub const Receiver = struct {
         }
 
         thread.status = .waiting;
-        proc.yield(trap);
     }
 
     pub fn reply(paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {

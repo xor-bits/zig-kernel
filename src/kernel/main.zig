@@ -256,7 +256,7 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
         // else => std.debug.panic("TODO: syscall {s}", .{@tagName(id)}),
     }
 
-    if (thread.status == .stopped) {
+    if (thread.status == .stopped or thread.status == .waiting) {
         proc.yield(trap);
     }
 }
