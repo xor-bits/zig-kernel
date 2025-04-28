@@ -71,11 +71,11 @@ fn map_root(vmem: *caps.Vmem, a: args.Args) !caps.Ref(caps.Frame) {
     };
 
     log.info("root virtual memory size: 0x{x}", .{data_len});
-    log.info("mapping root [ 0x{x:0>16}..0x{x:0>16} ]", .{
+    log.info("mapping root   [ 0x{x:0>16}..0x{x:0>16} ]", .{
         @intFromPtr(boot_info_ptr.root_data),
         @intFromPtr(boot_info_ptr.root_data) + boot_info_ptr.root_data_len,
     });
-    log.info("mapping initfs    [ 0x{x:0>16}..0x{x:0>16} ]", .{
+    log.info("mapping initfs [ 0x{x:0>16}..0x{x:0>16} ]", .{
         @intFromPtr(boot_info_ptr.initfs_data),
         @intFromPtr(boot_info_ptr.initfs_data) + boot_info_ptr.initfs_data_len,
     });
