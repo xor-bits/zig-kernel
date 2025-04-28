@@ -75,6 +75,8 @@ pub const Receiver = struct {
         var msg = trap.readMessage();
         msg.cap = 0; // call doesnt get to know the Receiver capability id
 
+        try thread.moveExtra(sender, @truncate(msg.extra));
+
         thread.status = .waiting;
         thread.trap = trap.*;
         self.sender.store(thread, .seq_cst);
@@ -108,6 +110,8 @@ pub const Sender = struct {
 
         const msg = trap.readMessage();
         // recv gets to know the Sender capability id (just the number)
+
+        try thread.moveExtra(listener, @truncate(msg.extra));
 
         thread.status = .waiting;
         thread.trap = trap.*;

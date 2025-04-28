@@ -38,7 +38,12 @@ pub fn init() !void {
     // push the null capability
     _ = push_capability(.{});
 
-    // debug_type(Object);
+    debug_type(Object);
+    debug_type(Memory);
+    debug_type(Thread);
+    debug_type(Vmem);
+    debug_type(Receiver);
+    debug_type(Sender);
 }
 
 /// create a capability out of an object
@@ -78,6 +83,11 @@ pub fn get_capability(thread: *Thread, cap_id: u32) Error!*Object {
         return Error.InvalidCapability;
 
     return obj;
+}
+
+/// gets a capability when its already locked and checked to be owned
+pub fn getCapabilityLocked(cap_id: u32) *Object {
+    return &capability_array_unchecked()[cap_id];
 }
 
 /// a single bidirectional call

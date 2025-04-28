@@ -242,6 +242,17 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
         .yield => {
             proc.yield(trap);
         },
+        .get_extra => {
+            const idx: u7 = @truncate(trap.arg0);
+            trap.arg0 = thread.getExtra(idx);
+            trap.syscall_id = abi.sys.encode(0);
+        },
+        .set_extra => {
+            const idx: u7 = @truncate(trap.arg0);
+            const val: usize = @truncate(trap.arg1);
+            thread.setExtra(idx, val, trap.arg2 != 0);
+            trap.syscall_id = abi.sys.encode(0);
+        },
         // else => std.debug.panic("TODO: syscall {s}", .{@tagName(id)}),
     }
 

@@ -15,7 +15,9 @@ pub fn main() !void {
     var msg: abi.sys.Message = .{ .arg0 = @intFromEnum(abi.RootRequest.memory) };
     try abi.rt.root_ipc.call(&msg);
     log.info("got reply: {}", .{msg});
-    const memory = abi.caps.Memory{ .cap = @truncate(try abi.sys.decode(msg.arg0)) };
+
+    const mem_cap: u32 = @truncate(abi.sys.getExtra(0));
+    const memory = abi.caps.Memory{ .cap = mem_cap };
 
     const new_vmem = try memory.alloc(abi.caps.Vmem);
     _ = new_vmem;

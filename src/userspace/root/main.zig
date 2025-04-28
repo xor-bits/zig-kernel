@@ -109,7 +109,10 @@ fn processRootRequest(system: *const System, msg: *abi.sys.Message) void {
                 return;
             };
 
-            msg.arg0 = abi.sys.encode(memory.cap);
+            abi.sys.setExtra(0, memory.cap, true);
+            msg.extra = 1;
+
+            msg.arg0 = abi.sys.encode(0);
         },
         .vm, .pm, .vfs => {
             msg.arg0 = abi.sys.encode(abi.sys.Error.Unimplemented);

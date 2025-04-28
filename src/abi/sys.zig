@@ -9,13 +9,19 @@ pub const Id = enum(usize) {
     /// print debug logs to serial output
     log = 1,
     /// identify the object type of a capability
-    debug = 2,
-    call = 3,
-    recv = 4,
-    reply = 5,
-    // replyRecv = 6,
+    debug,
+    call,
+    recv,
+    reply,
+    // reply_recv,
+    /// read (and reset) an extra message register of the current thread
+    get_extra,
+    /// write an extra message register of the current thread
+    set_extra,
     /// give up the CPU for other tasks
-    yield = 8,
+    yield,
+
+    // TODO: maybe move all object call id's here to be syscall id's
 };
 
 pub const Rights = extern struct {
@@ -293,7 +299,7 @@ pub const Message = extern struct {
     /// Number of extra arguments in the thread extra arguments array.
     /// They can contain capabilities that have their ownership
     /// automatically transferred.
-    extra: u32 = 0,
+    extra: u32 = 0, // u7
     // fast registers \/
     arg0: usize = 0,
     arg1: usize = 0,
@@ -336,6 +342,22 @@ pub fn reply(cap: u32, msg: *Message) !void {
         regs[4],
         regs[5],
     });
+}
+
+pub fn getExtra(idx: u7) usize {
+    const result, const vals = syscall1rw(@intFromEnum(Id.get_extra), .{
+        idx,
+    });
+    _ = decode(result) catch unreachable;
+    return vals[0];
+}
+
+pub fn setExtra(idx: u7, val: usize, is_cap: bool) void {
+    _ = syscall(.set_extra, .{
+        idx,
+        val,
+        @intFromBool(is_cap),
+    }) catch unreachable;
 }
 
 pub fn yield() void {
@@ -501,6 +523,23 @@ pub fn syscall6(id: usize, arg1: usize, arg2: usize, arg3: usize, arg4: usize, a
           [arg6] "{r10}" (arg6),
         : "rcx", "r11" // rcx becomes rip and r11 becomes rflags
     );
+}
+
+pub fn syscall1rw(id: usize, args: [1]usize) struct { usize, [1]usize } {
+    var arg0: usize = undefined; // arrays dont work on outputs for whatever reason
+
+    const res = asm volatile ("syscall"
+        : [ret] "={rax}" (-> usize),
+          [arg0out] "={rdi}" (arg0),
+        : [id] "{rax}" (id),
+          [arg0in] "{rdi}" (args[0]),
+        : "rcx", "r11" // rcx becomes rip and r11 becomes rflags
+    );
+
+    return .{
+        res,
+        .{arg0},
+    };
 }
 
 pub fn syscall6rw(id: usize, args: [6]usize) struct { usize, [6]usize } {

@@ -30,12 +30,85 @@ pub const Thread = struct {
     /// scheduler linked list
     prev: ?caps.Ref(Thread) = null,
 
+    /// extra ipc registers
+    /// controlled by Receiver and Sender
+    extra_regs: [128]u64 = std.mem.zeroes([128]u64),
+    /// extra ipc register types, 0=raw 1=cap
+    /// controlled by Receiver and Sender
+    extra_types: u128 = 0,
+
     pub fn init(self: caps.Ref(@This())) void {
         self.ptr().* = .{};
     }
 
     pub fn alloc(_: ?abi.ChunkSize) Error!addr.Phys {
         return pmem.alloc(@sizeOf(@This())) orelse return Error.OutOfMemory;
+    }
+
+    pub fn getExtra(self: *@This(), idx: u7) usize {
+        // current thread is locked
+
+        const val = self.extra_regs[idx];
+        self.extra_regs[idx] = 0;
+        self.extra_types &= ~(@as(u128, 1) << idx);
+        return val;
+    }
+
+    pub fn setExtra(self: *@This(), idx: u7, val: usize, is_cap: bool) void {
+        // current thread is locked
+
+        self.extra_regs[idx] = val;
+        if (is_cap) {
+            self.extra_types |= @as(u128, 1) << idx;
+        } else {
+            self.extra_types &= ~(@as(u128, 1) << idx);
+        }
+    }
+
+    pub fn moveExtra(self: *@This(), target: *@This(), count: u7) Error!void {
+        // both current and target threads are locked
+
+        {
+            var locked_count: usize = 0;
+
+            defer {
+                for (0..count) |idx| {
+                    if ((self.extra_types & (@as(u128, 1) << @as(u7, @truncate(idx)))) == 0) continue;
+                    if (locked_count == 0) break;
+                    locked_count -= 1;
+
+                    const cap_id: u32 = @truncate(self.extra_regs[idx]);
+                    const obj = caps.getCapabilityLocked(cap_id);
+                    obj.lock.unlock();
+                }
+            }
+
+            // lock all caps
+            for (0..count) |idx| {
+                if ((self.extra_types & (@as(u128, 1) << @as(u7, @truncate(idx)))) == 0) continue;
+
+                const cap_id: u32 = @truncate(self.extra_regs[idx]);
+                _ = try caps.get_capability(self, cap_id);
+
+                locked_count += 1;
+            }
+
+            // transfer ownership
+            for (0..count) |idx| {
+                if ((self.extra_types & (@as(u128, 1) << @as(u7, @truncate(idx)))) == 0) continue;
+
+                const cap_id: u32 = @truncate(self.extra_regs[idx]);
+                const obj = caps.getCapabilityLocked(cap_id);
+
+                obj.owner.store(Thread.vmemOf(target), .release);
+            }
+        }
+
+        // resets all target extra registers and moves `count` registers over
+        target.extra_regs = std.mem.zeroes([128]u64);
+        target.extra_types = self.extra_types;
+        std.mem.copyForwards(u64, target.extra_regs[0..], self.extra_regs[0..count]);
+        self.extra_regs = std.mem.zeroes([128]u64);
     }
 
     // FIXME: pass Ref(Self) instead of addr.Phys
