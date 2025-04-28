@@ -77,9 +77,8 @@ pub const Receiver = struct {
 
         try thread.moveExtra(sender, @truncate(msg.extra));
 
-        thread.status = .waiting;
         thread.trap = trap.*;
-        self.sender.store(thread, .seq_cst);
+        proc.ready(thread);
         proc.switchTo(trap, sender);
 
         trap.writeMessage(msg);

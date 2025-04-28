@@ -122,9 +122,6 @@ pub fn ready(thread: *caps.Thread) void {
 }
 
 pub fn next() caps.Ref(caps.Thread) {
-    // log.debug("waiting for next thread", .{});
-    // defer log.debug("waiting for next thread done", .{});
-
     if (active_threads.load(.monotonic) == 0) {
         log.err("NO ACTIVE THREADS", .{});
         log.err("THIS IS A USER-SPACE ERROR", .{});
@@ -134,6 +131,7 @@ pub fn next() caps.Ref(caps.Thread) {
 
     while (true) {
         if (tryNext()) |next_thread| return next_thread;
+        log.debug("waiting for next thread", .{});
         arch.ints.wait();
     }
 }
