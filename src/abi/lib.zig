@@ -154,10 +154,21 @@ pub const RootRequest = enum(u8) {
     memory,
 
     /// request a sender to the vm server
+    /// only pm can use this
     vm,
+
+    /// provide a sender to the vm server
+    /// only vm can use this
+    vm_ready,
+
+    // /// install a new pm sender that all new .pm requests get
+    // pm_install,
 
     /// request a sender to the pm server
     pm,
+
+    // /// install a new vfs sender that all new .vfs requests get
+    // vfs_install,
 
     /// request a sender to the vfs server
     vfs,

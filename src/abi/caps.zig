@@ -12,7 +12,7 @@ pub const ROOT_BOOT_INFO: Frame = .{ .cap = 4 };
 
 /// capability that allows kernel object allocation
 pub const Memory = struct {
-    cap: u32,
+    cap: u32 = 0,
 
     pub const Type: abi.ObjectType = .memory;
 
@@ -29,7 +29,7 @@ pub const Memory = struct {
 
 /// capability to manage a single thread control block (TCB)
 pub const Thread = struct {
-    cap: u32,
+    cap: u32 = 0,
 
     pub const Type: abi.ObjectType = .thread;
 
@@ -60,15 +60,17 @@ pub const Thread = struct {
 
 /// capability to the virtual memory structure
 pub const Vmem = struct {
-    cap: u32,
+    cap: u32 = 0,
 
     pub const Type: abi.ObjectType = .vmem;
 
     pub fn map(self: @This(), frame: Frame, vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) sys.Error!void {
+        // @import("std").log.info("mapping 0x{x}", .{vaddr});
         return sys.vmemMap(self.cap, frame.cap, vaddr, rights, flags);
     }
 
     pub fn unmap(self: @This(), frame: Frame, vaddr: usize) sys.Error!void {
+        // @import("std").log.info("unmapping 0x{x}", .{vaddr});
         return sys.vmemUnmap(self.cap, frame.cap, vaddr);
     }
 
@@ -79,7 +81,7 @@ pub const Vmem = struct {
 
 /// capability to a physical memory region (sized `ChunkSize`)
 pub const Frame = struct {
-    cap: u32,
+    cap: u32 = 0,
 
     pub const Type: abi.ObjectType = .frame;
 };
@@ -112,7 +114,7 @@ pub const Receiver = struct {
 /// capability to **a** sender end of an endpoint,
 /// there can be multiple senders
 pub const Sender = struct {
-    cap: u32,
+    cap: u32 = 0,
 
     pub const Type: abi.ObjectType = .sender;
 

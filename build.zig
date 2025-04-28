@@ -192,6 +192,7 @@ fn createInitfsTarGz(
 ) std.Build.LazyPath {
     const initfs_processes = .{
         "vm",
+        "pm",
         "init",
     };
 

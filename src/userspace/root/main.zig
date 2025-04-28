@@ -41,13 +41,19 @@ pub fn main() !void {
 
     const recv = try abi.caps.ROOT_MEMORY.alloc(abi.caps.Receiver);
 
+    var system: System = .{
+        .vm_bin = try binBytes("/sbin/vm"),
+        .pm_bin = try binBytes("/sbin/pm"),
+    };
+
     // FIXME: figure out a way to reclaim capabilities from crashed processes
 
     // virtual memory manager (system) (server)
     // maps new processes to memory and manages page faults,
     // heaps, lazy alloc, shared memory, swapping, etc.
     const vm_sender = try recv.subscribe();
-    const vm = try exec_elf("/sbin/vm", vm_sender);
+    system.vm = try exec_elf(system.vm_bin, vm_sender);
+    system.vm_endpoint = vm_sender.cap;
 
     // process manager (system) (server)
     // manages unix-like process stuff like permissions, cli args, etc.
@@ -64,51 +70,133 @@ pub fn main() !void {
     // launches stuff like the window manager and virtual TTYs
     // try exec_with_vm("/sbin/init");
 
-    var system: System = .{
-        .vm = vm,
-        .vm_sender = vm_sender,
-    };
-
     var msg: abi.sys.Message = undefined;
     try recv.recv(&msg);
     while (true) {
         // log.info("root received: {}", .{msg});
-        processRootRequest(&system, &msg);
-        try recv.replyRecv(&msg);
+        if (try processRootRequest(recv, &system, &msg))
+            try recv.replyRecv(&msg)
+        else
+            try recv.recv(&msg);
     }
 }
 
+fn binBytes(path: []const u8) ![]const u8 {
+    return initfsd.readFile(initfsd.openFile(path) orelse {
+        log.err("missing critical system binary: '{s}'", .{path});
+        return error.MissingSystem;
+    });
+}
+
 const System = struct {
-    vm: abi.caps.Thread,
-    vm_sender: abi.caps.Sender,
+    vm: abi.caps.Thread = .{},
+    vm_bin: []const u8,
+    vm_sender: abi.caps.Sender = .{},
+    vm_endpoint: u32 = 0,
+
+    pm: abi.caps.Thread = .{},
+    pm_bin: []const u8,
 };
 
-fn processRootRequest(system: *const System, msg: *abi.sys.Message) void {
+fn processRootRequest(
+    recv: abi.caps.Receiver,
+    system: *System,
+    msg: *abi.sys.Message,
+) !bool {
     const req = std.meta.intToEnum(abi.RootRequest, msg.arg0) catch {
         msg.arg0 = abi.sys.encode(abi.sys.Error.InvalidArgument);
-        return;
+        return true;
     };
 
     switch (req) {
         .memory => {
             // only system processes can get access to the physical memory allocator
-            if (system.vm_sender.cap != msg.cap) return;
+            if (system.vm_endpoint != msg.cap) {
+                msg.arg0 = abi.sys.encode(Error.PermissionDenied);
+                msg.extra = 0;
+                return true;
+            }
 
             const memory = abi.caps.ROOT_MEMORY.alloc(abi.caps.Memory) catch |err| {
                 msg.arg0 = abi.sys.encode(err);
-                return;
+                msg.extra = 0;
+                return true;
             };
 
             abi.sys.setExtra(0, memory.cap, true);
             msg.extra = 1;
-
             msg.arg0 = abi.sys.encode(0);
         },
+        .vm_ready => {
+            if (system.vm_endpoint != msg.cap) {
+                msg.arg0 = abi.sys.encode(Error.PermissionDenied);
+                msg.extra = 0;
+                return true;
+            }
+
+            if (msg.extra != 1) {
+                msg.arg0 = abi.sys.encode(Error.InvalidArgument);
+                msg.extra = 0;
+                return true;
+            }
+
+            // FIXME: verify that it is a cap
+            system.vm_sender = .{ .cap = @truncate(abi.sys.getExtra(0)) };
+            msg.extra = 0;
+            msg.arg0 = abi.sys.encode(0);
+
+            // TODO: do all this \/ from a 2nd thread
+
+            try recv.reply(msg); // reply now but dont recv yet
+
+            log.info("vm ready, exec pm", .{});
+
+            // send the pm server elf file to vm server using shared memory IPC
+            const frame = try abi.caps.ROOT_MEMORY.allocSized(
+                abi.caps.Frame,
+                abi.ChunkSize.of(system.pm_bin.len) orelse {
+                    log.err("pm binary too large", .{});
+                    return error.PmElfCantSend;
+                },
+            );
+
+            log.info("mapping shared mem", .{});
+            try abi.caps.ROOT_SELF_VMEM.map(
+                frame,
+                LOADER_TMP,
+                .{ .writable = true },
+                .{},
+            );
+            log.info("copying shared mem", .{});
+            copyForwardsVolatile(
+                u8,
+                @as([*]volatile u8, @ptrFromInt(LOADER_TMP))[0..system.pm_bin.len],
+                system.pm_bin,
+            );
+            log.info("unmapping shared mem", .{});
+            try abi.caps.ROOT_SELF_VMEM.unmap(
+                frame,
+                LOADER_TMP,
+            );
+
+            log.info("sending shared mem", .{});
+            var exec_msg: abi.sys.Message = .{
+                .extra = 1,
+            };
+            abi.sys.setExtra(0, frame.cap, true);
+            try system.vm_sender.call(&exec_msg);
+            _ = try abi.sys.decode(exec_msg.arg0);
+
+            return false; // false => no reply
+        },
         .vm, .pm, .vfs => {
-            msg.arg0 = abi.sys.encode(abi.sys.Error.Unimplemented);
-            return;
+            msg.arg0 = abi.sys.encode(Error.Unimplemented);
+            msg.extra = 0;
+            return true;
         },
     }
+
+    return true;
 }
 
 pub fn map_naive(frame: abi.caps.Frame, vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
@@ -120,16 +208,14 @@ pub fn map_naive(frame: abi.caps.Frame, vaddr: usize, rights: abi.sys.Rights, fl
     );
 }
 
-fn exec_elf(path: []const u8, sender: abi.caps.Sender) !abi.caps.Thread {
-    const elf_file = initfsd.openFile(path).?;
-    const elf_bytes = initfsd.readFile(elf_file);
+fn exec_elf(elf_bytes: []const u8, sender: abi.caps.Sender) !abi.caps.Thread {
     var elf = std.io.fixedBufferStream(elf_bytes);
 
     var crc: u32 = 0;
     for (elf_bytes) |b| {
         crc = @addWithOverflow(crc, @as(u32, b))[0];
     }
-    log.info("xor crc of `{s}` is {d}", .{ path, crc });
+    log.info("xor crc of is {d}", .{crc});
 
     const header = try std.elf.Header.read(&elf);
     var program_headers = header.program_header_iterator(&elf);

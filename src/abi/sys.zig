@@ -66,6 +66,7 @@ pub const Error = error{
     AlreadyMapped,
     NotMapped,
     MappingOverlap,
+    PermissionDenied,
 
     UnknownError,
 };
@@ -97,6 +98,7 @@ pub fn encodeError(err: Error) usize {
         error.AlreadyMapped => 15,
         error.NotMapped => 16,
         error.MappingOverlap => 17,
+        error.PermissionDenied => 18,
 
         error.UnknownError => std.debug.panic("unknown error shouldn't be encoded", .{}),
     }));
@@ -125,6 +127,7 @@ pub fn decode(v: usize) Error!usize {
         15 => error.AlreadyMapped,
         16 => error.NotMapped,
         17 => error.MappingOverlap,
+        18 => error.PermissionDenied,
 
         else => return error.UnknownError,
     };
