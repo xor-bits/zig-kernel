@@ -55,12 +55,11 @@ pub fn main() noreturn {
         arch.hcf();
     }
 
-    // the HHDM should be at 0xFFFF_FFFF_8000_0000
     const hhdm_response = hhdm.response orelse {
         log.err("no HHDM", .{});
         arch.hcf();
     };
-    std.debug.assert(0xFFFF_FFFF_8000_0000 == hhdm_response.offset);
+    hhdm_offset = hhdm_response.offset;
 
     log.info("kernel main", .{});
     log.info("zig version: {s}", .{builtin.zig_version_string});
