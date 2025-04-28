@@ -13,7 +13,7 @@ pub const Id = enum(usize) {
     call,
     recv,
     reply,
-    // reply_recv,
+    reply_recv,
     /// read (and reset) an extra message register of the current thread
     get_extra,
     /// write an extra message register of the current thread
@@ -342,6 +342,11 @@ pub fn reply(cap: u32, msg: *Message) !void {
         regs[4],
         regs[5],
     });
+}
+
+pub fn replyRecv(cap: u32, msg: *Message) !void {
+    msg.cap = cap;
+    _ = try rwcall(.reply_recv, msg);
 }
 
 pub fn getExtra(idx: u7) usize {

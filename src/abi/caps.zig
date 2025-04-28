@@ -99,6 +99,10 @@ pub const Receiver = struct {
         return sys.reply(self.cap, msg);
     }
 
+    pub fn replyRecv(self: @This(), msg: *sys.Message) sys.Error!void {
+        return sys.replyRecv(self.cap, msg);
+    }
+
     pub fn subscribe(self: @This()) sys.Error!Sender {
         const cap = try sys.receiverSubscribe(self.cap);
         return .{ .cap = cap };

@@ -114,8 +114,11 @@ pub fn reply(thread: *Thread, cap_id: u32, trap: *arch.SyscallRegs) Error!void {
     return obj.reply(thread, trap);
 }
 
-pub fn replyRecv() Error!void {
-    // TODO:
+pub fn replyRecv(thread: *Thread, cap_id: u32, trap: *arch.SyscallRegs) Error!void {
+    const obj = try get_capability(thread, cap_id);
+    defer obj.lock.unlock();
+
+    return obj.replyRecv(thread, trap);
 }
 
 pub fn capAssertNotNull(cap: u32, trap: *arch.SyscallRegs) bool {
@@ -293,6 +296,18 @@ pub const Object = struct {
             .vmem => Error.InvalidArgument,
             .frame => Error.InvalidArgument,
             .receiver => Receiver.reply(self.paddr, thread, trap),
+            .sender => Error.InvalidArgument,
+        };
+    }
+
+    pub fn replyRecv(self: Self, thread: *Thread, trap: *arch.SyscallRegs) Error!void {
+        return switch (self.type) {
+            .null => Error.InvalidCapability,
+            .memory => Error.InvalidArgument,
+            .thread => Error.InvalidArgument,
+            .vmem => Error.InvalidArgument,
+            .frame => Error.InvalidArgument,
+            .receiver => Receiver.replyRecv(self.paddr, thread, trap),
             .sender => Error.InvalidArgument,
         };
     }

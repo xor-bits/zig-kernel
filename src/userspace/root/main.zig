@@ -78,13 +78,11 @@ pub fn main() !void {
     };
 
     var msg: abi.sys.Message = undefined;
+    try recv.recv(&msg);
     while (true) {
-        try recv.recv(&msg);
-        log.info("root received: {}", .{msg});
-
+        // log.info("root received: {}", .{msg});
         processRootRequest(&system, &msg);
-
-        try recv.reply(&msg);
+        try recv.replyRecv(&msg);
     }
 }
 

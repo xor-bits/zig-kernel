@@ -239,6 +239,13 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
                 trap.syscall_id = abi.sys.encode(err);
             }
         },
+        .reply_recv => {
+            if (caps.replyRecv(thread, @truncate(trap.arg0), trap)) |_| {
+                trap.syscall_id = abi.sys.encode(0);
+            } else |err| {
+                trap.syscall_id = abi.sys.encode(err);
+            }
+        },
         .yield => {
             proc.yield(trap);
         },

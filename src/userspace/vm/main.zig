@@ -21,6 +21,15 @@ pub fn main() !void {
 
     const new_vmem = try memory.alloc(abi.caps.Vmem);
     _ = new_vmem;
+
+    msg = .{ .arg0 = @intFromEnum(abi.RootRequest.pm) };
+    var count: usize = 0;
+    while (true) {
+        try abi.rt.root_ipc.call(&msg);
+        count += 1;
+        if (count % 100_000 == 1)
+            log.info("call done, count={}", .{count});
+    }
 }
 
 comptime {

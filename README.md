@@ -117,6 +117,24 @@ zig build run --prominent-compile-errors --summary none -freference-trace \
 - [ ] /sbin/pcid process
 
 - [ ] /sbin/usbd process
-     
+
+## IPC performance
+
+Approximate synchronous IPC performance: `call` + `replyRecv`
+loop takes about 10µs (100 000 per second):
+
+```zig
+// server
+while (true) {
+    try rx.replyRecv(&msg);
+}
+// client
+while (true) {
+    try tx.call(&msg);
+}
+```
+
+## Gallery
+    
 ![zig-kernel](https://github.com/user-attachments/assets/e508b174-1ccd-4830-aa00-68ec27faba77)
 
