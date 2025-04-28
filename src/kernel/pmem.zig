@@ -433,7 +433,7 @@ test "no collisions" {
 
     // allocate all 4096 pages
     for (&pages) |*page| {
-        page.* = page_allocator.create(Page) orelse null;
+        page.* = page_allocator.create(Page) catch null;
     }
 
     // zero all of them
@@ -456,7 +456,7 @@ test "no collisions" {
     // free all of them
     for (&pages) |_page| {
         const page = _page orelse continue;
-        free(page);
+        page_allocator.destroy(page);
     }
 
     try std.testing.expect(unused_before == printBits(false));
