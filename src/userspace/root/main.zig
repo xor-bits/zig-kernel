@@ -36,14 +36,6 @@ pub fn main() !void {
     );
     log.info("boot info mapped", .{});
     const boot_info = @as(*volatile abi.BootInfo, @ptrFromInt(BOOT_INFO));
-    // log.info("boot info {}", .{boot_info.*});
-
-    log.info("root binary addr: {*}", .{boot_info.rootData().ptr});
-    log.info("root binary size: {}", .{boot_info.rootData().len});
-    log.info("root binary path: '{s}'", .{boot_info.rootPath()});
-    log.info("initfs addr: {*}", .{boot_info.initfsData().ptr});
-    log.info("initfs size: {}", .{boot_info.initfsData().len});
-    log.info("initfs path: '{s}'", .{boot_info.initfsPath()});
 
     try initfsd.init(boot_info.initfsData());
 
