@@ -22,7 +22,6 @@ pub const KERNELGS_BASE = 0xC0000102;
 
 //
 
-
 pub export var smp: limine.SmpRequest = .{};
 var next: std.atomic.Value(usize) = .init(0);
 
@@ -42,12 +41,20 @@ pub fn earlyInit() void {
     wrmsr(GS_BASE, 0);
 }
 
-pub fn init_cpu(id: u32) !void {
+pub fn init_cpu(id: u32, smpinfo: ?*limine.SmpInfo) !void {
+    const lapic_id = if (smpinfo) |i|
+        i.lapic_id
+    else if (smp.response) |resp|
+        resp.bsp_lapic_id
+    else
+        0;
+
     const tls = try pmem.page_allocator.create(main.CpuLocalStorage);
     tls.* = .{
         .self_ptr = tls,
         .cpu_config = undefined,
         .id = id,
+        .lapic_id = @truncate(lapic_id),
     };
 
     try CpuConfig.init(&tls.cpu_config, id);
@@ -73,9 +80,9 @@ pub fn smp_init() void {
     }
 }
 
-export fn _smpstart(_: *limine.SmpInfo) callconv(.C) noreturn {
+export fn _smpstart(smpinfo: *limine.SmpInfo) callconv(.C) noreturn {
     earlyInit();
-    main.smpmain();
+    main.smpmain(smpinfo);
 }
 
 pub fn cpu_local() *main.CpuLocalStorage {
@@ -344,7 +351,6 @@ pub fn flush_tlb_addr(vaddr: usize) void {
         : "memory"
     );
 }
-
 
 /// processor ID
 pub fn cpu_id() u32 {
@@ -811,6 +817,15 @@ pub const Idt = extern struct {
                 defer if (is_user) swapgs();
 
                 apic.timer(interrupt_stack_frame);
+            }
+        }).asInt();
+        entries[apic.IRQ_IPI] = Entry.generate(struct {
+            fn handler(interrupt_stack_frame: *const InterruptStackFrame) void {
+                const is_user = interrupt_stack_frame.code_segment == @as(u16, GdtDescriptor.user_code_selector);
+                if (is_user) swapgs();
+                defer if (is_user) swapgs();
+
+                apic.ipi(interrupt_stack_frame);
             }
         }).asInt();
 

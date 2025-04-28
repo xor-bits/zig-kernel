@@ -2,8 +2,10 @@ const std = @import("std");
 const abi = @import("abi");
 
 const addr = @import("addr.zig");
+const apic = @import("apic.zig");
 const arch = @import("arch.zig");
 const caps = @import("caps.zig");
+const main = @import("main.zig");
 const spin = @import("spin.zig");
 
 const log = std.log.scoped(.proc);
@@ -16,6 +18,8 @@ const Error = abi.sys.Error;
 var active_threads: std.atomic.Value(usize) = .init(1);
 var queues: [4]Queue = .{ .{}, .{}, .{}, .{} };
 var queue_locks: [4]spin.Mutex = .{ .new(), .new(), .new(), .new() };
+
+var waiters = [_]std.atomic.Value(?*main.CpuLocalStorage){.init(null)} ** 256;
 
 const Queue = struct {
     head: ?caps.Ref(caps.Thread) = null,
@@ -119,6 +123,17 @@ pub fn ready(thread: *caps.Thread) void {
     defer queue_locks[prio].unlock();
 
     queues[prio].push(caps.Ref(caps.Thread){ .paddr = addr.Virt.fromPtr(thread).hhdmToPhys() });
+
+    // notify a single sleeping processor
+    for (&waiters) |*w| {
+        const waiter: *const main.CpuLocalStorage = w.swap(null, .acquire) orelse continue;
+        // log.info("giving thread to {} ({})", .{ waiter.id, waiter.lapic_id });
+        apic.interProcessorInterrupt(waiter.lapic_id);
+        break;
+    }
+
+    // TODO: else notify the lowest priority processor
+    // (if its current priority is lower than this new one)
 }
 
 pub fn next() caps.Ref(caps.Thread) {
@@ -129,10 +144,17 @@ pub fn next() caps.Ref(caps.Thread) {
         // arch.hcf();
     }
 
+    if (tryNext()) |next_thread| return next_thread;
+
+    log.debug("waiting for next thread", .{});
+    defer log.debug("next thread acquired", .{});
+
     while (true) {
-        if (tryNext()) |next_thread| return next_thread;
-        log.debug("waiting for next thread", .{});
+        const locals = arch.cpu_local();
+        waiters[locals.id].store(locals, .seq_cst);
         arch.ints.wait();
+
+        if (tryNext()) |next_thread| return next_thread;
     }
 }
 

@@ -39,6 +39,7 @@ pub fn init() !void {
     if (rsdp.revision == 0) {
         try acpiv1(rsdp);
     } else {
+        log.err("no x2APIC support", .{});
         try acpiv2(rsdp);
     }
 }

@@ -14,6 +14,7 @@ const log = std.log.scoped(.apic);
 
 pub const IRQ_SPURIOUS: u8 = 0xFF;
 pub const IRQ_TIMER: u8 = 0x30;
+pub const IRQ_IPI: u8 = 0x31;
 
 pub const IA32_APIC_XAPIC_ENABLE: u64 = 1 << 11;
 pub const IA32_APIC_X2APIC_ENABLE: u64 = 1 << 10;
@@ -97,6 +98,8 @@ pub fn init(madt: *const Madt) !void {
     if (arch.cpu_id() == 0)
         log.info("found Local APIC addr: 0x{x}", .{lapic_addr});
     const lapic: *volatile LocalApicRegs = addr.Phys.fromInt(lapic_addr).toHhdm().toPtr(*volatile LocalApicRegs);
+    // const lapic_id = lapic.lapic_id.val >> 24;
+    // arch.cpu_local().lapic_id.store(@truncate(lapic_id), .seq_cst);
 
     apic_base.initNow(lapic);
 }
@@ -163,8 +166,80 @@ pub fn timer(_: *const anyopaque) void {
     eoi();
 }
 
-fn eoi() void {
+pub fn ipi(_: *const anyopaque) void {
+    eoi();
+}
+
+pub fn eoi() void {
     apic_base.get().?.*.eoi.val = 0;
+}
+
+pub fn interProcessorInterrupt(target_lapic_id: u8) void {
+    const lapic_regs: *volatile LocalApicRegs = apic_base.get().?.*;
+
+    const IcrHigh = packed struct {
+        reserved: u24 = 0,
+        destination: u8,
+    };
+    const IcrLow = packed struct {
+        vector: u8,
+        delivery_mode: enum(u3) {
+            fixed,
+            lowest_priority, // this one is interesting for scheduling
+            smi,
+            reserved0,
+            nmi,
+            init,
+            start_up,
+            reserved1,
+        },
+        destination_mode: enum(u1) {
+            physical,
+            logical,
+        },
+        delivery_status: enum(u1) {
+            idle,
+            send_pending,
+        } = .idle,
+        reserved0: u1 = 0,
+        level: enum(u1) {
+            deassert,
+            assert,
+        },
+        trigger_mode: enum(u1) {
+            edge,
+            level,
+        },
+        reserved1: u2 = 0,
+        destination_shorthand: enum(u2) {
+            no_shorthand,
+            self,
+            all_including_self,
+            all_excluding_self,
+        },
+        reserved2: u12 = 0,
+    };
+
+    // log.info("ICR_HIGH: {*}", .{&lapic_regs.interrupt_command[1].val});
+    // log.info("ICR_LOW: {*}", .{&lapic_regs.interrupt_command[0].val});
+
+    const icr_high = IcrHigh{
+        .destination = target_lapic_id,
+    };
+    const icr_low = IcrLow{
+        .vector = IRQ_IPI,
+        .delivery_mode = .fixed,
+        .destination_mode = .physical,
+        .level = .assert,
+        .trigger_mode = .edge,
+        .destination_shorthand = .no_shorthand,
+    };
+
+    // log.info("ICR_HIGH: {}", .{icr_high});
+    // log.info("ICR_LOW: {}", .{icr_low});
+
+    lapic_regs.interrupt_command[1].val = @bitCast(icr_high);
+    lapic_regs.interrupt_command[0].val = @bitCast(icr_low);
 }
 
 //

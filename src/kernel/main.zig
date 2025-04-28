@@ -37,6 +37,7 @@ pub const CpuLocalStorage = struct {
 
     current_thread: ?*caps.Thread = null,
     id: u32,
+    lapic_id: u8,
 };
 
 //
@@ -77,7 +78,7 @@ pub fn main() noreturn {
     // set up arch specific things: GDT, TSS, IDT, syscalls, ...
     const id = arch.next_cpu_id();
     log.info("initializing CPU-{}", .{id});
-    arch.init_cpu(id) catch |err| {
+    arch.init_cpu(id, null) catch |err| {
         std.debug.panic("failed to initialize CPU-{}: {}", .{ id, err });
     };
 
@@ -116,7 +117,7 @@ pub fn main() noreturn {
 }
 
 // the actual _smpstart is in arch/x86_64.zig
-pub fn smpmain() noreturn {
+pub fn smpmain(smpinfo: *limine.SmpInfo) noreturn {
     const log = std.log.scoped(.main);
 
     // boot up a few processors
@@ -125,7 +126,7 @@ pub fn smpmain() noreturn {
     // set up arch specific things: GDT, TSS, IDT, syscalls, ...
     const id = arch.next_cpu_id();
     log.info("initializing CPU-{}", .{id});
-    arch.init_cpu(id) catch |err| {
+    arch.init_cpu(id, smpinfo) catch |err| {
         std.debug.panic("failed to initialize CPU-{}: {}", .{ id, err });
     };
 
