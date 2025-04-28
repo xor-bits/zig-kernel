@@ -1119,11 +1119,11 @@ pub const SyscallRegs = extern struct {
 };
 
 const syscall_enter = std.fmt.comptimePrint(
-// interrupts get cleared already
-// \\ cli
-// save the user stack temporarily into the kernel GS structure
-// then load the real kernel stack (because syscall keeps RSP from userland)
-// then push the user stack into SyscallRegs
+    // interrupts get cleared already
+    // \\ cli
+    // save the user stack temporarily into the kernel GS structure
+    // then load the real kernel stack (because syscall keeps RSP from userland)
+    // then push the user stack into SyscallRegs
     \\ swapgs
     \\ movq %rsp, %gs:{0d}
     \\ movq %gs:{1d}, %rsp
@@ -1180,25 +1180,25 @@ const sysret_instr = std.fmt.comptimePrint(
 , .{@offsetOf(CpuConfig, "rsp_user")});
 
 pub fn sysret(args: *SyscallRegs) noreturn {
-    asm volatile (
-    // set stack to be args
+    const instr =
         \\ movq %[args], %rsp
         \\
-        ++ sysret_instr
+    ++ sysret_instr;
+    asm volatile (instr
         :
         : [args] "r" (args),
         : "memory"
     );
-
     unreachable;
 }
 
 fn syscall_handler_wrapper_wrapper() callconv(.Naked) noreturn {
-    asm volatile (syscall_enter ++
-            \\
-            \\ call syscall_handler_wrapper
-            \\
-        ++ sysret_instr ::: "memory");
+    const instr = syscall_enter ++
+        \\
+        \\ call syscall_handler_wrapper
+        \\
+    ++ sysret_instr;
+    asm volatile (instr ::: "memory");
 }
 
 export fn syscall_handler_wrapper(args: *SyscallRegs) callconv(.SysV) void {
