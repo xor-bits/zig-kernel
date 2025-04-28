@@ -6,6 +6,7 @@ const addr = @import("addr.zig");
 const arch = @import("arch.zig");
 const lazy = @import("lazy.zig");
 const hpet = @import("hpet.zig");
+const spin = @import("spin.zig");
 
 const log = std.log.scoped(.apic);
 
@@ -36,11 +37,10 @@ const APIC_TIMER_DIV: u32 = 0b0010; // div by 8
 
 /// parse Multiple APIC Description Table
 pub fn init(madt: *const Madt) !void {
-    log.info("init APIC", .{});
+    log.info("init APIC-{}", .{arch.cpu_id()});
 
     if (builtin.target.cpu.arch == .x86_64) {
         disablePic();
-        log.info("PIC disabled", .{});
     }
 
     var lapic_addr: u64 = madt.lapic_addr;
@@ -59,7 +59,8 @@ pub fn init(madt: *const Madt) !void {
             1 => {
                 const entry: *const IoApic = @ptrCast(entry_base);
                 // _ = entry;
-                log.info("found I/O APIC addr: 0x{x}", .{entry.io_apic_addr});
+                if (arch.cpu_id() == 0)
+                    log.info("found I/O APIC addr: 0x{x}", .{entry.io_apic_addr});
                 // TODO: this is going to be used later for I/O APIC
             },
             2 => {
@@ -93,7 +94,8 @@ pub fn init(madt: *const Madt) !void {
         }
     }
 
-    log.info("found Local APIC addr: 0x{x}", .{lapic_addr});
+    if (arch.cpu_id() == 0)
+        log.info("found Local APIC addr: 0x{x}", .{lapic_addr});
     const lapic: *volatile LocalApicRegs = addr.Phys.fromInt(lapic_addr).toHhdm().toPtr(*volatile LocalApicRegs);
 
     apic_base.initNow(lapic);
@@ -129,7 +131,8 @@ pub fn enable() void {
     lapic.lvt_error.val = 0;
     lapic.divide_configuration.val = APIC_TIMER_DIV; // buggy hardware fix
 
-    log.info("APIC initialized", .{});
+    if (arch.cpu_id() == 0)
+        log.info("APIC initialized", .{});
 }
 
 /// returns the apic period for 1ms
@@ -146,7 +149,8 @@ fn measure_apic_timer_speed(lapic: *volatile LocalApicRegs) u32 {
     lapic.lvt_timer.val = APIC_DISABLE;
     const count = 0xFFFF_FFFF - lapic.current_count.val;
 
-    log.info("APIC timer speed: 1ms = {d} ticks", .{count});
+    if (arch.cpu_id() == 0)
+        log.info("APIC timer speed: 1ms = {d} ticks", .{count});
 
     return count;
 }
@@ -302,7 +306,21 @@ const ProcessorLx2apic = extern struct {
 
 //
 
+var entry_spin: spin.Mutex = .new();
+var wait_spin: spin.Mutex = .newLocked();
+
 fn disablePic() void {
+    if (!entry_spin.tryLock()) {
+        // some other cpu is already working on this,
+        // wait for it to be complete and then return
+        wait_spin.lock();
+        defer wait_spin.unlock();
+        return;
+    }
+
+    // leave entry_spin as locked but unlock wait_spin to signal others
+    defer wait_spin.unlock();
+
     log.info("obliterating PIC because PIC sucks", .{});
     const outb = arch.x86_64.outb;
     const io_wait = arch.x86_64.io_wait;
@@ -344,4 +362,6 @@ fn disablePic() void {
     // mask out all interrupts to limit the random useless spam from PIC
     outb(pic1_data, 0xFF);
     outb(pic2_data, 0xFF);
+
+    log.info("PIC disabled", .{});
 }

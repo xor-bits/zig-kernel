@@ -13,7 +13,7 @@ const Error = abi.sys.Error;
 
 // TODO: maybe a fastpath ring buffer before the linked list to reduce locking
 
-var active_threads: std.atomic.Value(usize) = .init(0);
+var active_threads: std.atomic.Value(usize) = .init(1);
 var queues: [4]Queue = .{ .{}, .{}, .{}, .{} };
 var queue_locks: [4]spin.Mutex = .{ .new(), .new(), .new(), .new() };
 
@@ -51,6 +51,11 @@ const Queue = struct {
 };
 
 //
+
+pub fn init() void {
+    // the number is 1 by default, starting root makes it 2 and this drops it back to the real 1
+    _ = active_threads.fetchSub(1, .seq_cst);
+}
 
 /// add the current thread back to the ready queue (if ready) and maybe switch to another thread
 pub fn yield(trap: *arch.SyscallRegs) void {

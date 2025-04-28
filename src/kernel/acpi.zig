@@ -2,6 +2,7 @@ const std = @import("std");
 const limine = @import("limine");
 
 const apic = @import("apic.zig");
+const arch = @import("arch.zig");
 const addr = @import("addr.zig");
 const hpet = @import("hpet.zig");
 
@@ -14,7 +15,8 @@ pub export var rsdp_req: limine.RsdpRequest = .{};
 //
 
 pub fn init() !void {
-    log.info("init ACPI", .{});
+    if (arch.cpu_id() == 0)
+        log.info("init ACPI", .{});
 
     const rsdp_resp: *limine.RsdpResponse = rsdp_req.response orelse {
         return error.NoRsdp;
@@ -31,7 +33,8 @@ pub fn init() !void {
         return error.InvalidRsdpSignature;
     }
 
-    log.info("ACPI OEM: {s}", .{rsdp.oem_id});
+    if (arch.cpu_id() == 0)
+        log.info("ACPI OEM: {s}", .{rsdp.oem_id});
 
     if (rsdp.revision == 0) {
         try acpiv1(rsdp);
@@ -41,7 +44,8 @@ pub fn init() !void {
 }
 
 fn acpiv1(rsdp: *const Rsdp) !void {
-    log.info("ACPI v1", .{});
+    if (arch.cpu_id() == 0)
+        log.info("ACPI v1", .{});
 
     // FIXME: this is unaligned most of the time, but zig doesnt like that
     const rsdt: *const Rsdt = addr.Phys.fromInt(rsdp.rsdt_addr).toHhdm().toPtr(*const Rsdt);
@@ -56,7 +60,8 @@ fn acpiv1(rsdp: *const Rsdp) !void {
 }
 
 fn acpiv2(rsdp: *const Rsdp) !void {
-    log.info("ACPI v2", .{});
+    if (arch.cpu_id() == 0)
+        log.info("ACPI v2", .{});
 
     const xsdp: *const Xsdp = @ptrCast(rsdp);
     if (!isChecksumValid(Xsdp, xsdp)) {
@@ -78,7 +83,8 @@ fn walkTables(comptime T: type, pointers: []align(1) const T) !void {
     var maybe_apic: ?*const SdtHeader = null;
     var maybe_hpet: ?*const SdtHeader = null;
 
-    log.info("SDT Headers:", .{});
+    if (arch.cpu_id() == 0)
+        log.info("SDT Headers:", .{});
     for (pointers) |sdt_ptr| {
         const sdt: *const SdtHeader = addr.Phys.fromInt(sdt_ptr).toHhdm().toPtr(*const SdtHeader);
         if (!isChecksumValid(SdtHeader, sdt)) {
@@ -86,7 +92,8 @@ fn walkTables(comptime T: type, pointers: []align(1) const T) !void {
             continue;
         }
 
-        log.info(" - {s}", .{sdt.signature});
+        if (arch.cpu_id() == 0)
+            log.info(" - {s}", .{sdt.signature});
 
         // FIXME: load APIC always before HPET, because HPET uses APIC
         switch (SdtType.fromSignature(sdt.signature)) {

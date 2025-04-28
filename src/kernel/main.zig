@@ -80,7 +80,7 @@ pub fn main() noreturn {
     };
 
     // boot up a few processors
-    // arch.smp_init();
+    arch.smp_init();
 
     // set up arch specific things: GDT, TSS, IDT, syscalls, ...
     const id = arch.next_cpu_id();
@@ -95,7 +95,7 @@ pub fn main() noreturn {
     };
 
     // initialize ACPI specific things: APIC, HPET, ...
-    log.info("initializing ACPI", .{});
+    log.info("initializing ACPI for CPU-{}", .{id});
     acpi.init() catch |err| {
         std.debug.panic("failed to initialize ACPI CPU-{}: {any}", .{ id, err });
     };
@@ -130,14 +130,14 @@ pub fn smpmain() noreturn {
     arch.smp_init();
 
     // set up arch specific things: GDT, TSS, IDT, syscalls, ...
-    log.info("initializing CPU", .{});
     const id = arch.next_cpu_id();
+    log.info("initializing CPU-{}", .{id});
     arch.init_cpu(id) catch |err| {
         std.debug.panic("failed to initialize CPU-{}: {}", .{ id, err });
     };
 
     // initialize ACPI specific things: APIC, HPET, ...
-    log.info("initializing ACPI", .{});
+    log.info("initializing ACPI for CPU-{}", .{id});
     acpi.init() catch |err| {
         std.debug.panic("failed to initialize ACPI CPU-{}: {any}", .{ id, err });
     };

@@ -36,7 +36,7 @@ pub fn init_cpu(id: u32) !void {
         .id = id,
     };
 
-    try CpuConfig.init(&tls.cpu_config);
+    try CpuConfig.init(&tls.cpu_config, id);
 
     wrmsr(GS_BASE, @intFromPtr(tls));
     wrmsr(KERNELGS_BASE, 0);
@@ -331,38 +331,10 @@ pub fn flush_tlb_addr(vaddr: usize) void {
     );
 }
 
-const cpu_id_mode_ty = enum(u8) {
-    rdpid,
-    rdtscp,
-    rdmsr,
-    lazy,
-};
-var cpu_id_mode = std.atomic.Value(cpu_id_mode_ty).init(.lazy);
 
 /// processor ID
 pub fn cpu_id() u32 {
-    switch (cpu_id_mode.load(.acquire)) {
-        .rdpid => return @intCast(rdpid()),
-        .rdtscp => return rdtscp().pid,
-        .rdmsr => return @intCast(rdmsr(IA32_TCS_AUX)),
-        .lazy => {
-            @branchHint(.cold);
-
-            if (cpuid(0x7, 0).ecx & (1 << 22) != 0) {
-                log.info("RDPID support", .{});
-                cpu_id_mode.store(.rdpid, .release);
-                return @intCast(rdpid());
-            } else if (cpuid(0x80000001, 0).edx & (1 << 27) != 0) {
-                log.info("RDTSCP support", .{});
-                cpu_id_mode.store(.rdtscp, .release);
-                return rdtscp().pid;
-            } else {
-                log.info("fallback RDMSR", .{});
-                cpu_id_mode.store(.rdmsr, .release);
-                return @intCast(rdmsr(IA32_TCS_AUX));
-            }
-        },
-    }
+    return cpu_local().id;
 }
 
 pub fn reset() void {
@@ -875,15 +847,15 @@ pub const CpuConfig = struct {
     tss: Tss,
     idt: Idt,
 
-    pub fn init(self: *@This()) !void {
+    pub fn init(self: *@This(), id: u32) !void {
         self.tss = try Tss.new();
         self.gdt = Gdt.new(&self.tss);
         self.idt = Idt.new();
 
         // initialize GDT (, TSS) and IDT
-        log.debug("loading new GDT", .{});
+        // log.debug("loading new GDT", .{});
         self.gdt.load();
-        log.debug("loading new IDT", .{});
+        // log.debug("loading new IDT", .{});
         self.idt.load(null);
         // ints.enable();
 
@@ -920,7 +892,7 @@ pub const CpuConfig = struct {
 
         const efer_flags: u64 = @bitCast(EferFlags{ .system_call_extensions = 1 });
         wrmsr(EFER, rdmsr(EFER) | efer_flags);
-        log.info("syscalls initialized", .{});
+        log.info("syscalls initialized for CPU-{}", .{id});
     }
 };
 

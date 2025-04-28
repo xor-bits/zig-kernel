@@ -46,6 +46,7 @@ const Opts = struct {
     ovmf_fd: []const u8,
     gdb: bool,
     testing: bool,
+    cpus: u8,
 };
 
 fn options(b: *std.Build, target: std.Build.ResolvedTarget) Opts {
@@ -63,6 +64,7 @@ fn options(b: *std.Build, target: std.Build.ResolvedTarget) Opts {
         .ovmf_fd = b.option([]const u8, "ovmf", "OVMF.fd path") orelse "/usr/share/ovmf/x64/OVMF.fd",
         .gdb = b.option(bool, "gdb", "use GDB") orelse false,
         .testing = b.option(bool, "test", "include test runner") orelse false,
+        .cpus = b.option(u8, "cpus", "number of SMP processors") orelse 0,
     };
 }
 
@@ -75,8 +77,6 @@ fn runQemu(b: *std.Build, opts: *const Opts, os_iso: std.Build.LazyPath) void {
         "q35",
         "-cpu",
         "qemu64,+rdrand,+rdseed,+rdtscp,+rdpid",
-        // "-smp",
-        // "4",
         "-m",
         "1g", // 3m is the absolute minimum right now
         // "-M",
@@ -97,8 +97,14 @@ fn runQemu(b: *std.Build, opts: *const Opts, os_iso: std.Build.LazyPath) void {
     });
     qemu_step.addPrefixedFileArg("format=raw,file=", os_iso);
 
-    const display = opts.display;
-    if (display) {
+    if (opts.cpus >= 2) {
+        qemu_step.addArgs(&.{
+            "-smp",
+            b.fmt("{}", .{opts.cpus}),
+        });
+    }
+
+    if (opts.display) {
         qemu_step.addArgs(&.{
             "-display",
             "gtk,show-cursor=off",
@@ -110,22 +116,19 @@ fn runQemu(b: *std.Build, opts: *const Opts, os_iso: std.Build.LazyPath) void {
         });
     }
 
-    const debug = opts.debug;
-    switch (debug) {
+    switch (opts.debug) {
         0 => {},
         1 => qemu_step.addArgs(&.{ "-d", "guest_errors" }),
         2 => qemu_step.addArgs(&.{ "-d", "cpu_reset,guest_errors" }),
         3 => qemu_step.addArgs(&.{ "-d", "int,cpu_reset,guest_errors" }),
     }
 
-    const use_ovmf = opts.use_ovmf;
-    if (use_ovmf) {
+    if (opts.use_ovmf) {
         const ovmf_fd = opts.ovmf_fd;
         qemu_step.addArgs(&.{ "-bios", ovmf_fd });
     }
 
-    const gdb = opts.gdb;
-    if (gdb) {
+    if (opts.gdb) {
         qemu_step.addArgs(&.{ "-s", "-S" });
     }
 

@@ -47,6 +47,7 @@ pub fn exec(a: args.Args) !void {
     std.debug.assert(id == abi.caps.ROOT_BOOT_INFO.cap);
 
     try proc.start(init_thread);
+    proc.init();
 }
 
 fn map_root(vmem: *caps.Vmem, a: args.Args) !caps.Ref(caps.Frame) {
