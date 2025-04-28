@@ -79,7 +79,7 @@ fn map_root(vmem: *caps.Vmem, a: args.Args) !caps.Ref(caps.Frame) {
         @intFromPtr(boot_info_ptr.initfs_data) + boot_info_ptr.initfs_data_len,
     });
     log.info("root binary path: '{s}'", .{a.root_path});
-    log.info("initfs path:           '{s}'", .{a.initfs_path});
+    log.info("initfs path:      '{s}'", .{a.initfs_path});
 
     var current = low;
     while (current.raw < high.raw) : (current.raw += addr.Virt.fromParts(.{ .level1 = 1 }).raw) {
