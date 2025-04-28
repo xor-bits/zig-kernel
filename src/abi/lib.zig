@@ -173,3 +173,31 @@ pub const RootRequest = enum(u8) {
     /// request a sender to the vfs server
     vfs,
 };
+
+pub const VmRequest = enum(u8) {
+    /// create a new address space and load an ELF into it
+    /// returns an index number that can be used to create threads
+    ///
+    /// input:
+    /// - extra: 1
+    /// - extra0: frame capability containing the elf
+    /// - arg0: elf binary offset in extra0
+    /// - arg1: elf binary length
+    ///
+    /// output:
+    /// - extra: 0
+    /// - arg0: Error!handle
+    load_elf,
+
+    /// create a new thread from an address space
+    ///
+    /// input:
+    ///  - extra: 0
+    ///  - arg0: Error!handle
+    ///
+    /// output:
+    ///  - extra: 1
+    ///  - extra0: thread capability
+    ///  - arg0: Error!void
+    exec,
+};
