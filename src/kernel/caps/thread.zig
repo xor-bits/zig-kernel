@@ -68,6 +68,11 @@ pub const Thread = struct {
     pub fn moveExtra(self: *@This(), target: *@This(), count: u7) Error!void {
         // both current and target threads are locked
 
+        if (count == 0) {
+            @branchHint(.likely);
+            return;
+        }
+
         {
             var locked_count: usize = 0;
 
