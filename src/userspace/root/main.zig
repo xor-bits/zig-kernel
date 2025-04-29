@@ -170,7 +170,7 @@ fn processRootRequest(
                 .{},
             );
             log.info("copying shared mem", .{});
-            copyForwardsVolatile(
+            abi.util.copyForwardsVolatile(
                 u8,
                 @as([*]volatile u8, @ptrFromInt(LOADER_TMP))[0..system.pm_bin.len],
                 system.pm_bin,
@@ -299,9 +299,9 @@ fn exec_elf(elf_bytes: []const u8, sender: abi.caps.Sender) !abi.caps.Thread {
         // because frame caps use huge and giant pages automatically
 
         const size = segment_vaddr_top - segment_vaddr_bottom;
-        const frames = try allocVector(abi.caps.ROOT_MEMORY, size);
+        const frames = try abi.util.allocVector(abi.caps.ROOT_MEMORY, size);
 
-        try mapVector(
+        try abi.util.mapVector(
             &frames,
             abi.caps.ROOT_SELF_VMEM,
             LOADER_TMP,
@@ -313,19 +313,19 @@ fn exec_elf(elf_bytes: []const u8, sender: abi.caps.Sender) !abi.caps.Thread {
         //     segment_vaddr_bottom + segment_data_bottom_offset,
         //     segment_vaddr_bottom + segment_data_bottom_offset + program_header.p_filesz,
         // });
-        copyForwardsVolatile(
+        abi.util.copyForwardsVolatile(
             u8,
             @as([*]volatile u8, @ptrFromInt(LOADER_TMP + segment_data_bottom_offset))[0..program_header.p_filesz],
             bytes,
         );
 
-        try unmapVector(
+        try abi.util.unmapVector(
             &frames,
             abi.caps.ROOT_SELF_VMEM,
             LOADER_TMP,
         );
 
-        try mapVector(
+        try abi.util.mapVector(
             &frames,
             new_vmem,
             segment_vaddr_bottom,
@@ -340,9 +340,7 @@ fn exec_elf(elf_bytes: []const u8, sender: abi.caps.Sender) !abi.caps.Thread {
     try new_vmem.map(
         stack,
         0x7FFF_FFF0_0000,
-        .{
-            .writable = true,
-        },
+        .{ .writable = true },
         .{},
     );
 
@@ -352,9 +350,7 @@ fn exec_elf(elf_bytes: []const u8, sender: abi.caps.Sender) !abi.caps.Thread {
     try new_vmem.map(
         heap,
         heap_bottom,
-        .{
-            .writable = true,
-        },
+        .{ .writable = true },
         .{},
     );
 

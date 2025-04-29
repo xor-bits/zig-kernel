@@ -6,6 +6,7 @@ pub const caps = @import("caps.zig");
 pub const ring = @import("ring.zig");
 pub const rt = @import("rt.zig");
 pub const sys = @import("sys.zig");
+pub const util = @import("util.zig");
 
 //
 
