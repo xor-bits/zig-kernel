@@ -128,7 +128,10 @@ pub const Vmem = struct {
             .map => {
                 // lock the frame temporarily, mark it as mapped and unmark it if an error occurs
                 const frame_obj = try caps.get_capability(thread, @truncate(trap.arg2));
-                if (frame_obj.next != 0) return Error.AlreadyMapped;
+                if (frame_obj.next != 0) {
+                    frame_obj.lock.unlock();
+                    return Error.AlreadyMapped;
+                }
                 frame_obj.next = @truncate(trap.arg0);
                 errdefer frame_obj.next = 0;
                 defer frame_obj.lock.unlock();
@@ -185,7 +188,10 @@ pub const Vmem = struct {
             .unmap => {
                 // lock the frame temporarily, check that it is mapped here and unmark it
                 const frame_obj = try caps.get_capability(thread, @truncate(trap.arg2));
-                if (frame_obj.next != @as(u32, @truncate(trap.arg0))) return Error.NotMapped;
+                if (frame_obj.next != @as(u32, @truncate(trap.arg0))) {
+                    frame_obj.lock.unlock();
+                    return Error.NotMapped;
+                }
                 frame_obj.next = 0;
                 errdefer frame_obj.next = @truncate(trap.arg0);
                 defer frame_obj.lock.unlock();
