@@ -1,11 +1,12 @@
 const std = @import("std");
 const abi = @import("abi");
 
-const arch = @import("arch.zig");
 const addr = @import("addr.zig");
-const spin = @import("spin.zig");
+const arch = @import("arch.zig");
+const conf = @import("conf.zig");
 const pmem = @import("pmem.zig");
 const proc = @import("proc.zig");
+const spin = @import("spin.zig");
 
 const caps_ipc = @import("caps/ipc.zig");
 const caps_pmem = @import("caps/pmem.zig");
@@ -14,10 +15,6 @@ const caps_vmem = @import("caps/vmem.zig");
 
 const log = std.log.scoped(.caps);
 const Error = abi.sys.Error;
-
-//
-
-pub const LOG_OBJ_CALLS: bool = false;
 
 //
 
@@ -70,6 +67,9 @@ pub fn get_capability(thread: *Thread, cap_id: u32) Error!*Object {
 
     const current = Thread.vmemOf(thread);
     const obj = &caps[cap_id];
+
+    errdefer if (conf.LOG_OBJ_CALLS)
+        log.debug("obj was cap={} type={} thread={*}", .{ cap_id, obj.type, thread });
 
     // fast path fail if the capability is not owned or being modified
     if (obj.owner.load(.acquire) != current)

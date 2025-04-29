@@ -4,6 +4,7 @@ const std = @import("std");
 const addr = @import("../addr.zig");
 const arch = @import("../arch.zig");
 const caps = @import("../caps.zig");
+const conf = @import("../conf.zig");
 const pmem = @import("../pmem.zig");
 const proc = @import("../proc.zig");
 const spin = @import("../spin.zig");
@@ -124,7 +125,7 @@ pub const Thread = struct {
 
         const target_thread = caps.Ref(Thread){ .paddr = paddr };
 
-        if (caps.LOG_OBJ_CALLS)
+        if (conf.LOG_OBJ_CALLS)
             log.debug("thread call \"{s}\" from {*} on {*}", .{ @tagName(call_id), thread, target_thread.ptr() });
 
         switch (call_id) {

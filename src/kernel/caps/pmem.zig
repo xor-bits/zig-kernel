@@ -4,6 +4,7 @@ const std = @import("std");
 const addr = @import("../addr.zig");
 const arch = @import("../arch.zig");
 const caps = @import("../caps.zig");
+const conf = @import("../conf.zig");
 const pmem = @import("../pmem.zig");
 
 const log = std.log.scoped(.caps);
@@ -25,7 +26,7 @@ pub const Memory = struct {
             return Error.InvalidArgument;
         };
 
-        if (caps.LOG_OBJ_CALLS)
+        if (conf.LOG_OBJ_CALLS)
             log.debug("memory call \"{s}\"", .{@tagName(call_id)});
 
         switch (call_id) {

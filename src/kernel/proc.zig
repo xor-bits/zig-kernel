@@ -5,6 +5,7 @@ const addr = @import("addr.zig");
 const apic = @import("apic.zig");
 const arch = @import("arch.zig");
 const caps = @import("caps.zig");
+const conf = @import("conf.zig");
 const main = @import("main.zig");
 const spin = @import("spin.zig");
 
@@ -92,6 +93,9 @@ pub fn switchTo(trap: *arch.SyscallRegs, thread: *caps.Thread) void {
     caps.Vmem.switchTo(thread.vmem.?);
     trap.* = thread.trap;
     thread.status = .running;
+
+    if (conf.LOG_CTX_SWITCHES)
+        log.debug("switch to {*}", .{thread});
 }
 
 /// stop the thread and (TODO) interrupt a processor that might be running it
@@ -147,8 +151,10 @@ pub fn next() caps.Ref(caps.Thread) {
 
     if (tryNext()) |next_thread| return next_thread;
 
-    log.debug("waiting for next thread", .{});
-    defer log.debug("next thread acquired", .{});
+    if (conf.LOG_WAITING)
+        log.debug("waiting for next thread", .{});
+    defer if (conf.LOG_WAITING)
+        log.debug("next thread acquired", .{});
 
     while (true) {
         const locals = arch.cpu_local();

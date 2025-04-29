@@ -7,6 +7,7 @@ const acpi = @import("acpi.zig");
 const arch = @import("arch.zig");
 const args = @import("args.zig");
 const addr = @import("addr.zig");
+const conf = @import("conf.zig");
 const logs = @import("logs.zig");
 const spin = @import("spin.zig");
 const proc = @import("proc.zig");
@@ -163,8 +164,11 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
     const locals = arch.cpu_local();
     const thread = locals.current_thread.?;
 
-    // log.debug("syscall: {s}", .{@tagName(id)});
-    // defer log.debug("syscall done", .{});
+    if (conf.LOG_SYSCALLS)
+        log.debug("syscall: {s}      cap_id={}", .{ @tagName(id), trap.arg0 });
+    defer if (conf.LOG_SYSCALLS)
+        log.debug("syscall: {s} done cap_id={}", .{ @tagName(id), trap.arg0 });
+
     switch (id) {
         .log => {
             // FIXME: disable on release builds

@@ -4,6 +4,7 @@ const abi = @import("abi");
 const addr = @import("../addr.zig");
 const arch = @import("../arch.zig");
 const caps = @import("../caps.zig");
+const conf = @import("../conf.zig");
 const proc = @import("../proc.zig");
 const pmem = @import("../pmem.zig");
 
@@ -29,7 +30,7 @@ pub const Receiver = struct {
             return Error.InvalidArgument;
         };
 
-        if (caps.LOG_OBJ_CALLS)
+        if (conf.LOG_OBJ_CALLS)
             log.debug("receiver call \"{s}\"", .{@tagName(call_id)});
 
         switch (call_id) {
@@ -42,7 +43,7 @@ pub const Receiver = struct {
 
     // block until something sends
     pub fn recv(paddr: addr.Phys, thread: *caps.Thread, _: *arch.SyscallRegs) Error!void {
-        if (caps.LOG_OBJ_CALLS)
+        if (conf.LOG_OBJ_CALLS)
             log.debug("receiver recv", .{});
 
         const self = (caps.Ref(@This()){ .paddr = paddr }).ptr();
@@ -56,7 +57,7 @@ pub const Receiver = struct {
     }
 
     pub fn reply(paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
-        if (caps.LOG_OBJ_CALLS)
+        if (conf.LOG_OBJ_CALLS)
             log.debug("receiver reply", .{});
 
         const self = (caps.Ref(@This()){ .paddr = paddr }).ptr();
@@ -88,7 +89,7 @@ pub const Receiver = struct {
     }
 
     pub fn replyRecv(paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
-        if (caps.LOG_OBJ_CALLS)
+        if (conf.LOG_OBJ_CALLS)
             log.debug("receiver reply", .{});
 
         const self = (caps.Ref(@This()){ .paddr = paddr }).ptr();
@@ -131,7 +132,7 @@ pub const Sender = struct {
 
     // block until the receiver is free, then switch to the receiver
     pub fn call(paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
-        if (caps.LOG_OBJ_CALLS)
+        if (conf.LOG_OBJ_CALLS)
             log.debug("sender call", .{});
 
         const self = (caps.Ref(Receiver){ .paddr = paddr }).ptr();
