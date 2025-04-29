@@ -26,7 +26,7 @@ pub const BOOT_INFO = 0x8000_0000_0000 - 0x1000;
 
 //
 
-pub fn main() !void {
+pub fn main() !noreturn {
     log.info("I am root", .{});
 
     try map_naive(
@@ -53,7 +53,7 @@ pub fn main() !void {
     // maps new processes to memory and manages page faults,
     // heaps, lazy alloc, shared memory, swapping, etc.
     const vm_sender = try recv.subscribe();
-    system.vm = try exec_elf(system.vm_bin, vm_sender);
+    system.vm, system.vm_vmem = try exec_elf(system.vm_bin, vm_sender);
     system.vm_endpoint = vm_sender.cap;
 
     // process manager (system) (server)
@@ -71,6 +71,7 @@ pub fn main() !void {
     // launches stuff like the window manager and virtual TTYs
     // try exec_with_vm("/sbin/init");
 
+    log.info("root waiting for messages", .{});
     var msg: abi.sys.Message = undefined;
     try recv.recv(&msg);
     while (true) {
@@ -90,12 +91,13 @@ fn binBytes(path: []const u8) ![]const u8 {
 }
 
 const System = struct {
-    vm: abi.caps.Thread = .{},
+    vm: caps.Thread = .{},
+    vm_vmem: ?caps.Vmem = null,
     vm_bin: []const u8,
-    vm_sender: abi.caps.Sender = .{},
+    vm_sender: caps.Sender = .{},
     vm_endpoint: u32 = 0,
 
-    pm: abi.caps.Thread = .{},
+    pm: caps.Thread = .{},
     pm_bin: []const u8,
 };
 
@@ -109,6 +111,7 @@ fn processRootRequest(
         msg.arg0 = abi.sys.encode(abi.sys.Error.InvalidArgument);
         return true;
     };
+    log.info("root got {}", .{req});
 
     switch (req) {
         .memory => {
@@ -126,6 +129,25 @@ fn processRootRequest(
             };
 
             abi.sys.setExtra(0, memory.cap, true);
+            msg.extra = 1;
+            msg.arg0 = abi.sys.encode(0);
+        },
+        .self_vmem => {
+            if (system.vm_endpoint != msg.cap) {
+                msg.arg0 = abi.sys.encode(Error.PermissionDenied);
+                msg.extra = 0;
+                return true;
+            }
+
+            const vmem = system.vm_vmem orelse {
+                msg.arg0 = abi.sys.encode(Error.AlreadyMapped);
+                msg.extra = 0;
+                return true;
+            };
+            system.vm_vmem = null;
+
+            log.info("sending {}", .{vmem.cap});
+            abi.sys.setExtra(0, vmem.cap, true);
             msg.extra = 1;
             msg.arg0 = abi.sys.encode(0);
         },
@@ -200,7 +222,7 @@ fn processRootRequest(
             };
             abi.sys.setExtra(0, frame.cap, true);
             try system.vm_sender.call(&exec_msg);
-            const entry = try abi.sys.decode(exec_msg.arg0);
+            _ = try abi.sys.decode(exec_msg.arg0);
 
             log.info("new pm thread", .{});
             exec_msg = .{
@@ -213,10 +235,6 @@ fn processRootRequest(
             _ = try abi.sys.decode(exec_msg.arg0);
 
             log.info("start pm", .{});
-            try thread.writeRegs(&.{
-                .user_instr_ptr = entry,
-                .user_stack_ptr = 0x8000_0000_0000,
-            });
             try thread.setPrio(0);
             try thread.start();
 
@@ -241,7 +259,7 @@ pub fn map_naive(frame: abi.caps.Frame, vaddr: usize, rights: abi.sys.Rights, fl
     );
 }
 
-fn exec_elf(elf_bytes: []const u8, sender: abi.caps.Sender) !abi.caps.Thread {
+fn exec_elf(elf_bytes: []const u8, sender: abi.caps.Sender) !struct { caps.Thread, caps.Vmem } {
     var elf = std.io.fixedBufferStream(elf_bytes);
 
     var crc: u32 = 0;
@@ -370,64 +388,7 @@ fn exec_elf(elf_bytes: []const u8, sender: abi.caps.Sender) !abi.caps.Thread {
     log.info("everything ready, exec", .{});
     try new_thread.start();
 
-    return new_thread;
-}
-
-const FrameVector = std.EnumArray(abi.ChunkSize, abi.caps.Frame);
-
-fn allocVector(mem: abi.caps.Memory, size: usize) !FrameVector {
-    if (size > abi.ChunkSize.@"1GiB".sizeBytes()) return error.SegmentTooBig;
-    var frames: FrameVector = .initFill(.{ .cap = 0 });
-
-    inline for (std.meta.fields(abi.ChunkSize)) |f| {
-        const variant: abi.ChunkSize = @enumFromInt(f.value);
-        const specific_size: usize = variant.sizeBytes();
-
-        if (size & specific_size != 0) {
-            const frame = try mem.allocSized(abi.caps.Frame, variant);
-            frames.set(variant, frame);
-        }
-    }
-
-    return frames;
-}
-
-fn mapVector(v: *const FrameVector, vmem: abi.caps.Vmem, _vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
-    var vaddr = _vaddr;
-
-    var iter = @constCast(v).iterator();
-    while (iter.next()) |e| {
-        if (e.value.*.cap == 0) continue;
-
-        try vmem.map(
-            e.value.*,
-            vaddr,
-            rights,
-            flags,
-        );
-
-        vaddr += e.key.sizeBytes();
-    }
-}
-
-fn unmapVector(v: *const FrameVector, vmem: abi.caps.Vmem, _vaddr: usize) !void {
-    var vaddr = _vaddr;
-
-    var iter = @constCast(v).iterator();
-    while (iter.next()) |e| {
-        if (e.value.*.cap == 0) continue;
-
-        try vmem.unmap(
-            e.value.*,
-            vaddr,
-        );
-
-        vaddr += e.key.sizeBytes();
-    }
-}
-
-pub fn copyForwardsVolatile(comptime T: type, dest: []volatile T, source: []const T) void {
-    for (dest[0..source.len], source) |*d, s| d.* = s;
+    return .{ new_thread, new_vmem };
 }
 
 pub extern var __stack_end: u8;
@@ -466,5 +427,4 @@ export fn zig_main_realstack() noreturn {
     main() catch |err| {
         std.debug.panic("{}", .{err});
     };
-    while (true) {}
 }

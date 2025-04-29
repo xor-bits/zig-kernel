@@ -155,6 +155,10 @@ pub const RootRequest = enum(u8) {
     /// only system processes are allowed request this
     memory,
 
+    /// request self vmem capability
+    /// only vm can use this
+    self_vmem,
+
     /// request a sender to the vm server
     /// only pm can use this
     vm,
@@ -201,10 +205,11 @@ pub const VmRequest = enum(u8) {
     ///
     /// output:
     /// - extra: 0
-    /// - arg0: Error!usize (entrypoint)
+    /// - arg0: Error!void
     load_elf,
 
     /// create a new thread from an address space
+    /// ip and sp are already set
     ///
     /// input:
     ///  - extra: 0
