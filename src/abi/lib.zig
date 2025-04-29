@@ -36,13 +36,13 @@ fn logFn(comptime message_level: std.log.Level, comptime scope: @TypeOf(.enum_li
 pub fn panic(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace, ret_addr: ?usize) noreturn {
     _ = error_return_trace;
 
-    if (ret_addr) |at| {
-        std.log.scoped(.panic).err("panicked at 0x{x}:\n{s}", .{ at, msg });
-    } else {
-        std.log.scoped(.panic).err("panicked:\n{s}", .{msg});
+    std.log.scoped(.panic).err("panicked: {s}\nstack trace:", .{msg});
+    var iter = std.debug.StackIterator.init(ret_addr, @frameAddress());
+    while (iter.next()) |addr| {
+        std.log.scoped(.panic).warn("  0x{x}", .{addr});
     }
 
-    while (true) {}
+    while (true) sys.yield();
 }
 
 //
