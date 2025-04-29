@@ -203,6 +203,8 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
                 }
                 _ = log.info("{s}", .{line});
             }
+
+            trap.syscall_id = abi.sys.encode(0);
         },
         .debug => {
             if (caps.get_capability(thread, @truncate(trap.arg0))) |obj| {
