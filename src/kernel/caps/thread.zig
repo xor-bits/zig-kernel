@@ -178,7 +178,10 @@ pub const Thread = struct {
                 if (target_thread.ptr().status != .stopped) return Error.NotStopped;
 
                 // TODO: require stopping the thread or something
-                const vmem = try (try caps.get_capability(thread, @truncate(trap.arg2))).as(caps.Vmem);
+                const vmem_obj = try caps.get_capability(thread, @truncate(trap.arg2));
+                defer vmem_obj.lock.unlock();
+                const vmem = try vmem_obj.as(caps.Vmem);
+
                 target_thread.ptr().vmem = vmem;
             },
             .set_prio => {
