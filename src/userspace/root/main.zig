@@ -207,35 +207,24 @@ fn processRootRequest(
             );
 
             log.info("creating new vmem", .{});
-            var exec_msg: abi.sys.Message = .{
-                .extra = 0,
-                .arg0 = @intFromEnum(abi.VmRequest.new_vmem),
-            };
-            try system.vm_sender.call(&exec_msg);
-
-            const pm_vm_handle = try abi.sys.decode(exec_msg.arg0);
+            const vm_sender = abi.VmProtocol.Client().init(system.vm_sender);
+            const res0, const pm_vm_handle = try vm_sender.call(.newVmem, void{});
+            _ = try res0;
 
             log.info("sending shared mem", .{});
-            exec_msg = .{
-                .extra = 1,
-                .arg0 = @intFromEnum(abi.VmRequest.load_elf),
-                .arg1 = pm_vm_handle,
-                .arg2 = 0,
-                .arg3 = system.pm_bin.len,
-            };
-            abi.sys.setExtra(0, frame.cap, true);
-            try system.vm_sender.call(&exec_msg);
-            _ = try abi.sys.decode(exec_msg.arg0);
+            const res1 = try vm_sender.call(.loadElf, .{
+                pm_vm_handle,
+                frame,
+                0,
+                system.pm_bin.len,
+            });
+            _ = try res1.@"0";
 
             log.info("new pm thread", .{});
-            exec_msg = .{
-                .extra = 0,
-                .arg0 = @intFromEnum(abi.VmRequest.new_thread),
-                .arg1 = pm_vm_handle,
-            };
-            try system.vm_sender.call(&exec_msg);
-            const thread: caps.Thread = .{ .cap = @truncate(abi.sys.getExtra(0)) };
-            _ = try abi.sys.decode(exec_msg.arg0);
+            const res2, const thread = try vm_sender.call(.newThread, .{
+                pm_vm_handle,
+            });
+            _ = try res2;
 
             const sender = try recv.subscribe();
 

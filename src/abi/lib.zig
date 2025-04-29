@@ -182,73 +182,19 @@ pub const RootRequest = enum(u8) {
     vfs,
 };
 
-pub const VmRequest = enum(u8) {
+pub const VmProtocol = Protocol(struct {
     /// create a new empty address space
-    /// returns an index number that can be used to create threads
-    ///
-    /// input:
-    /// - arg0: .new_vmem
-    ///
-    /// output:
-    /// - arg0: Error!usize (handle)
-    new_vmem,
+    /// returns a handle that can be used to create threads
+    newVmem: fn () struct { sys.Error!void, usize },
 
     // TODO: make sure there is only one copy of
     // this frame so that the vm can read it in peace
     /// load an ELF into an address space
-    ///
-    /// input:
-    /// - extra: 1
-    /// - extra0: frame capability containing the elf
-    /// - arg0: .load_elf
-    /// - arg1: handle
-    /// - arg2: elf binary offset in extra0
-    /// - arg3: elf binary length
-    ///
-    /// output:
-    /// - extra: 0
-    /// - arg0: Error!void
-    load_elf,
+    loadElf: fn (handle: usize, elf: caps.Frame, offset: usize, length: usize) sys.Error!void,
 
     /// create a new thread from an address space
     /// ip and sp are already set
-    ///
-    /// input:
-    ///  - extra: 0
-    ///  - arg0: .new_thread
-    ///  - arg1: handle
-    ///
-    /// output:
-    ///  - extra: 1
-    ///  - extra0: thread capability
-    ///  - arg0: Error!void
-    new_thread,
-};
-
-// TODO: some RCP style prototype thing that generates
-// a serializer and a deserializer for messages and also
-// a functions to call the server and server loop
-//
-// most servers are just:
-// ```
-// recv(&msg);
-// while (true) {
-//   handle(&msg)
-//   replyRecv(&msg);
-// }
-// ```
-
-pub const VmProtocol = Protocol(struct {
-    // TODO: make sure there is only one copy of
-    // this frame so that the vm can read it in peace
-    /// create a new address space and load an ELF into it
-    /// returns an index number that can be used to create threads
-    loadElf: fn (frame: caps.Frame, offset: usize, length: usize) sys.Error!void,
-    // loadElf: fn (frame: caps.Frame, offset: usize, length: usize) sys.Error!usize,
-
-    /// create a new thread from an address space
-    exec: fn (vm_handle: usize) sys.Error!void,
-    // exec: fn (vm_handle: usize) sys.Error!caps.Thread,
+    newThread: fn (handle: usize) struct { sys.Error!void, caps.Thread },
 });
 
 // pub const PmProtocol = Protocol(struct {});

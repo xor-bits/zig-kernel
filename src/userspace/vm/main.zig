@@ -8,7 +8,7 @@ const caps = abi.caps;
 const log = std.log.scoped(.vm);
 pub const std_options = abi.std_options;
 pub const panic = abi.panic;
-pub const name = "pm";
+pub const name = "vm";
 const Error = abi.sys.Error;
 const LOADER_TMP: usize = 0x1000_0000_0000;
 const ELF_TMP: usize = 0x2000_0000_0000;
@@ -49,12 +49,13 @@ pub fn main() !void {
         .self_vmem = self_vmem,
     };
 
+    const server = abi.VmProtocol.Server(*System, .{
+        .newVmem = newVmemHandler,
+        .loadElf = loadElfHandler,
+        .newThread = newThreadHandler,
+    }).init(&system, vm_recv);
     log.info("vm waiting for messages", .{});
-    try vm_recv.recv(&msg);
-    while (true) {
-        processRequest(&system, &msg);
-        try vm_recv.replyRecv(&msg);
-    }
+    try server.run();
 }
 
 const System = struct {
@@ -74,139 +75,87 @@ const AddressSpace = struct {
     entry: usize = 0,
 };
 
-fn processRequest(system: *System, msg: *abi.sys.Message) void {
-    const req = std.meta.intToEnum(abi.VmRequest, msg.arg0) catch {
-        msg.arg0 = abi.sys.encode(abi.sys.Error.InvalidArgument);
-        msg.extra = 0;
-        return;
-    };
-    log.info("vm got {}", .{req});
+fn newVmemHandler(ctx: *System, sender: u32, _: void) struct { Error!void, usize } {
+    for (&ctx.address_spaces, 0..) |*entry, i| {
+        if (entry.* != null) continue;
 
-    switch (req) {
-        .new_vmem => {
-            if (msg.extra != 0) {
-                msg.arg0 = abi.sys.encode(abi.sys.Error.InvalidArgument);
-                msg.extra = 0;
-                return;
-            }
+        const vmem = ctx.memory.alloc(caps.Vmem) catch |err| {
+            // FIXME: vm server is responsible for OOMs
+            std.debug.panic("vmem OOM: {}", .{err});
+        };
 
-            for (&system.address_spaces, 0..) |*entry, i| {
-                if (entry.* != null) continue;
+        entry.* = .{
+            .owner = sender,
+            .vmem = vmem,
+        };
 
-                const vmem = system.memory.alloc(caps.Vmem) catch |err| {
-                    // FIXME: vm server is responsible for OOMs
-                    std.debug.panic("vmem OOM: {}", .{err});
-                };
-
-                entry.* = .{
-                    .owner = msg.cap,
-                    .vmem = vmem,
-                };
-
-                msg.arg0 = abi.sys.encode(i);
-                return;
-            }
-
-            msg.arg0 = abi.sys.encode(Error.Internal);
-            return;
-        },
-        .load_elf => {
-            if (msg.extra != 1) {
-                msg.arg0 = abi.sys.encode(abi.sys.Error.InvalidArgument);
-                msg.extra = 0;
-                return;
-            }
-            msg.extra = 0;
-
-            // FIXME: verify that it is a cap and not raw data
-            const frame_cap: u32 = @truncate(abi.sys.getExtra(0));
-
-            const ty = abi.sys.debug(frame_cap) catch |err| {
-                msg.arg0 = abi.sys.encode(err);
-                return;
-            };
-            if (ty != .frame) {
-                abi.sys.setExtra(0, frame_cap, true);
-                msg.extra = 1;
-                msg.arg0 = abi.sys.encode(abi.sys.Error.InvalidArgument);
-                return;
-            }
-            const frame = abi.caps.Frame{ .cap = frame_cap };
-            // TODO: free
-            // defer frame.free();
-
-            const handle = msg.arg1;
-            if (handle >= 256) {
-                msg.arg0 = abi.sys.encode(abi.sys.Error.InvalidArgument);
-                return;
-            }
-            const addr_spc = &(system.address_spaces[handle] orelse {
-                msg.arg0 = abi.sys.encode(abi.sys.Error.InvalidArgument);
-                return;
-            });
-            if (addr_spc.owner != msg.cap) {
-                msg.arg0 = abi.sys.encode(abi.sys.Error.InvalidArgument);
-                return;
-            }
-
-            const offset = msg.arg2;
-            const length = msg.arg3;
-
-            // FIXME: make sure the frame is actually as big as it is told to be
-
-            system.self_vmem.map(frame, ELF_TMP, .{ .writable = true }, .{}) catch
-                unreachable;
-
-            load_elf(
-                system,
-                @as([*]const u8, @ptrFromInt(ELF_TMP))[offset..][0..length],
-                addr_spc,
-            ) catch |err| {
-                log.warn("failed to load ELF: {}", .{err});
-                msg.arg0 = abi.sys.encode(Error.Internal);
-                return;
-            };
-
-            system.self_vmem.unmap(frame, ELF_TMP) catch
-                unreachable;
-
-            log.info("got ELF to load {}", .{.{ frame, offset, length }});
-
-            msg.arg0 = abi.sys.encode(0);
-        },
-        .new_thread => {
-            if (msg.extra != 0) {
-                msg.arg0 = abi.sys.encode(abi.sys.Error.InvalidArgument);
-                msg.extra = 0;
-                return;
-            }
-
-            const handle = msg.arg1;
-            if (handle >= 256) {
-                msg.arg0 = abi.sys.encode(abi.sys.Error.InvalidArgument);
-                return;
-            }
-            const addr_spc = &(system.address_spaces[handle] orelse {
-                msg.arg0 = abi.sys.encode(abi.sys.Error.InvalidArgument);
-                return;
-            });
-            if (addr_spc.owner != msg.cap) {
-                msg.arg0 = abi.sys.encode(abi.sys.Error.InvalidArgument);
-                return;
-            }
-
-            const thread = newThread(system, addr_spc) catch |err| {
-                log.err("failed to create a new thread: {}", .{err});
-                msg.arg0 = abi.sys.encode(Error.Internal);
-                return;
-            };
-
-            abi.sys.setExtra(0, thread.cap, true);
-            msg.extra = 1;
-            msg.arg0 = abi.sys.encode(0);
-            return;
-        },
+        return .{ void{}, i };
     }
+
+    return .{ Error.Internal, 0 };
+}
+
+// FIXME: named fields in req, or better: just `req: abi.VmProtocol.Request(.loadElf)`
+fn loadElfHandler(ctx: *System, sender: u32, req: struct { usize, caps.Frame, usize, usize }) struct { Error!void } {
+    const handle = req.@"0";
+    const frame = req.@"1";
+    const offset = req.@"2";
+    const length = req.@"3";
+
+    // TODO: free
+    // defer frame.free();
+
+    if (handle >= 256) {
+        return .{abi.sys.Error.InvalidArgument};
+    }
+    const addr_spc = &(ctx.address_spaces[handle] orelse {
+        return .{abi.sys.Error.InvalidArgument};
+    });
+    if (addr_spc.owner != sender) {
+        return .{abi.sys.Error.InvalidArgument};
+    }
+
+    // FIXME: make sure the frame is actually as big as it is told to be
+
+    ctx.self_vmem.map(frame, ELF_TMP, .{ .writable = true }, .{}) catch
+        unreachable;
+
+    load_elf(
+        ctx,
+        @as([*]const u8, @ptrFromInt(ELF_TMP))[offset..][0..length],
+        addr_spc,
+    ) catch |err| {
+        log.warn("failed to load ELF: {}", .{err});
+        return .{Error.Internal};
+    };
+
+    ctx.self_vmem.unmap(frame, ELF_TMP) catch
+        unreachable;
+
+    log.info("got ELF to load {}", .{.{ frame, offset, length }});
+
+    return .{void{}};
+}
+
+fn newThreadHandler(ctx: *System, sender: u32, req: struct { usize }) struct { Error!void, caps.Thread } {
+    const handle = req.@"0";
+
+    if (handle >= 256) {
+        return .{ abi.sys.Error.InvalidArgument, .{} };
+    }
+    const addr_spc = &(ctx.address_spaces[handle] orelse {
+        return .{ abi.sys.Error.InvalidArgument, .{} };
+    });
+    if (addr_spc.owner != sender) {
+        return .{ abi.sys.Error.InvalidArgument, .{} };
+    }
+
+    const thread = newThread(ctx, addr_spc) catch |err| {
+        log.err("failed to create a new thread: {}", .{err});
+        return .{ Error.Internal, .{} };
+    };
+
+    return .{ void{}, thread };
 }
 
 // this is the real ELF loader for the os
