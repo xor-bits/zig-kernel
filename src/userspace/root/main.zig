@@ -11,6 +11,7 @@ const caps = abi.caps;
 
 pub const std_options = abi.std_options;
 pub const panic = abi.panic;
+pub const name = "pm";
 
 //
 

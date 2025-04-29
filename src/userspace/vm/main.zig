@@ -8,6 +8,7 @@ const caps = abi.caps;
 const log = std.log.scoped(.vm);
 pub const std_options = abi.std_options;
 pub const panic = abi.panic;
+pub const name = "pm";
 const Error = abi.sys.Error;
 const LOADER_TMP: usize = 0x1000_0000_0000;
 const ELF_TMP: usize = 0x2000_0000_0000;
@@ -22,6 +23,7 @@ pub fn main() !void {
     log.debug("requesting memory", .{});
     var msg: abi.sys.Message = .{ .arg0 = @intFromEnum(abi.RootRequest.memory) };
     try root.call(&msg);
+    try abi.sys.decodeVoid(msg.arg0);
     const memory = caps.Memory{ .cap = @truncate(abi.sys.getExtra(0)) };
 
     log.debug("requesting self vmem", .{});

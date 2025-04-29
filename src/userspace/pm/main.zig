@@ -8,6 +8,7 @@ const caps = abi.caps;
 const log = std.log.scoped(.pm);
 pub const std_options = abi.std_options;
 pub const panic = abi.panic;
+pub const name = "pm";
 
 //
 
@@ -19,6 +20,7 @@ pub fn main() !void {
     log.debug("requesting memory", .{});
     var msg: abi.sys.Message = .{ .arg0 = @intFromEnum(abi.RootRequest.memory) };
     try root.call(&msg);
+    try abi.sys.decodeVoid(msg.arg0);
     const memory = caps.Memory{ .cap = @truncate(abi.sys.getExtra(0)) };
 
     // endpoint for pm server <-> unix app communication
