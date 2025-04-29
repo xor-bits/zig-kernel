@@ -80,7 +80,14 @@ pub fn encode(result: Error!usize) usize {
     return val;
 }
 
-pub fn encodeError(err: Error) usize {
+pub fn encodeVoid(result: Error!void) usize {
+    result catch |err| {
+        return encodeError(err);
+    };
+    return 0;
+}
+
+fn encodeError(err: Error) usize {
     return @bitCast(-@as(isize, switch (err) {
         error.Unimplemented => 1,
         error.InvalidAddress => 2,
@@ -134,6 +141,10 @@ pub fn decode(v: usize) Error!usize {
 
         else => return error.UnknownError,
     };
+}
+
+pub fn decodeVoid(v: usize) Error!void {
+    _ = try decode(v);
 }
 
 //

@@ -42,8 +42,6 @@ pub fn main() !void {
 
     // TODO: install page fault handlers
 
-    // benchmarkIpc();
-
     var system: System = .{
         .memory = memory,
         .self_vmem = self_vmem,

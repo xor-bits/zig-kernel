@@ -167,11 +167,11 @@ pub const RootRequest = enum(u8) {
     /// only vm can use this
     vm_ready,
 
-    // /// install a new pm sender that all new .pm requests get
-    // pm_install,
-
     /// request a sender to the pm server
     pm,
+
+    /// install a new pm sender that all new .pm requests get
+    pm_ready,
 
     // /// install a new vfs sender that all new .vfs requests get
     // vfs_install,
@@ -236,179 +236,475 @@ pub const VmRequest = enum(u8) {
 // }
 // ```
 
-// pub fn Protocol(comptime spec: type) type {
-//     const info = comptime @typeInfo(spec);
-//     if (info != .@"struct")
-//         @compileError("Protocol input has to be a struct");
+pub const VmProtocol = Protocol(struct {
+    // TODO: make sure there is only one copy of
+    // this frame so that the vm can read it in peace
+    /// create a new address space and load an ELF into it
+    /// returns an index number that can be used to create threads
+    loadElf: fn (frame: caps.Frame, offset: usize, length: usize) sys.Error!void,
+    // loadElf: fn (frame: caps.Frame, offset: usize, length: usize) sys.Error!usize,
 
-//     if (info.@"struct".is_tuple)
-//         @compileError("Protocol input has to be a struct");
+    /// create a new thread from an address space
+    exec: fn (vm_handle: usize) sys.Error!void,
+    // exec: fn (vm_handle: usize) sys.Error!caps.Thread,
+});
 
-//     var input_msg: MessageUsage = .{};
-//     var output_msg: MessageUsage = .{};
+pub const PmProtocol = Protocol(struct {
+    hello: fn (val: usize) sys.Error!void,
+});
 
-//     var server_fields: [info.@"struct".fields.len + 1]struct { [:0]const u8, type } = undefined;
-//     server_fields[0] = .{ "rx", caps.Receiver };
+/// this fucking monstrosity converts a simple specification type
+/// into a Client and Server based on the hiillos IPC system
+/// look at `VmProtocol` for an example
+pub fn Protocol(comptime spec: type) type {
+    const info = comptime @typeInfo(spec);
+    if (info != .@"struct")
+        @compileError("Protocol input has to be a struct");
 
-//     var message_variant_fields: [info.@"struct".fields.len]std.builtin.Type.EnumField = undefined;
-//     for (&message_variant_fields, info.@"struct".fields) |*enum_field, *spec_field| {
-//         enum_field.name = spec_field.name;
-//     }
-//     const message_variant_enum = std.builtin.Type.Enum{
-//         .tag_type = if (message_variant_fields.len == 0) void else u8,
-//         .fields = &message_variant_fields,
-//     };
+    if (info.@"struct".is_tuple)
+        @compileError("Protocol input has to be a struct");
 
-//     output_msg;
+    const Variant = struct {
+        /// the tuple input
+        input_ty: type,
+        /// the tuple output
+        output_ty: type,
 
-//     inline for (info.@"struct".fields, 0..) |field, i| {
-//         const field_info = comptime @typeInfo(field.type);
-//         if (field_info != .@"fn")
-//             @compileError("Protocol input struct fields have to be of type fn");
+        /// struct containing `serialize` and `deserialize` fns
+        /// to convert `input_ty` to a message
+        /// and message to `input_ty`
+        input_converter: type,
+        /// struct containing `serialize` and `deserialize` fns
+        /// to convert `output_ty` to a message
+        /// and message to `output_ty`
+        output_converter: type,
 
-//         if (field_info.@"fn".is_generic)
-//             @compileError("Protocol input functions cannot be generic");
+        handler: fn (msg: *sys.Message) void,
+    };
 
-//         server_fields[i] = .{ field.name, field_info.@"fn" };
+    var variants: [info.@"struct".fields.len]Variant = undefined;
 
-//         inline for (field_info.@"fn".params) |param| {
-//             if (param.is_generic)
-//                 @compileError("Protocol input functions cannot be generic");
+    var server_fields: [info.@"struct".fields.len + 1]struct { [:0]const u8, type } = undefined;
+    server_fields[0] = .{ "rx", caps.Receiver };
 
-//             const param_ty = param.type orelse
-//                 @compileError("Protocol input function parameters have to have types");
+    var message_variant_fields: [info.@"struct".fields.len]std.builtin.Type.EnumField = undefined;
+    var message_variant_field_idx = 0;
+    for (&message_variant_fields, info.@"struct".fields) |*enum_field, *spec_field| {
+        enum_field.* = .{
+            .name = spec_field.name,
+            .value = message_variant_field_idx,
+        };
+        message_variant_field_idx += 1;
+    }
+    const _message_variant_enum = std.builtin.Type{ .@"enum" = std.builtin.Type.Enum{
+        .tag_type = if (message_variant_fields.len == 0) void else u8,
+        .fields = &message_variant_fields,
+        .decls = &.{},
+        .is_exhaustive = true,
+    } };
+    const MessageVariant: type = @Type(_message_variant_enum);
 
-//             param_ty;
-//         }
+    inline for (info.@"struct".fields, 0..) |field, i| {
+        // RPC call param serializer/deserializer
+        var input_msg: MessageUsage = .{};
+        // RPC call result serializer/deserializer
+        var output_msg: MessageUsage = .{};
 
-//         output_msg;
-//     }
+        // the arg "0" is an enum of the call type
+        _ = input_msg.addType(MessageVariant);
 
-//     return struct {
-//         pub fn Client() type {
-//             return struct {
-//                 tx: caps.Sender,
-//             };
-//         }
+        const field_info = comptime @typeInfo(field.type);
+        if (field_info != .@"fn")
+            @compileError("Protocol input struct fields have to be of type fn");
 
-//         pub fn Server() type {
-//             return struct {
-//                 rx: caps.Receiver,
-//             };
-//         }
-//     };
-// }
+        if (field_info.@"fn".is_generic)
+            @compileError("Protocol input functions cannot be generic");
 
-// const MessageUsage = struct {
-//     // number of capabilities in the extra regs that the single message transfers
-//     caps: u7 = 0,
-//     // number of raw data registers that the single message transfers
-//     // (over 5 regs starts using extra regs)
-//     data: [200]DataEntry,
-//     data_cnt: u8 = 0,
+        server_fields[i] = .{ field.name, field.type };
 
-//     const DataEntry = struct { usize, type };
+        _ = output_msg.addType(field_info.@"fn".return_type.?);
 
-//     fn addType(comptime self: @This(), comptime ty: type) usize {
-//         // caps.Memory,
-//         // caps.Thread,
-//         // caps.Vmem,
-//         // caps.Frame,
-//         // caps.Receiver,
-//         // caps.Sender,
-//         self.data[self.data_cnt] = .{ self.data_cnt, ty };
-//         self.data_cnt;
-//     }
+        inline for (field_info.@"fn".params) |param| {
+            if (param.is_generic)
+                @compileError("Protocol input functions cannot be generic");
 
-//     fn finish(comptime self: @This()) void {
-//         // make message register use more efficient
-//         std.sort.pdq(DataEntry, self.data[0..self.data_cnt], void{}, struct {
-//             fn lessThanFn(_: void, lhs: DataEntry, rhs: DataEntry) bool {
-//                 return @sizeOf(lhs.@"1") < @sizeOf(rhs.@"1");
-//             }
-//         }.lessThanFn);
-//     }
+            const param_ty = param.type orelse
+                @compileError("Protocol input function parameters have to have types");
 
-//     fn Blob(comptime self: @This()) type {
-//         var fields: [self.data_cnt]std.builtin.Type.StructField = undefined;
-//         for (&self.data, 0..) |s, i| {
-//             fields[i] = .{
-//                 .name = std.fmt.comptimePrint("{}", .{s.@"0"}),
-//                 .type = s.@"1",
+            _ = input_msg.addType(param_ty);
+        }
 
-//                 .default_value_ptr = null,
-//                 .is_comptime = false,
-//                 .alignment = @alignOf(s.@"1"),
-//             };
-//         }
+        input_msg.finish(true);
+        output_msg.finish(false);
 
-//         const blob: std.builtin.Type.Struct = .{
-//             .layout = .@"extern",
-//             .fields = &fields,
-//         };
+        // if (true)
+        //     @compileError(std.fmt.comptimePrint("input_ty={}", .{input_msg.MakeIo()}));
 
-//         return @Type(blob);
-//     }
+        const input_converter = input_msg.makeConverter();
+        const output_converter = output_msg.makeConverter();
 
-//     fn makeSerializer(comptime self: @This()) type {
-//         const _Blob = self.Blob();
+        variants[i] = Variant{
+            .input_converter = input_converter,
+            .output_converter = output_converter,
+            .input_ty = input_msg.MakeIo(),
+            .output_ty = output_msg.MakeIo(),
+            .handler = struct {
+                fn handler(msg: *sys.Message) void {
+                    std.log.info("handler {}", .{i});
 
-//         // const func: std.builtin.Type.Fn = .{
-//         //     .return_type =
-//         // };
-//         return struct {
-//             fn serialize(inputs: anytype) sys.Error!void {
-//                 var blob: _Blob = undefined;
-//                 blob;
+                    _ = msg;
+                    // const input = input_converter.deserialize(msg) orelse {
+                    //     // FIXME: handle invalid input
+                    //     std.log.err("invalid input", .{});
+                    //     return;
+                    // };
 
-//                 const blob_info = @typeInfo(_Blob);
+                }
+            }.handler,
+        };
+    }
 
-//                 inline for (blob_info.@"struct".fields) |f| {
-//                     @field(blob, f.name) = @field(blob, inputs.name);
-//                 }
-//             }
-//         };
-//     }
-// };
+    const variants_const = variants; // ok zig randomly doesnt like accessing vars from nested things
 
-// fn allocType(comptime T: type, comptime msg: *MessageUsage) void {
-//     const info = @typeInfo(T);
+    return struct {
+        fn ReturnType(comptime id: MessageVariant) type {
+            return info.@"struct".fields[@intFromEnum(id)].type;
+        }
 
-//     switch (info) {
-//         .error_union => |v| {
-//             if (v.error_set != sys.Error)
-//                 @compileError("Error sets must be abi.sys.Error");
+        fn VariantOf(comptime id: MessageVariant) Variant {
+            return variants_const[@intFromEnum(id)];
+        }
 
-//             _ = msg.addType(v.error_set);
+        pub fn Client() type {
+            return struct {
+                tx: caps.Sender,
 
-//             allocType(v.payload, msg);
-//             return;
-//         },
-//         else => {},
-//     }
+                pub fn init(tx: caps.Sender) @This() {
+                    return .{ .tx = tx };
+                }
 
-//     switch (T) {
-//         caps.Memory,
-//         caps.Thread,
-//         caps.Vmem,
-//         caps.Frame,
-//         caps.Receiver,
-//         caps.Sender,
-//         => {
-//             msg.caps += 1;
-//         },
+                pub fn call(self: @This(), comptime id: MessageVariant, args: anytype) sys.Error!VariantOf(id).output_ty {
+                    const variant = VariantOf(id);
 
-//         void => {},
-//     }
-// }
+                    var msg: sys.Message = undefined;
+                    variant.input_converter.serialize(&msg, .{id} ++ args);
+                    try self.tx.call(&msg);
+                    return variant.output_converter.deserialize(&msg).?; // FIXME:
+                }
+            };
+        }
 
-// const VmProtocol = Protocol(struct {
-//     // TODO: make sure there is only one copy of
-//     // this frame so that the vm can read it in peace
-//     /// create a new address space and load an ELF into it
-//     /// returns an index number that can be used to create threads
-//     loadElf: fn (frame: caps.Frame, offset: usize, length: usize) sys.Error!usize,
+        pub fn Server() type {
+            return struct {
+                rx: caps.Receiver,
+                // handlers: []const fn () void = b: {
+                //     var _handlers = [info.@"struct".fields.len]fn () void;
+                //     inline for ()
+                //     break :b;
+                // },
 
-//     /// create a new thread from an address space
-//     exec: fn (vm_handle: usize) sys.Error!caps.Thread,
-// });
+                pub fn init(rx: caps.Receiver) @This() {
+                    return .{ .rx = rx };
+                }
+
+                pub fn run(self: @This()) !void {
+                    var msg: sys.Message = undefined;
+                    try self.rx.recv(&msg);
+                    while (true) {
+                        const variant = variants_const[0].input_converter.deserializeVariant(&msg).?; // FIXME:
+
+                        // hopefully gets converted into a switch
+                        inline for (0..variants_const.len) |i| {
+                            if (i == @intFromEnum(variant)) {
+                                variants_const[i].handler(&msg);
+                            }
+                        }
+
+                        try self.rx.replyRecv(&msg);
+                    }
+                }
+            };
+        }
+    };
+}
+
+const MessageUsage = struct {
+    // number of capabilities in the extra regs that the single message transfers
+    caps: u7 = 0,
+    // number of raw data registers that the single message transfers
+    // (over 5 regs starts using extra regs)
+    data: [200]DataEntry = undefined,
+    data_cnt: u8 = 0,
+
+    finished: ?type = null,
+
+    const DataEntry = struct {
+        name: [:0]const u8,
+        type: type,
+        fake_type: type,
+        encode_type: DataEntryEnc,
+    };
+
+    const DataEntryEnc = enum {
+        raw,
+        cap,
+        err,
+        tagged_enum,
+    };
+
+    /// adds a named (named the returned number) field of type to this struct builder
+    fn addType(comptime self: *@This(), comptime ty: type) usize {
+        if (self.finished != null)
+            @compileError("already finished");
+
+        var real_ty: type = undefined;
+        var enc: DataEntryEnc = undefined;
+
+        switch (ty) {
+            caps.Memory,
+            caps.Thread,
+            caps.Vmem,
+            caps.Frame,
+            caps.Receiver,
+            caps.Sender,
+            => {
+                real_ty = u32;
+                enc = .cap;
+            },
+            f64,
+            f32,
+            f16,
+            usize,
+            u32,
+            u16,
+            u8,
+            isize,
+            i32,
+            i16,
+            i8,
+            void,
+            => {
+                real_ty = ty;
+                enc = .raw;
+            },
+            sys.Error!void => {
+                real_ty = usize;
+                enc = .err;
+            },
+            else => {
+                const info = @typeInfo(ty);
+                if (info == .@"enum") {
+                    real_ty = info.@"enum".tag_type;
+                    enc = .tagged_enum;
+                } else {
+                    @compileError(std.fmt.comptimePrint("unknown type {}", .{ty}));
+                }
+            },
+        }
+
+        self.data[self.data_cnt] = .{
+            .name = std.fmt.comptimePrint("{}", .{self.data_cnt}),
+            .type = real_ty,
+            .fake_type = ty,
+            .encode_type = enc,
+        };
+        self.data_cnt += 1;
+        return self.data_cnt;
+    }
+
+    /// reorder fields to compact the data
+    fn finish(comptime self: *@This(), comptime is_union: bool) void {
+        if (self.finished != null)
+            @compileError("already finished");
+
+        // make message register use more efficient
+        // sorts everything except leaves the union tag (enum) as the first thing, because it has to
+        std.sort.pdq(DataEntry, self.data[@intFromBool(is_union)..self.data_cnt], void{}, struct {
+            fn lessThanFn(_: void, lhs: DataEntry, rhs: DataEntry) bool {
+                return @sizeOf(lhs.type) < @sizeOf(rhs.type);
+            }
+        }.lessThanFn);
+
+        const size_without_padding = @sizeOf(self.MakeStruct());
+        const size_with_padding = std.mem.alignForward(usize, size_without_padding, @sizeOf(usize));
+
+        const padding = @Type(std.builtin.Type{ .array = std.builtin.Type.Array{
+            .len = size_with_padding - size_without_padding,
+            .child = u8,
+            .sentinel_ptr = null,
+        } });
+        self.data[self.data_cnt] = .{
+            .name = "_padding",
+            .type = padding,
+            .fake_type = padding,
+            .encode_type = .raw,
+        };
+        self.data_cnt += 1;
+        self.finished = self.MakeStruct();
+    }
+
+    fn MakeStruct(comptime self: @This()) type {
+        var fields: [self.data_cnt]std.builtin.Type.StructField = undefined;
+        for (self.data[0..self.data_cnt], 0..) |s, i| {
+            fields[i] = .{
+                .name = s.name,
+                .type = s.type,
+                .default_value_ptr = null,
+                .is_comptime = false,
+                .alignment = @alignOf(s.type),
+            };
+        }
+
+        const ty: std.builtin.Type = .{ .@"struct" = .{
+            .layout = .@"extern",
+            .backing_integer = null,
+            .fields = &fields,
+            .decls = &.{},
+            .is_tuple = false,
+        } };
+
+        return @Type(ty);
+    }
+
+    fn MakeIo(comptime self: @This()) type {
+        var fields: [self.data_cnt - 1]std.builtin.Type.StructField = undefined;
+        inline for (self.data[0 .. self.data_cnt - 1], &fields) |data_f, *tuple_f| {
+            tuple_f.* = .{
+                .name = data_f.name,
+                .type = data_f.fake_type,
+                .default_value_ptr = null,
+                .is_comptime = false,
+                .alignment = @alignOf(data_f.fake_type),
+            };
+        }
+
+        const ty: std.builtin.Type = .{ .@"struct" = .{
+            .layout = .auto,
+            .backing_integer = null,
+            .fields = &fields,
+            .decls = &.{},
+            .is_tuple = true,
+        } };
+
+        return @Type(ty);
+    }
+
+    fn makeConverter(comptime self: @This()) type {
+        const Struct: type = self.finished orelse
+            @compileError("not finished");
+        const Io: type = self.MakeIo();
+        const regs: usize = comptime @sizeOf(Struct) / @sizeOf(usize);
+
+        return struct {
+            pub fn serialize(msg: *sys.Message, inputs: Io) void {
+                var data: Struct = undefined;
+
+                // const input_fields: []const std.builtin.Type.StructField = @typeInfo(@TypeOf(inputs));
+                inline for (self.data[0 .. self.data_cnt - 1]) |f| {
+                    // copy every (non cap and non padding) field of `data` from `input`
+                    // @compileLog(std.fmt.comptimePrint("name={s} ty={} fakety={} encty={}", .{
+                    //     f.name,
+                    //     f.type,
+                    //     f.fake_type,
+                    //     f.encode_type,
+                    // }));
+
+                    if (f.encode_type == .err) {
+                        @field(data, f.name) =
+                            sys.encodeVoid(@field(inputs, f.name));
+                    } else if (f.encode_type == .raw) {
+                        @field(data, f.name) =
+                            @field(inputs, f.name);
+                    } else if (f.encode_type == .tagged_enum) {
+                        @field(data, f.name) =
+                            @intFromEnum(@field(inputs, f.name));
+                    }
+                }
+
+                const data_as_regs: [regs]u64 = @bitCast(data);
+
+                var extra_idx: u7 = 0;
+
+                inline for (self.data[0 .. self.data_cnt - 1]) |f| {
+                    if (f.encode_type == .cap) {
+                        sys.setExtra(extra_idx, @field(inputs, f.name).cap, true);
+                        extra_idx += 1;
+                    }
+                }
+
+                inline for (data_as_regs[0..], 0..) |reg, i| {
+                    if (i == 0) {
+                        msg.arg0 = reg;
+                    } else if (i == 1) {
+                        msg.arg1 = reg;
+                    } else if (i == 2) {
+                        msg.arg2 = reg;
+                    } else if (i == 3) {
+                        msg.arg3 = reg;
+                    } else if (i == 4) {
+                        msg.arg4 = reg;
+                    } else {
+                        sys.setExtra(extra_idx, reg, false);
+                        extra_idx += 1;
+                    }
+                }
+            }
+
+            pub fn deserializeVariant(msg: *sys.Message) ?self.data[0].fake_type {
+                var data_as_regs: [regs]u64 = undefined;
+                data_as_regs[0] = msg.arg0;
+                const data: Struct = @bitCast(data_as_regs);
+                return std.meta.intToEnum(
+                    self.data[0].fake_type,
+                    @field(data, self.data[0].name),
+                ) catch null;
+            }
+
+            pub fn deserialize(msg: *sys.Message) ?Io {
+                var ret: Io = undefined;
+
+                var extra_idx: u7 = 0;
+                inline for (self.data[0 .. self.data_cnt - 1]) |f| {
+                    if (f.encode_type == .cap) {
+                        @field(ret, f.name) = .{ .cap = sys.getExtra(extra_idx) };
+                        extra_idx += 1;
+                    }
+                }
+
+                var data_as_regs: [regs]u64 = undefined;
+                inline for (data_as_regs[0..], 0..) |*reg, i| {
+                    if (i == 0) {
+                        reg.* = msg.arg0;
+                    } else if (i == 1) {
+                        reg.* = msg.arg1;
+                    } else if (i == 2) {
+                        reg.* = msg.arg2;
+                    } else if (i == 3) {
+                        reg.* = msg.arg3;
+                    } else if (i == 4) {
+                        reg.* = msg.arg4;
+                    } else {
+                        reg.* = sys.getExtra(extra_idx);
+                        extra_idx += 1;
+                    }
+                }
+                const data: Struct = @bitCast(data_as_regs);
+
+                inline for (self.data[0 .. self.data_cnt - 1]) |f| {
+                    if (f.encode_type == .err) {
+                        @field(ret, f.name) =
+                            sys.decodeVoid(@field(data, f.name));
+                    } else if (f.encode_type == .raw) {
+                        @field(ret, f.name) =
+                            @field(data, f.name);
+                    } else if (f.encode_type == .tagged_enum) {
+                        @field(ret, f.name) =
+                            @enumFromInt(@field(data, f.name));
+                        // std.meta.intToEnum(f.fake_type, @field(data, f.name)) orelse return null;
+                    }
+                }
+                return ret;
+            }
+        };
+    }
+};

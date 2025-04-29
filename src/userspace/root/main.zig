@@ -99,6 +99,8 @@ const System = struct {
 
     pm: caps.Thread = .{},
     pm_bin: []const u8,
+    pm_sender: caps.Sender = .{},
+    pm_endpoint: u32 = 0,
 };
 
 fn processRootRequest(
@@ -239,6 +241,28 @@ fn processRootRequest(
             try thread.start();
 
             return false; // false => no reply
+        },
+        .pm_ready => {
+            if (system.vm_endpoint != msg.cap) {
+                msg.arg0 = abi.sys.encode(Error.PermissionDenied);
+                msg.extra = 0;
+                return true;
+            }
+
+            if (msg.extra != 1) {
+                msg.arg0 = abi.sys.encode(Error.InvalidArgument);
+                msg.extra = 0;
+                return true;
+            }
+
+            // FIXME: verify that it is a cap
+            system.vm_sender = .{ .cap = @truncate(abi.sys.getExtra(0)) };
+            msg.extra = 0;
+            msg.arg0 = abi.sys.encode(0);
+
+            // TODO: do all this \/ from a 2nd thread
+
+            try recv.reply(msg); // reply now but dont recv yet
         },
         .vm, .pm, .vfs => {
             msg.arg0 = abi.sys.encode(Error.Unimplemented);
