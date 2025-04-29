@@ -321,7 +321,7 @@ pub fn log(s: []const u8) void {
 
 pub fn debug(cap: u32) !abi.ObjectType {
     const id = try syscall(.debug, .{cap});
-    return std.meta.intToEnum(abi.ObjectType, id);
+    return std.meta.intToEnum(abi.ObjectType, id) catch unreachable;
 }
 
 pub fn call(cap: u32, msg: *Message) !void {

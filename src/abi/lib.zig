@@ -175,28 +175,45 @@ pub const RootRequest = enum(u8) {
 };
 
 pub const VmRequest = enum(u8) {
+    /// create a new empty address space
+    /// returns an index number that can be used to create threads
+    ///
+    /// input:
+    /// - arg0: .new_vmem
+    ///
+    /// output:
+    /// - arg0: Error!usize (handle)
+    new_vmem,
+
+    // TODO: make sure there is only one copy of
+    // this frame so that the vm can read it in peace
+    /// load an ELF into an address space
     ///
     /// input:
     /// - extra: 1
     /// - extra0: frame capability containing the elf
-    /// - arg0: elf binary offset in extra0
-    /// - arg1: elf binary length
+    /// - arg0: .load_elf
+    /// - arg1: handle
+    /// - arg2: elf binary offset in extra0
+    /// - arg3: elf binary length
     ///
     /// output:
     /// - extra: 0
-    /// - arg0: Error!handle
+    /// - arg0: Error!usize (entrypoint)
     load_elf,
 
+    /// create a new thread from an address space
     ///
     /// input:
     ///  - extra: 0
-    ///  - arg0: handle
+    ///  - arg0: .new_thread
+    ///  - arg1: handle
     ///
     /// output:
     ///  - extra: 1
     ///  - extra0: thread capability
     ///  - arg0: Error!void
-    exec,
+    new_thread,
 };
 
 // TODO: some RCP style prototype thing that generates

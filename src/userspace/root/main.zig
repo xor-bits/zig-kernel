@@ -5,6 +5,7 @@ const initfsd = @import("initfsd.zig");
 
 const log = std.log.scoped(.root);
 const Error = abi.sys.Error;
+const caps = abi.caps;
 
 //
 
@@ -103,6 +104,7 @@ fn processRootRequest(
     system: *System,
     msg: *abi.sys.Message,
 ) !bool {
+    defer log.info("processRootRequest done", .{});
     const req = std.meta.intToEnum(abi.RootRequest, msg.arg0) catch {
         msg.arg0 = abi.sys.encode(abi.sys.Error.InvalidArgument);
         return true;
@@ -179,13 +181,44 @@ fn processRootRequest(
                 LOADER_TMP,
             );
 
-            log.info("sending shared mem", .{});
+            log.info("creating new vmem", .{});
             var exec_msg: abi.sys.Message = .{
+                .extra = 0,
+                .arg0 = @intFromEnum(abi.VmRequest.new_vmem),
+            };
+            try system.vm_sender.call(&exec_msg);
+
+            const pm_vm_handle = try abi.sys.decode(exec_msg.arg0);
+
+            log.info("sending shared mem", .{});
+            exec_msg = .{
                 .extra = 1,
+                .arg0 = @intFromEnum(abi.VmRequest.load_elf),
+                .arg1 = pm_vm_handle,
+                .arg2 = 0,
+                .arg3 = system.pm_bin.len,
             };
             abi.sys.setExtra(0, frame.cap, true);
             try system.vm_sender.call(&exec_msg);
+            const entry = try abi.sys.decode(exec_msg.arg0);
+
+            log.info("new pm thread", .{});
+            exec_msg = .{
+                .extra = 0,
+                .arg0 = @intFromEnum(abi.VmRequest.new_thread),
+                .arg1 = pm_vm_handle,
+            };
+            try system.vm_sender.call(&exec_msg);
+            const thread: caps.Thread = .{ .cap = @truncate(abi.sys.getExtra(0)) };
             _ = try abi.sys.decode(exec_msg.arg0);
+
+            log.info("start pm", .{});
+            try thread.writeRegs(&.{
+                .user_instr_ptr = entry,
+                .user_stack_ptr = 0x8000_0000_0000,
+            });
+            try thread.setPrio(0);
+            try thread.start();
 
             return false; // false => no reply
         },
@@ -329,7 +362,7 @@ fn exec_elf(elf_bytes: []const u8, sender: abi.caps.Sender) !abi.caps.Thread {
     const new_thread = try abi.caps.ROOT_MEMORY.alloc(abi.caps.Thread);
 
     try new_thread.setVmem(new_vmem);
-    try new_thread.setPrio(3);
+    try new_thread.setPrio(0);
     try new_thread.writeRegs(&.{
         .arg0 = sender.cap, // set RDI to
         .user_instr_ptr = header.entry,
