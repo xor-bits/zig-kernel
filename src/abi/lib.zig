@@ -251,10 +251,9 @@ pub const VmProtocol = Protocol(struct {
     // exec: fn (vm_handle: usize) sys.Error!caps.Thread,
 });
 
-pub const PmProtocol = Protocol(struct {
-    hello: fn (val: usize) sys.Error!void,
-});
+// pub const PmProtocol = Protocol(struct {});
 
+// TODO: automatically convert tuples with just one item into that item
 /// this fucking monstrosity converts a simple specification type
 /// into a Client and Server based on the hiillos IPC system
 /// look at `VmProtocol` for an example
@@ -281,13 +280,13 @@ pub fn Protocol(comptime spec: type) type {
         /// and message to `output_ty`
         output_converter: type,
 
-        handler: fn (msg: *sys.Message) void,
+        handler: []const u8,
+        // handler: fn (msg: *sys.Message) void,
     };
 
     var variants: [info.@"struct".fields.len]Variant = undefined;
 
-    var server_fields: [info.@"struct".fields.len + 1]struct { [:0]const u8, type } = undefined;
-    server_fields[0] = .{ "rx", caps.Receiver };
+    var handlers_fields: [info.@"struct".fields.len]std.builtin.Type.StructField = undefined;
 
     var message_variant_fields: [info.@"struct".fields.len]std.builtin.Type.EnumField = undefined;
     var message_variant_field_idx = 0;
@@ -322,9 +321,14 @@ pub fn Protocol(comptime spec: type) type {
         if (field_info.@"fn".is_generic)
             @compileError("Protocol input functions cannot be generic");
 
-        server_fields[i] = .{ field.name, field.type };
-
-        _ = output_msg.addType(field_info.@"fn".return_type.?);
+        const return_ty = @typeInfo(field_info.@"fn".return_type.?);
+        if (return_ty == .@"struct" and return_ty.@"struct".is_tuple) {
+            for (return_ty.@"struct".fields) |f| {
+                _ = output_msg.addType(f.type);
+            }
+        } else {
+            _ = output_msg.addType(field_info.@"fn".return_type.?);
+        }
 
         inline for (field_info.@"fn".params) |param| {
             if (param.is_generic)
@@ -344,29 +348,35 @@ pub fn Protocol(comptime spec: type) type {
 
         const input_converter = input_msg.makeConverter();
         const output_converter = output_msg.makeConverter();
+        const input_ty = input_msg.MakeIo();
+        const output_ty = output_msg.MakeIo();
 
         variants[i] = Variant{
             .input_converter = input_converter,
             .output_converter = output_converter,
-            .input_ty = input_msg.MakeIo(),
-            .output_ty = output_msg.MakeIo(),
-            .handler = struct {
-                fn handler(msg: *sys.Message) void {
-                    std.log.info("handler {}", .{i});
+            .input_ty = input_ty,
+            .output_ty = output_ty,
+            .handler = field.name,
+        };
 
-                    _ = msg;
-                    // const input = input_converter.deserialize(msg) orelse {
-                    //     // FIXME: handle invalid input
-                    //     std.log.err("invalid input", .{});
-                    //     return;
-                    // };
-
-                }
-            }.handler,
+        handlers_fields[i] = std.builtin.Type.StructField{
+            .name = field.name,
+            .type = fn (req: TupleWithoutFirst(input_ty)) output_ty,
+            .default_value_ptr = null,
+            .alignment = @alignOf(field.type),
+            .is_comptime = false,
         };
     }
 
     const variants_const = variants; // ok zig randomly doesnt like accessing vars from nested things
+
+    const Handlers = @Type(.{ .@"struct" = std.builtin.Type.Struct{
+        .layout = .auto,
+        .backing_integer = null,
+        .fields = &handlers_fields,
+        .decls = &.{},
+        .is_tuple = false,
+    } });
 
     return struct {
         fn ReturnType(comptime id: MessageVariant) type {
@@ -385,25 +395,22 @@ pub fn Protocol(comptime spec: type) type {
                     return .{ .tx = tx };
                 }
 
-                pub fn call(self: @This(), comptime id: MessageVariant, args: anytype) sys.Error!VariantOf(id).output_ty {
+                pub fn call(self: @This(), comptime id: MessageVariant, args: TupleWithoutFirst(VariantOf(id).input_ty)) sys.Error!VariantOf(id).output_ty {
                     const variant = VariantOf(id);
 
                     var msg: sys.Message = undefined;
-                    variant.input_converter.serialize(&msg, .{id} ++ args);
+                    const inputs = if (@TypeOf(args) == void) .{id} else .{id} ++ args;
+                    variant.input_converter.serialize(&msg, inputs);
                     try self.tx.call(&msg);
                     return variant.output_converter.deserialize(&msg).?; // FIXME:
                 }
             };
         }
 
-        pub fn Server() type {
+        pub fn Server(comptime handlers: Handlers) type {
             return struct {
                 rx: caps.Receiver,
-                // handlers: []const fn () void = b: {
-                //     var _handlers = [info.@"struct".fields.len]fn () void;
-                //     inline for ()
-                //     break :b;
-                // },
+                comptime handlers: Handlers = handlers,
 
                 pub fn init(rx: caps.Receiver) @This() {
                     return .{ .rx = rx };
@@ -416,9 +423,18 @@ pub fn Protocol(comptime spec: type) type {
                         const variant = variants_const[0].input_converter.deserializeVariant(&msg).?; // FIXME:
 
                         // hopefully gets converted into a switch
-                        inline for (0..variants_const.len) |i| {
+                        inline for (&variants_const, 0..) |v, i| {
                             if (i == @intFromEnum(variant)) {
-                                variants_const[i].handler(&msg);
+                                const input = v.input_converter.deserialize(&msg) orelse {
+                                    // FIXME: handle invalid input
+                                    std.log.err("invalid input", .{});
+                                    return;
+                                };
+
+                                const handler = @field(self.handlers, v.handler);
+                                const output = handler(tuplePopFirst(input));
+
+                                v.output_converter.serialize(&msg, output);
                             }
                         }
 
@@ -668,7 +684,7 @@ const MessageUsage = struct {
                 var extra_idx: u7 = 0;
                 inline for (self.data[0 .. self.data_cnt - 1]) |f| {
                     if (f.encode_type == .cap) {
-                        @field(ret, f.name) = .{ .cap = sys.getExtra(extra_idx) };
+                        @field(ret, f.name) = .{ .cap = @truncate(sys.getExtra(extra_idx)) };
                         extra_idx += 1;
                     }
                 }
@@ -710,3 +726,80 @@ const MessageUsage = struct {
         };
     }
 };
+
+fn TupleWithoutFirst(comptime tuple: type) type {
+    var s = @typeInfo(tuple).@"struct";
+    if (s.fields.len == 0)
+        @compileError("cannot pop the first field from an empty struct");
+    if (s.fields.len == 1)
+        return void;
+
+    var fields: [s.fields.len - 1]std.builtin.Type.StructField = undefined;
+    inline for (s.fields[1..], 0..) |f, i| {
+        fields[i] = f;
+        fields[i].name = s.fields[i].name;
+    }
+    s.fields = &fields;
+    return @Type(.{ .@"struct" = s });
+}
+
+fn tuplePopFirst(tuple: anytype) TupleWithoutFirst(@TypeOf(tuple)) {
+    const Result = TupleWithoutFirst(@TypeOf(tuple));
+
+    const prev = @typeInfo(@TypeOf(tuple)).@"struct";
+
+    if (prev.fields.len == 0)
+        @compileError("cannot pop the first field from an empty struct");
+    if (prev.fields.len == 1)
+        return void{};
+
+    const next = @typeInfo(Result).@"struct";
+
+    var result: Result = undefined;
+    inline for (prev.fields[1..], next.fields) |prev_f, next_f| {
+        @field(result, next_f.name) = @field(tuple, prev_f.name);
+    }
+
+    return result;
+}
+
+test "comptime RPC Protocol generator" {
+    const Proto = Protocol(struct {
+        hello1: fn (val: usize) sys.Error!void,
+        hello2: fn () void,
+        hello3: fn (frame: caps.Frame) struct { sys.Error!void, usize },
+    });
+
+    const client = Proto.Client().init(.{});
+    const res1 = client.call(.hello1, .{5});
+    const res2 = client.call(.hello2, void{});
+    const res3 = client.call(.hello3, .{try caps.ROOT_MEMORY.alloc(caps.Frame)});
+
+    try std.testing.expect(@TypeOf(res1) == sys.Error!struct { sys.Error!void });
+    try std.testing.expect(@TypeOf(res2) == sys.Error!struct { void });
+    try std.testing.expect(@TypeOf(res3) == sys.Error!struct { sys.Error!void, usize });
+
+    const S = struct {
+        fn hello1(request: struct { usize }) struct { sys.Error!void } {
+            std.log.info("pm hello1 request: {}", .{request});
+            return .{void{}};
+        }
+
+        fn hello2(request: void) struct { void } {
+            std.log.info("pm hello2 request: {}", .{request});
+            return .{void{}};
+        }
+
+        fn hello3(request: struct { caps.Frame }) struct { sys.Error!void, usize } {
+            std.log.info("pm hello3 request: {}", .{request});
+            return .{ void{}, 0 };
+        }
+    };
+
+    const server = Proto.Server(.{
+        .hello1 = S.hello1,
+        .hello2 = S.hello2,
+        .hello3 = S.hello3,
+    }).init(.{});
+    try std.testing.expectError(sys.Error.InvalidCapability, server.run());
+}

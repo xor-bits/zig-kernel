@@ -9,6 +9,7 @@ const log = std.log.scoped(.pm);
 pub const std_options = abi.std_options;
 pub const panic = abi.panic;
 pub const name = "pm";
+const Error = abi.sys.Error;
 
 //
 
@@ -29,10 +30,14 @@ pub fn main() !void {
     const pm_send = try pm_recv.subscribe();
 
     // inform the root that pm is ready
+    log.debug("pm ready", .{});
     msg = .{ .extra = 1, .arg0 = @intFromEnum(abi.RootRequest.pm_ready) };
     abi.sys.setExtra(0, pm_send.cap, true);
     try root.call(&msg);
     _ = try abi.sys.decode(msg.arg0);
+
+    // const server = abi.PmProtocol.Server(.{}).init(pm_recv);
+    // try server.run();
 }
 
 comptime {

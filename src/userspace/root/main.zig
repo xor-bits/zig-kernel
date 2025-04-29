@@ -119,7 +119,7 @@ fn processRootRequest(
     switch (req) {
         .memory => {
             // only system processes can get access to the physical memory allocator
-            if (system.vm_endpoint != msg.cap) {
+            if (system.vm_endpoint != msg.cap and system.pm_endpoint != msg.cap) {
                 msg.arg0 = abi.sys.encode(Error.PermissionDenied);
                 msg.extra = 0;
                 return true;
@@ -237,14 +237,22 @@ fn processRootRequest(
             const thread: caps.Thread = .{ .cap = @truncate(abi.sys.getExtra(0)) };
             _ = try abi.sys.decode(exec_msg.arg0);
 
+            const sender = try recv.subscribe();
+
             log.info("start pm", .{});
             try thread.setPrio(0);
+            try thread.transferCap(sender.cap);
+            var regs: abi.sys.ThreadRegs = undefined;
+            try thread.readRegs(&regs);
+            regs.arg0 = sender.cap; // set RDI to the sender cap
+            try thread.writeRegs(&regs);
             try thread.start();
+            system.pm_endpoint = sender.cap;
 
             return false; // false => no reply
         },
         .pm_ready => {
-            if (system.vm_endpoint != msg.cap) {
+            if (system.pm_endpoint != msg.cap) {
                 msg.arg0 = abi.sys.encode(Error.PermissionDenied);
                 msg.extra = 0;
                 return true;
@@ -257,13 +265,11 @@ fn processRootRequest(
             }
 
             // FIXME: verify that it is a cap
-            system.vm_sender = .{ .cap = @truncate(abi.sys.getExtra(0)) };
+            system.pm_sender = .{ .cap = @truncate(abi.sys.getExtra(0)) };
             msg.extra = 0;
             msg.arg0 = abi.sys.encode(0);
 
-            // TODO: do all this \/ from a 2nd thread
-
-            try recv.reply(msg); // reply now but dont recv yet
+            return true;
         },
         .vm, .pm, .vfs => {
             msg.arg0 = abi.sys.encode(Error.Unimplemented);
