@@ -56,6 +56,10 @@ pub const Thread = struct {
     pub fn setPrio(self: @This(), priority: u2) sys.Error!void {
         return sys.threadSetPrio(self.cap, priority);
     }
+
+    pub fn transferCap(self: @This(), cap: u32) sys.Error!void {
+        return sys.threadTransferCap(self.cap, cap);
+    }
 };
 
 /// capability to the virtual memory structure
@@ -72,10 +76,6 @@ pub const Vmem = struct {
     pub fn unmap(self: @This(), frame: Frame, vaddr: usize) sys.Error!void {
         // @import("std").log.info("unmapping 0x{x}", .{vaddr});
         return sys.vmemUnmap(self.cap, frame.cap, vaddr);
-    }
-
-    pub fn transferCap(self: @This(), cap: u32) sys.Error!void {
-        return sys.vmemTransferCap(self.cap, cap);
     }
 };
 

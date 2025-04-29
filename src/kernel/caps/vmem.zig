@@ -236,11 +236,6 @@ pub const Vmem = struct {
                     );
                 }
             },
-            .transfer_cap => {
-                const cap = try caps.get_capability(thread, @truncate(trap.arg2));
-                defer cap.lock.unlock();
-                cap.owner.store(self, .seq_cst);
-            },
         }
     }
 

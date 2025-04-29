@@ -175,6 +175,7 @@ pub const ThreadCallId = enum(u8) {
     write_regs,
     set_vmem,
     set_prio,
+    transfer_cap,
 };
 
 pub const ThreadRegs = extern struct {
@@ -252,12 +253,19 @@ pub fn threadSetPrio(thread_cap: u32, priority: u2) !void {
     try call(thread_cap, &msg);
 }
 
+pub fn threadTransferCap(thread_cap: u32, cap: u32) !void {
+    var msg: Message = .{
+        .arg0 = @intFromEnum(ThreadCallId.transfer_cap),
+        .arg1 = cap,
+    };
+    try call(thread_cap, &msg);
+}
+
 // VMEM CAPABILITY CALLS
 
 pub const VmemCallId = enum(u8) {
     map,
     unmap,
-    transfer_cap,
 };
 
 pub fn vmemMap(vmem_cap: u32, frame_cap: u32, vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
@@ -276,14 +284,6 @@ pub fn vmemUnmap(vmem_cap: u32, frame_cap: u32, vaddr: usize) !void {
         .arg0 = @intFromEnum(VmemCallId.unmap),
         .arg1 = frame_cap,
         .arg2 = vaddr,
-    };
-    try call(vmem_cap, &msg);
-}
-
-pub fn vmemTransferCap(vmem_cap: u32, cap: u32) !void {
-    var msg: Message = .{
-        .arg0 = @intFromEnum(VmemCallId.transfer_cap),
-        .arg1 = cap,
     };
     try call(vmem_cap, &msg);
 }

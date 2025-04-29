@@ -297,7 +297,6 @@ fn exec_elf(elf_bytes: []const u8, sender: abi.caps.Sender) !struct { caps.Threa
     var program_headers = header.program_header_iterator(&elf);
 
     const new_vmem = try abi.caps.ROOT_MEMORY.alloc(abi.caps.Vmem);
-    try new_vmem.transferCap(sender.cap);
 
     var heap_bottom: usize = 0;
 
@@ -407,6 +406,7 @@ fn exec_elf(elf_bytes: []const u8, sender: abi.caps.Sender) !struct { caps.Threa
         .user_instr_ptr = header.entry,
         .user_stack_ptr = 0x7FFF_FFF4_0000,
     });
+    try new_thread.transferCap(sender.cap);
 
     // log.info("ip=0x{x} sp=0x{x}", .{ header.entry, 0x7FFF_FFF4_0000 });
 

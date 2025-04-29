@@ -188,6 +188,16 @@ pub const Thread = struct {
             .set_prio => {
                 target_thread.ptr().priority = @truncate(trap.arg2);
             },
+            .transfer_cap => {
+                const cap = try caps.get_capability(thread, @truncate(trap.arg2));
+                defer cap.lock.unlock();
+
+                if (Thread.vmemOf(target_thread.ptr())) |vmem| {
+                    cap.owner.store(vmem, .seq_cst);
+                } else {
+                    return Error.NoVmem;
+                }
+            },
         }
     }
 
