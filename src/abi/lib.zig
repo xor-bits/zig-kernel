@@ -42,7 +42,8 @@ pub fn panic(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace, ret_
         std.log.scoped(.panic).warn("  0x{x}", .{addr});
     }
 
-    while (true) sys.yield();
+    asm volatile ("mov 0, %rax"); // read from nullptr to kill the process
+    unreachable;
 }
 
 //
