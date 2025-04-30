@@ -42,18 +42,18 @@ pub const Receiver = struct {
     }
 
     // block until something sends
-    pub fn recv(paddr: addr.Phys, thread: *caps.Thread, _: *arch.SyscallRegs) Error!void {
+    pub fn recv(paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
         if (conf.LOG_OBJ_CALLS)
             log.debug("receiver recv", .{});
 
         const self = (caps.Ref(@This()){ .paddr = paddr }).ptr();
 
+        thread.status = .waiting;
+        thread.trap = trap.*;
         if (null != self.receiver.cmpxchgStrong(null, thread, .seq_cst, .monotonic)) {
             // TODO: already listening
             return Error.Unimplemented;
         }
-
-        thread.status = .waiting;
     }
 
     pub fn reply(paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
