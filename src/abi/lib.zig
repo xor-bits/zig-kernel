@@ -388,6 +388,12 @@ pub fn Protocol(comptime spec: type) type {
                     }
                 }
 
+                pub fn reply(self: @This(), comptime id: MessageVariant, output: VariantOf(id).output_ty) sys.Error!void {
+                    var msg: sys.Message = undefined;
+                    variants_const[@intFromEnum(id)].output_converter.serialize(&msg, output);
+                    try self.rx.reply();
+                }
+
                 pub fn run(self: @This()) !void {
                     var msg: sys.Message = undefined;
                     try self.rx.recv(&msg);
