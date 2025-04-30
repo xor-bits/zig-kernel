@@ -13,7 +13,7 @@ pub const util = @import("util.zig");
 /// where the kernel places the root binary
 pub const ROOT_EXE = 0x200_0000;
 
-pub const LOG_SERVERS: bool = true;
+pub const LOG_SERVERS: bool = false;
 
 //
 

@@ -131,7 +131,7 @@ fn loadElfHandler(ctx: *System, sender: u32, req: struct { usize, caps.Frame, us
     ctx.self_vmem.unmap(frame, ELF_TMP) catch
         unreachable;
 
-    log.info("got ELF to load {}", .{.{ frame, offset, length }});
+    log.debug("got ELF to load {}", .{.{ frame, offset, length }});
 
     return .{void{}};
 }
