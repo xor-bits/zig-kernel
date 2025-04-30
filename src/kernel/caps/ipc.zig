@@ -94,6 +94,8 @@ pub const Receiver = struct {
 
         const self = (caps.Ref(@This()){ .paddr = paddr }).ptr();
 
+        // FIXME: race conditions
+
         if (null != self.receiver.cmpxchgStrong(null, thread, .seq_cst, .monotonic)) {
             // TODO: already listening
             return Error.Unimplemented;

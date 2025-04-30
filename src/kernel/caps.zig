@@ -35,12 +35,12 @@ pub fn init() !void {
     // push the null capability
     _ = pushCapability(.{});
 
-    debugType(Object);
-    debugType(Memory);
-    debugType(Thread);
-    debugType(Vmem);
-    debugType(Receiver);
-    debugType(Sender);
+    // debugType(Object);
+    // debugType(Memory);
+    // debugType(Thread);
+    // debugType(Vmem);
+    // debugType(Receiver);
+    // debugType(Sender);
 }
 
 /// create a capability out of an object
@@ -314,5 +314,5 @@ pub const Object = struct {
 };
 
 fn debugType(comptime T: type) void {
-    std.log.info("{s}: size={} align={}", .{ @typeName(T), @sizeOf(T), @alignOf(T) });
+    std.log.debug("{s}: size={} align={}", .{ @typeName(T), @sizeOf(T), @alignOf(T) });
 }
