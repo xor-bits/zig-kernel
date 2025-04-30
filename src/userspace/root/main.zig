@@ -19,6 +19,7 @@ pub const name = "root";
 pub const LOADER_TMP = 0x2000_0000_0000;
 /// uncompressed initfs.tar location
 pub const INITFS_TAR = 0x3000_0000_0000;
+pub const FRAMEBUFFER = 0x4000_0000_0000;
 pub const STACK_SIZE = 0x40000;
 pub const STACK_TOP = 0x8000_0000_0000 - 0x2000;
 pub const STACK_BOTTOM = STACK_TOP - STACK_SIZE;
@@ -30,14 +31,16 @@ pub const BOOT_INFO = 0x8000_0000_0000 - 0x1000;
 pub fn main() !noreturn {
     log.info("I am root", .{});
 
-    try mapNaive(
+    try abi.caps.ROOT_SELF_VMEM.map(
         abi.caps.ROOT_BOOT_INFO,
         BOOT_INFO,
         .{ .writable = true },
         .{},
     );
     log.info("boot info mapped", .{});
-    const boot_info = @as(*volatile abi.BootInfo, @ptrFromInt(BOOT_INFO));
+    const boot_info = @as(*const abi.BootInfo, @ptrFromInt(BOOT_INFO));
+
+    try framebufferSplash(boot_info);
 
     try initfsd.init(boot_info.initfsData());
 
@@ -89,6 +92,46 @@ pub fn main() !noreturn {
         else
             try server.rx.recv(&msg);
     }
+}
+
+fn framebufferSplash(boot_info: *const abi.BootInfo) !void {
+    if (boot_info.framebuffer.cap == 0) return;
+
+    if (boot_info.framebuffer_bpp != 32) {
+        log.warn("unrecognized framebuffer format", .{});
+        return;
+    }
+
+    try abi.caps.ROOT_SELF_VMEM.map(boot_info.framebuffer, FRAMEBUFFER, .{ .writable = true }, .{
+        // TODO: PAT
+        .write_through = true,
+        .cache_disable = true,
+    });
+
+    const width = boot_info.framebuffer_width;
+    const height = boot_info.framebuffer_height;
+    const pitch = boot_info.framebuffer_pitch / 4;
+    const framebuffer = @as([*]volatile u32, @ptrFromInt(FRAMEBUFFER))[0 .. width * pitch];
+
+    const mid_x = width / 2;
+    const mid_y = height / 2;
+
+    // draw a small circle to let the user know at least something happened
+    for (mid_y - 25..mid_y + 25) |y| {
+        for (mid_x - 25..mid_x + 25) |x| {
+            const dx = if (mid_x > x) mid_x - x else x - mid_x;
+            const dy = if (mid_y > y) mid_y - y else y - mid_y;
+            const dsqr = dx * dx + dy * dy;
+
+            if (16 * 16 <= dsqr and dsqr <= 20 * 20) {
+                framebuffer[x + y * pitch] = 0xFFFFFF;
+            } else if (16 * 16 - 10 <= dsqr and dsqr <= 20 * 20 + 10) {
+                framebuffer[x + y * pitch] = 0x888888;
+            }
+        }
+    }
+
+    try abi.caps.ROOT_SELF_VMEM.unmap(boot_info.framebuffer, FRAMEBUFFER);
 }
 
 fn binBytes(path: []const u8) ![]const u8 {
@@ -292,15 +335,6 @@ fn execWithVm(ctx: *System, bin: []const u8) !caps.Sender {
     return sender;
 }
 
-pub fn mapNaive(frame: abi.caps.Frame, vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
-    try abi.caps.ROOT_SELF_VMEM.map(
-        frame,
-        vaddr,
-        rights,
-        flags,
-    );
-}
-
 fn execElf(elf_bytes: []const u8, sender: abi.caps.Sender) !struct { caps.Thread, caps.Vmem } {
     var elf = std.io.fixedBufferStream(elf_bytes);
 
@@ -461,7 +495,12 @@ export fn zigMain() noreturn {
 fn mapStack() !void {
     const frame = try abi.caps.ROOT_MEMORY.allocSized(abi.caps.Frame, .@"256KiB");
     // log.info("256KiB stack frame allocated", .{});
-    try mapNaive(frame, STACK_BOTTOM, .{ .writable = true }, .{});
+    try abi.caps.ROOT_SELF_VMEM.map(
+        frame,
+        STACK_BOTTOM,
+        .{ .writable = true },
+        .{},
+    );
     // log.info("stack mapping complete 0x{x}..0x{x}", .{ STACK_BOTTOM, STACK_TOP });
 }
 

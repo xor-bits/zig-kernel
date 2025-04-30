@@ -53,6 +53,8 @@ zig build run --prominent-compile-errors --summary none -freference-trace \
           to the (single per thread) vmem capability.
           Frame should be the only mappable capability
           and it is dynamically sized: `0x1000 * 2^size`.
+    - [ ] Mapping cache modes with PAT, uncacheable, write-combining,
+          write-through, write-protect, write-back and uncached
   - [x] GDT, TSS, IDT
   - [x] ACPI, APIC
   - [ ] SMP

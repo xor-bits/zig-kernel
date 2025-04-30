@@ -81,10 +81,17 @@ fn mapRoot(thread: *caps.Thread, vmem: *caps.Vmem, boot_info: *caps.Frame, a: ar
         if (resp.framebuffer_count != 0) {
             const fb = resp.framebuffers()[0];
             const fb_paddr = addr.Virt.fromPtr(fb.address).hhdmToPhys();
-            const framebuffer: caps.Ref(caps.Frame) = .{ .paddr = fb_paddr };
+            const bytes: usize = fb.height * fb.pitch * (std.math.divCeil(usize, fb.bpp, 8) catch unreachable);
+            if (abi.ChunkSize.of(bytes)) |fb_size| {
+                const framebuffer: caps.Ref(caps.Frame) = .{ .paddr = caps.Frame.new(fb_paddr, fb_size) };
 
-            const id = caps.pushCapability(framebuffer.object(thread));
-            boot_info_ptr.framebuffer = .{ .cap = id };
+                const id = caps.pushCapability(framebuffer.object(thread));
+                boot_info_ptr.framebuffer = .{ .cap = id };
+                boot_info_ptr.framebuffer_width = fb.width;
+                boot_info_ptr.framebuffer_height = fb.height;
+                boot_info_ptr.framebuffer_pitch = fb.pitch;
+                boot_info_ptr.framebuffer_bpp = fb.bpp;
+            }
         }
     }
 
