@@ -102,7 +102,7 @@ pub fn main() noreturn {
 
     if (builtin.is_test) {
         log.info("running tests", .{});
-        @import("root").run_tests() catch |err| {
+        @import("root").runTests() catch |err| {
             std.debug.panic("failed to run tests: {}", .{err});
         };
     }
@@ -149,7 +149,7 @@ fn procEnter() noreturn {
 
 pub fn syscall(trap: *arch.SyscallRegs) void {
     const log = std.log.scoped(.syscall);
-    // log.info("syscall from cpu={} ip=0x{x} sp=0x{x}", .{ arch.cpu_local().id, trap.user_instr_ptr, trap.user_stack_ptr });
+    // log.info("syscall from cpu={} ip=0x{x} sp=0x{x}", .{ arch.cpuLocal().id, trap.user_instr_ptr, trap.user_stack_ptr });
     // defer log.info("syscall done", .{});
 
     // TODO: once every CPU has reached this, bootloader_reclaimable memory could be freed

@@ -66,7 +66,7 @@ const Glyph = struct {
 
 fn generateGlyphs(bmp: []const u8) ![256]Glyph {
     const font_raw = try parseBmp(bmp);
-    // const font_raw = try parse_bmp(@embedFile("./font.bmp"));
+    // const font_raw = try parseBmp(@embedFile("./font.bmp"));
 
     var font = std.mem.zeroes([256]Glyph);
 

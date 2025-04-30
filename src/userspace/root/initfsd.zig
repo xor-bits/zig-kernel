@@ -71,72 +71,7 @@ pub fn init(initfs: []const u8) !void {
 }
 
 pub fn run() noreturn {
-    abi.sys.system_rename(0, "initfsd");
-
-    const heap = 2;
-
-    // io ring for sending requests elsewhere
-    const io_ring = abi.IoRing.init(64, heap.allocator()) catch unreachable;
-    defer io_ring.deinit();
-    io_ring.setup() catch unreachable;
-
-    // each request has 8 pages of room for copying the request buffer data over
-    // all of them are lazy allocated, and lazy zeroed once handled
-    const multi_buffer = heap.allocator().alloc(abi.sys.Page, 128 * 8) catch unreachable;
-    defer heap.allocator().free(multi_buffer);
-
-    // io ring for receiving protocol requests
-    const proto_io_ring = abi.IoRing.init(128, heap.allocator()) catch unreachable;
-    defer proto_io_ring.deinit();
-
-    // initialize the initfs protocol and wait for it to be created
-    abi.io.sync(abi.io.ProtoCreate.new(
-        "initfs",
-        &proto_io_ring,
-        @as([*]u8, @ptrCast(multi_buffer.ptr))[0 .. multi_buffer.len * 0x1000],
-    ), &io_ring) catch |err| {
-        std.debug.panic("failed to create a protocol: {}", .{err});
-    };
-
-    while (true) {
-        log.info("waiting for request", .{});
-        const request = proto_io_ring.wait_submission();
-        handleRequest(&request, &proto_io_ring);
-    }
-}
-
-fn handleRequest(req: *const abi.sys.SubmissionEntry, proto_io_ring: *const abi.IoRing) void {
-    // log.info("got request: {any}", .{req});
-
-    const result = switch (req.opcode) {
-        .open => handleOpen(req),
-        else => 0,
-    };
-
-    log.info("returning {any}", .{result});
-
-    proto_io_ring.complete(.{
-        .user_data = req.user_data,
-        .result = abi.sys.encode(result),
-    }) catch unreachable;
-
-    defer {
-        // mark the pages as lazy allocated again,
-        // effectively zeroing out the memory and freeing the physical allocation
-        const buffer_page_count = std.math.divCeil(usize, req.buffer_len, 0x1000) catch unreachable;
-        const buffer_pages: []abi.sys.Page = @as([*]abi.sys.Page, @alignCast(@ptrCast(req.buffer)))[0..buffer_page_count];
-        abi.sys.lazy_zero(buffer_pages);
-    }
-}
-
-fn handleOpen(req: *const abi.sys.SubmissionEntry) abi.sys.Error!usize {
-    const path = req.buffer[0..req.buffer_len];
-    log.info("got open: {s}", .{path});
-
-    const file = openFile(path) orelse {
-        return abi.sys.Error.NotFound;
-    };
-    return file; // returns the file index as the file descriptor number
+    @panic("todo");
 }
 
 pub fn openFile(path: []const u8) ?usize {

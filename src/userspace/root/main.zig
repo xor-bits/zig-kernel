@@ -60,18 +60,18 @@ pub fn main() !noreturn {
 
     // process manager (system) (server)
     // manages unix-like process stuff like permissions, cli args, etc.
-    // try exec_with_vm("/sbin/pm");
+    // try execWithVm("/sbin/pm");
 
     // virtual filesystem (system) (server)
     // manages the main VFS tree, everything mounted into it and file descriptors
-    // try exec_with_vm("/sbin/vfs");
+    // try execWithVm("/sbin/vfs");
 
     // init (normal) (process)
     // all the critial system servers are running, so now "normal" Linux-like init can run
     // gets a Sender capability to access the initfs part of this root process
     // just runs normal processes according to the init configuration
     // launches stuff like the window manager and virtual TTYs
-    // try exec_with_vm("/sbin/init");
+    // try execWithVm("/sbin/init");
 
     const server = Proto.init(&system, system.recv);
 

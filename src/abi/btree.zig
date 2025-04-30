@@ -257,7 +257,7 @@ pub fn BTreeMap(comptime K: type, comptime V: type, comptime cfg: Config) type {
         }
 
         fn splitNthChild(alloc: std.mem.Allocator, root: usize, depth: usize, n: usize) Error!void {
-            // log.info("split_nth_child(root={}, depth={}, n={})", .{ root, depth, n });
+            // log.info("splitNthChild(root={}, depth={}, n={})", .{ root, depth, n });
             if (depth == 0) unreachable;
 
             const parent: *BranchNode = @as(?*BranchNode, @ptrFromInt(root)) orelse unreachable;

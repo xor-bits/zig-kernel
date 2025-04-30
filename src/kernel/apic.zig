@@ -99,7 +99,7 @@ pub fn init(madt: *const Madt) !void {
         log.info("found Local APIC addr: 0x{x}", .{lapic_addr});
     const lapic: *volatile LocalApicRegs = addr.Phys.fromInt(lapic_addr).toHhdm().toPtr(*volatile LocalApicRegs);
     // const lapic_id = lapic.lapic_id.val >> 24;
-    // arch.cpu_local().lapic_id.store(@truncate(lapic_id), .seq_cst);
+    // arch.cpuLocal().lapic_id.store(@truncate(lapic_id), .seq_cst);
 
     apic_base.initNow(lapic);
 }
@@ -398,7 +398,7 @@ fn disablePic() void {
 
     log.info("obliterating PIC because PIC sucks", .{});
     const outb = arch.x86_64.outb;
-    const io_wait = arch.x86_64.ioWait;
+    const ioWait = arch.x86_64.ioWait;
 
     // the PIC is shit (not APIC, APIC is great)
     // AND its enabled by default usually
@@ -418,21 +418,21 @@ fn disablePic() void {
 
     // remap pic to discarded IRQs (32..47)
     outb(pic1_cmd, icw1_init | icw1_icw4);
-    io_wait();
+    ioWait();
     outb(pic2_cmd, icw1_init | icw1_icw4);
-    io_wait();
+    ioWait();
     outb(pic1_data, 32); // set master to IRQ32..IRQ39
-    io_wait();
+    ioWait();
     outb(pic2_data, 40); // set master to IRQ40..IRQ47
-    io_wait();
+    ioWait();
     outb(pic1_data, 4);
-    io_wait();
+    ioWait();
     outb(pic2_data, 2);
-    io_wait();
+    ioWait();
     outb(pic1_data, icw4_8086);
-    io_wait();
+    ioWait();
     outb(pic2_data, icw4_8086);
-    io_wait();
+    ioWait();
 
     // mask out all interrupts to limit the random useless spam from PIC
     outb(pic1_data, 0xFF);

@@ -906,7 +906,7 @@ pub const CpuConfig = struct {
 
         // // initialize CPU identification for scheduling purposes
         // wrmsr(IA32_TCS_AUX, this_cpu_id);
-        // log.info("CPU ID set: {d}", .{cpu_id()});
+        // log.info("CPU ID set: {d}", .{cpuId()});
 
         self.rsp_kernel = self.tss.privilege_stacks[0];
         self.rsp_user = 0;
