@@ -44,11 +44,15 @@ pub fn main() !void {
         .self_vmem = self_vmem,
     };
 
-    const server = abi.VmProtocol.Server(*System, .{
+    const server = abi.VmProtocol.Server(.{
+        .Context = *System,
+        .scope = if (abi.LOG_SERVERS) .vm else null,
+    }, .{
         .newVmem = newVmemHandler,
         .loadElf = loadElfHandler,
         .newThread = newThreadHandler,
     }).init(&system, vm_recv);
+
     log.info("vm waiting for messages", .{});
     try server.run();
 }

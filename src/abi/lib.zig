@@ -13,6 +13,8 @@ pub const util = @import("util.zig");
 /// where the kernel places the root binary
 pub const ROOT_EXE = 0x200_0000;
 
+pub const LOG_SERVERS: bool = true;
+
 //
 
 pub const std_options: std.Options = .{
@@ -386,18 +388,28 @@ pub fn Protocol(comptime spec: type) type {
             };
         }
 
-        pub fn Server(comptime Context: type, comptime handlers: anytype) type {
+        pub const ServerConfig = struct {
+            Context: type = void,
+            scope: ?@TypeOf(.enum_literal) = null,
+        };
+
+        pub fn Server(comptime config: ServerConfig, comptime handlers: anytype) type {
             return struct {
                 rx: caps.Receiver,
-                ctx: Context,
+                ctx: config.Context,
+                comptime logger: ?@TypeOf(.enum_literal) = config.scope,
                 comptime handlers: @TypeOf(handlers) = handlers,
 
-                pub fn init(ctx: Context, rx: caps.Receiver) @This() {
+                pub fn init(ctx: config.Context, rx: caps.Receiver) @This() {
                     return .{ .ctx = ctx, .rx = rx };
                 }
 
                 pub fn process(self: @This(), msg: *sys.Message) void {
                     const variant = variants_const[0].input_converter.deserializeVariant(msg).?; // FIXME:
+                    if (self.logger) |s|
+                        std.log.scoped(s).debug("handling {s}", .{@tagName(variant)});
+                    defer if (self.logger) |s|
+                        std.log.scoped(s).debug("handling {s} done", .{@tagName(variant)});
 
                     // hopefully gets converted into a switch
                     inline for (&variants_const, 0..) |v, i| {
