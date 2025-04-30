@@ -159,36 +159,6 @@ pub const SysLog = struct {
 
 //
 
-pub const RootRequest = enum(u8) {
-    /// request a physical memory allocator capability
-    /// only system processes are allowed request this
-    memory,
-
-    /// request self vmem capability
-    /// only vm can use this
-    self_vmem,
-
-    /// request a sender to the vm server
-    /// only pm can use this
-    vm,
-
-    /// provide a sender to the vm server
-    /// only vm can use this
-    vm_ready,
-
-    /// request a sender to the pm server
-    pm,
-
-    /// install a new pm sender that all new .pm requests get
-    pm_ready,
-
-    // /// install a new vfs sender that all new .vfs requests get
-    // vfs_install,
-
-    /// request a sender to the vfs server
-    vfs,
-};
-
 pub const RootProtocol = Protocol(struct {
     /// request a physical memory allocator capability
     /// only system processes are allowed request this
