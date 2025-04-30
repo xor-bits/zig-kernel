@@ -24,7 +24,7 @@ pub fn exec(a: args.Args) !void {
         .pml4_phys_base = vmem.paddr.toParts().page,
     }).write();
 
-    const boot_info = try map_root(vmem.ptr(), a);
+    const boot_info = try mapRoot(vmem.ptr(), a);
 
     const init_thread = try caps.Ref(caps.Thread).alloc(null);
     init_thread.ptr().* = .{
@@ -37,20 +37,20 @@ pub fn exec(a: args.Args) !void {
     const init_memory = try caps.Ref(caps.Memory).alloc(null);
 
     var id: u32 = undefined;
-    id = caps.push_capability(vmem.object(init_thread.ptr()));
+    id = caps.pushCapability(vmem.object(init_thread.ptr()));
     std.debug.assert(id == abi.caps.ROOT_SELF_VMEM.cap);
-    id = caps.push_capability(init_thread.object(init_thread.ptr()));
+    id = caps.pushCapability(init_thread.object(init_thread.ptr()));
     std.debug.assert(id == abi.caps.ROOT_SELF_THREAD.cap);
-    id = caps.push_capability(init_memory.object(init_thread.ptr()));
+    id = caps.pushCapability(init_memory.object(init_thread.ptr()));
     std.debug.assert(id == abi.caps.ROOT_MEMORY.cap);
-    id = caps.push_capability(boot_info.object(init_thread.ptr()));
+    id = caps.pushCapability(boot_info.object(init_thread.ptr()));
     std.debug.assert(id == abi.caps.ROOT_BOOT_INFO.cap);
 
     try proc.start(init_thread);
     proc.init();
 }
 
-fn map_root(vmem: *caps.Vmem, a: args.Args) !caps.Ref(caps.Frame) {
+fn mapRoot(vmem: *caps.Vmem, a: args.Args) !caps.Ref(caps.Frame) {
     const data_len = a.root_data.len + a.root_path.len + a.initfs_data.len + a.initfs_path.len;
 
     const low = addr.Virt.fromInt(abi.ROOT_EXE);
@@ -98,7 +98,7 @@ fn map_root(vmem: *caps.Vmem, a: args.Args) !caps.Ref(caps.Frame) {
         );
     }
 
-    arch.flush_tlb();
+    arch.flushTlb();
 
     log.info("copying root data", .{});
     std.mem.copyForwards(

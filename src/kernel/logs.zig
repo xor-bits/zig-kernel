@@ -26,7 +26,7 @@ fn logFn(comptime message_level: std.log.Level, comptime scope: @TypeOf(.enum_li
     log_lock.lock();
     defer log_lock.unlock();
 
-    if (arch.cpu_id_safe()) |id| {
+    if (arch.cpuIdSafe()) |id| {
         const fmt = "\x1B[90m[ " ++ level_col ++ level_txt ++ "\x1B[90m" ++ scope_txt ++ " #{} ]: \x1B[0m";
 
         uart.print(fmt, .{id});

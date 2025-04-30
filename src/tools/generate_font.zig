@@ -65,7 +65,7 @@ const Glyph = struct {
 };
 
 fn generateGlyphs(bmp: []const u8) ![256]Glyph {
-    const font_raw = try parse_bmp(bmp);
+    const font_raw = try parseBmp(bmp);
     // const font_raw = try parse_bmp(@embedFile("./font.bmp"));
 
     var font = std.mem.zeroes([256]Glyph);
@@ -172,7 +172,7 @@ pub const Parser = struct {
     }
 };
 
-fn parse_bmp(bmp: []const u8) !Image {
+fn parseBmp(bmp: []const u8) !Image {
     var parser = Parser.init(bmp);
 
     const bmp_header = parser.readStruct(struct {

@@ -64,7 +64,7 @@ pub fn init() void {
 
 /// add the current thread back to the ready queue (if ready) and maybe switch to another thread
 pub fn yield(trap: *arch.SyscallRegs) void {
-    const local = arch.cpu_local();
+    const local = arch.cpuLocal();
     if (local.current_thread) |prev_thread| {
         local.current_thread = null;
         prev_thread.trap = trap.*;
@@ -88,7 +88,7 @@ pub fn switchNow(trap: *arch.SyscallRegs) void {
 
 /// switch to another thread, skipping the scheduler entirely
 pub fn switchTo(trap: *arch.SyscallRegs, thread: *caps.Thread) void {
-    const local = arch.cpu_local();
+    const local = arch.cpuLocal();
     local.current_thread = thread;
     caps.Vmem.switchTo(thread.vmem.?);
     trap.* = thread.trap;
@@ -157,7 +157,7 @@ pub fn next() caps.Ref(caps.Thread) {
         log.debug("next thread acquired", .{});
 
     while (true) {
-        const locals = arch.cpu_local();
+        const locals = arch.cpuLocal();
         waiters[locals.id].store(locals, .seq_cst);
         arch.ints.wait();
 

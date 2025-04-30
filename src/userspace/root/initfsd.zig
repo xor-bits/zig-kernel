@@ -10,19 +10,19 @@ const log = std.log.scoped(.initfsd);
 const vmm_vector = std.mem.Allocator{
     .ptr = &vmm_vector_top,
     .vtable = &.{
-        .alloc = vmm_vector_alloc,
-        .resize = vmm_vector_resize,
-        .remap = vmm_vector_remap,
-        .free = vmm_vector_free,
+        .alloc = vmmVectorAlloc,
+        .resize = vmmVectorResize,
+        .remap = vmmVectorRemap,
+        .free = vmmVectorFree,
     },
 };
 
 var vmm_vector_top: usize = main.INITFS_TAR;
 
-fn vmm_vector_alloc(_top: *anyopaque, len: usize, _: std.mem.Alignment, _: usize) ?[*]u8 {
+fn vmmVectorAlloc(_top: *anyopaque, len: usize, _: std.mem.Alignment, _: usize) ?[*]u8 {
     const top: *usize = @alignCast(@ptrCast(_top));
     const ptr: [*]u8 = @ptrFromInt(top.*);
-    vmm_vector_grow(top, std.math.divCeil(
+    vmmVectorGrow(top, std.math.divCeil(
         usize,
         len,
         0x10000,
@@ -30,13 +30,13 @@ fn vmm_vector_alloc(_top: *anyopaque, len: usize, _: std.mem.Alignment, _: usize
     return ptr;
 }
 
-fn vmm_vector_resize(_: *anyopaque, _: []u8, _: std.mem.Alignment, _: usize, _: usize) bool {
+fn vmmVectorResize(_: *anyopaque, _: []u8, _: std.mem.Alignment, _: usize, _: usize) bool {
     return false;
 }
 
-fn vmm_vector_remap(_top: *anyopaque, memory: []u8, _: std.mem.Alignment, new_len: usize, _: usize) ?[*]u8 {
+fn vmmVectorRemap(_top: *anyopaque, memory: []u8, _: std.mem.Alignment, new_len: usize, _: usize) ?[*]u8 {
     const top: *usize = @alignCast(@ptrCast(_top));
-    vmm_vector_grow(top, std.math.divCeil(
+    vmmVectorGrow(top, std.math.divCeil(
         usize,
         new_len,
         0x10000,
@@ -44,12 +44,12 @@ fn vmm_vector_remap(_top: *anyopaque, memory: []u8, _: std.mem.Alignment, new_le
     return memory.ptr;
 }
 
-fn vmm_vector_free(_: *anyopaque, _: []u8, _: std.mem.Alignment, _: usize) void {}
+fn vmmVectorFree(_: *anyopaque, _: []u8, _: std.mem.Alignment, _: usize) void {}
 
-fn vmm_vector_grow(top: *usize, n_pages: usize) !void {
+fn vmmVectorGrow(top: *usize, n_pages: usize) !void {
     for (0..n_pages) |_| {
         const frame = try abi.caps.ROOT_MEMORY.allocSized(abi.caps.Frame, .@"64KiB");
-        try main.map_naive(
+        try main.mapNaive(
             frame,
             top.*,
             .{ .writable = true },
@@ -101,15 +101,15 @@ pub fn run() noreturn {
     while (true) {
         log.info("waiting for request", .{});
         const request = proto_io_ring.wait_submission();
-        handle_request(&request, &proto_io_ring);
+        handleRequest(&request, &proto_io_ring);
     }
 }
 
-fn handle_request(req: *const abi.sys.SubmissionEntry, proto_io_ring: *const abi.IoRing) void {
+fn handleRequest(req: *const abi.sys.SubmissionEntry, proto_io_ring: *const abi.IoRing) void {
     // log.info("got request: {any}", .{req});
 
     const result = switch (req.opcode) {
-        .open => handle_open(req),
+        .open => handleOpen(req),
         else => 0,
     };
 
@@ -129,7 +129,7 @@ fn handle_request(req: *const abi.sys.SubmissionEntry, proto_io_ring: *const abi
     }
 }
 
-fn handle_open(req: *const abi.sys.SubmissionEntry) abi.sys.Error!usize {
+fn handleOpen(req: *const abi.sys.SubmissionEntry) abi.sys.Error!usize {
     const path = req.buffer[0..req.buffer_len];
     log.info("got open: {s}", .{path});
 

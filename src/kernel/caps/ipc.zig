@@ -36,7 +36,7 @@ pub const Receiver = struct {
         switch (call_id) {
             .subscribe => {
                 const sender = caps.Ref(Sender){ .paddr = paddr };
-                trap.arg0 = caps.push_capability(sender.object(thread));
+                trap.arg0 = caps.pushCapability(sender.object(thread));
             },
         }
     }

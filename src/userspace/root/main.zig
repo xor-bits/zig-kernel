@@ -30,7 +30,7 @@ pub const BOOT_INFO = 0x8000_0000_0000 - 0x1000;
 pub fn main() !noreturn {
     log.info("I am root", .{});
 
-    try map_naive(
+    try mapNaive(
         abi.caps.ROOT_BOOT_INFO,
         BOOT_INFO,
         .{ .writable = true },
@@ -55,7 +55,7 @@ pub fn main() !noreturn {
     // maps new processes to memory and manages page faults,
     // heaps, lazy alloc, shared memory, swapping, etc.
     const vm_sender = try recv.subscribe();
-    system.vm, system.vm_vmem = try exec_elf(system.vm_bin, vm_sender);
+    system.vm, system.vm_vmem = try execElf(system.vm_bin, vm_sender);
     system.vm_endpoint = vm_sender.cap;
 
     // process manager (system) (server)
@@ -252,7 +252,7 @@ fn execPm(ctx: *System) !void {
     ctx.pm_endpoint = sender.cap;
 }
 
-pub fn map_naive(frame: abi.caps.Frame, vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
+pub fn mapNaive(frame: abi.caps.Frame, vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
     try abi.caps.ROOT_SELF_VMEM.map(
         frame,
         vaddr,
@@ -261,7 +261,7 @@ pub fn map_naive(frame: abi.caps.Frame, vaddr: usize, rights: abi.sys.Rights, fl
     );
 }
 
-fn exec_elf(elf_bytes: []const u8, sender: abi.caps.Sender) !struct { caps.Thread, caps.Vmem } {
+fn execElf(elf_bytes: []const u8, sender: abi.caps.Sender) !struct { caps.Thread, caps.Vmem } {
     var elf = std.io.fixedBufferStream(elf_bytes);
 
     var crc: u32 = 0;
@@ -398,34 +398,34 @@ pub extern var __thread_stack_end: u8;
 
 pub export fn _start() linksection(".text._start") callconv(.Naked) noreturn {
     asm volatile (
-        \\ jmp zig_main
+        \\ jmp zigMain
         :
         : [sp] "{rsp}" (&__stack_end),
     );
 }
 
-export fn zig_main() noreturn {
+export fn zigMain() noreturn {
     // switch to a bigger stack (256KiB, because the initfs deflate takes up over 128KiB on its own)
-    map_stack() catch |err| {
+    mapStack() catch |err| {
         std.debug.panic("not enough memory for a stack: {}", .{err});
     };
 
     asm volatile (
-        \\ jmp zig_main_realstack
+        \\ jmp zigMainRealstack
         :
         : [sp] "{rsp}" (STACK_TOP),
     );
     unreachable;
 }
 
-fn map_stack() !void {
+fn mapStack() !void {
     const frame = try abi.caps.ROOT_MEMORY.allocSized(abi.caps.Frame, .@"256KiB");
     // log.info("256KiB stack frame allocated", .{});
-    try map_naive(frame, STACK_BOTTOM, .{ .writable = true }, .{});
+    try mapNaive(frame, STACK_BOTTOM, .{ .writable = true }, .{});
     // log.info("stack mapping complete 0x{x}..0x{x}", .{ STACK_BOTTOM, STACK_TOP });
 }
 
-export fn zig_main_realstack() noreturn {
+export fn zigMainRealstack() noreturn {
     main() catch |err| {
         std.debug.panic("{}", .{err});
     };

@@ -41,7 +41,7 @@ pub fn earlyInit() void {
     wrmsr(GS_BASE, 0);
 }
 
-pub fn init_cpu(id: u32, smpinfo: ?*limine.SmpInfo) !void {
+pub fn initCpu(id: u32, smpinfo: ?*limine.SmpInfo) !void {
     const lapic_id = if (smpinfo) |i|
         i.lapic_id
     else if (smp.response) |resp|
@@ -64,7 +64,7 @@ pub fn init_cpu(id: u32, smpinfo: ?*limine.SmpInfo) !void {
 }
 
 // launch 2 next processors (snowball)
-pub fn smp_init() void {
+pub fn smpInit() void {
     if (smp.response) |resp| {
         var idx = next.fetchAdd(2, .monotonic);
         const cpus = resp.cpus();
@@ -85,7 +85,7 @@ export fn _smpstart(smpinfo: *limine.SmpInfo) callconv(.C) noreturn {
     main.smpmain(smpinfo);
 }
 
-pub fn cpu_local() *main.CpuLocalStorage {
+pub fn cpuLocal() *main.CpuLocalStorage {
     return asm volatile (std.fmt.comptimePrint(
             \\ movq %gs:{d}, %[cls]
         , .{@offsetOf(main.CpuLocalStorage, "self_ptr")})
@@ -156,7 +156,7 @@ pub fn inb(port: u16) u8 {
     );
 }
 
-pub fn io_wait() void {
+pub fn ioWait() void {
     outb(0x80, 0);
 }
 
@@ -184,7 +184,7 @@ pub fn ltr(v: u16) void {
     );
 }
 
-pub fn set_cs(sel: u64) void {
+pub fn setCs(sel: u64) void {
     asm volatile (
         \\ pushq %[v]
         \\ leaq .reload_CS(%rip), %rax
@@ -197,7 +197,7 @@ pub fn set_cs(sel: u64) void {
     );
 }
 
-pub fn set_ss(sel: u16) void {
+pub fn setSs(sel: u16) void {
     asm volatile (
         \\ movw %[v], %ss
         :
@@ -205,7 +205,7 @@ pub fn set_ss(sel: u16) void {
     );
 }
 
-pub fn set_ds(sel: u16) void {
+pub fn setDs(sel: u16) void {
     asm volatile (
         \\ movw %[v], %ds
         :
@@ -213,7 +213,7 @@ pub fn set_ds(sel: u16) void {
     );
 }
 
-pub fn set_es(sel: u16) void {
+pub fn setEs(sel: u16) void {
     asm volatile (
         \\ movw %[v], %es
         :
@@ -221,7 +221,7 @@ pub fn set_es(sel: u16) void {
     );
 }
 
-pub fn set_fs(sel: u16) void {
+pub fn setFs(sel: u16) void {
     asm volatile (
         \\ movw %[v], %fs
         :
@@ -229,7 +229,7 @@ pub fn set_fs(sel: u16) void {
     );
 }
 
-pub fn set_gs(sel: u16) void {
+pub fn setGs(sel: u16) void {
     asm volatile (
         \\ movw %[v], %gs
         :
@@ -339,11 +339,11 @@ pub fn rdcr3() u64 {
     );
 }
 
-pub fn flush_tlb() void {
+pub fn flushTlb() void {
     wrcr3(rdcr3());
 }
 
-pub fn flush_tlb_addr(vaddr: usize) void {
+pub fn flushTlbAddr(vaddr: usize) void {
     asm volatile (
         \\ invlpg (%[v])
         :
@@ -353,14 +353,14 @@ pub fn flush_tlb_addr(vaddr: usize) void {
 }
 
 /// processor ID
-pub fn cpu_id() u32 {
-    return cpu_local().id;
+pub fn cpuId() u32 {
+    return cpuLocal().id;
 }
 
-pub fn cpu_id_safe() ?u32 {
+pub fn cpuIdSafe() ?u32 {
     const gs = rdmsr(GS_BASE);
     if (gs == 0) return null;
-    return cpu_local().id;
+    return cpuLocal().id;
 }
 
 pub fn reset() void {
@@ -464,12 +464,12 @@ pub const Gdt = extern struct {
 
     fn loadRaw(ptr: *anyopaque) void {
         lgdt(@intFromPtr(ptr));
-        set_cs(GdtDescriptor.kernel_code_selector);
-        set_ss(GdtDescriptor.kernel_data_selector);
-        set_ds(GdtDescriptor.kernel_data_selector);
-        set_es(GdtDescriptor.kernel_data_selector);
-        set_fs(GdtDescriptor.kernel_data_selector);
-        set_gs(GdtDescriptor.kernel_data_selector);
+        setCs(GdtDescriptor.kernel_code_selector);
+        setSs(GdtDescriptor.kernel_data_selector);
+        setDs(GdtDescriptor.kernel_data_selector);
+        setEs(GdtDescriptor.kernel_data_selector);
+        setFs(GdtDescriptor.kernel_data_selector);
+        setGs(GdtDescriptor.kernel_data_selector);
         ltr(GdtDescriptor.tss_selector);
     }
 };
@@ -865,7 +865,7 @@ const InterruptStackFrame = extern struct {
     stack_segment: u16,
 };
 
-fn interrupt_ec(interrupt_stack_frame: *const InterruptStackFrame, ec: u64) callconv(.Interrupt) void {
+fn interruptEc(interrupt_stack_frame: *const InterruptStackFrame, ec: u64) callconv(.Interrupt) void {
     log.err("default interrupt: {any} {any}", .{ interrupt_stack_frame, ec });
 }
 
@@ -919,7 +919,7 @@ pub const CpuConfig = struct {
         );
 
         // RIP of the syscall jump destination
-        wrmsr(LSTAR, @intFromPtr(&syscall_handler_wrapper_wrapper));
+        wrmsr(LSTAR, @intFromPtr(&syscallHandlerWrapperWrapper));
 
         // bits that are 1 clear a bit from rflags when a syscall happens
         // setting interrupt_enable here disables interrupts on syscall
@@ -1207,16 +1207,16 @@ pub fn sysret(args: *SyscallRegs) noreturn {
     unreachable;
 }
 
-fn syscall_handler_wrapper_wrapper() callconv(.Naked) noreturn {
+fn syscallHandlerWrapperWrapper() callconv(.Naked) noreturn {
     const instr = syscall_enter ++
         \\
-        \\ call syscall_handler_wrapper
+        \\ call syscallHandlerWrapper
         \\
     ++ sysret_instr;
     asm volatile (instr ::: "memory");
 }
 
-export fn syscall_handler_wrapper(args: *SyscallRegs) callconv(.SysV) void {
+export fn syscallHandlerWrapper(args: *SyscallRegs) callconv(.SysV) void {
     main.syscall(args);
 }
 

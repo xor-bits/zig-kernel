@@ -15,7 +15,7 @@ pub export var rsdp_req: limine.RsdpRequest = .{};
 //
 
 pub fn init() !void {
-    if (arch.cpu_id() == 0)
+    if (arch.cpuId() == 0)
         log.info("init ACPI", .{});
 
     const rsdp_resp: *limine.RsdpResponse = rsdp_req.response orelse {
@@ -33,7 +33,7 @@ pub fn init() !void {
         return error.InvalidRsdpSignature;
     }
 
-    if (arch.cpu_id() == 0)
+    if (arch.cpuId() == 0)
         log.info("ACPI OEM: {s}", .{rsdp.oem_id});
 
     if (rsdp.revision == 0) {
@@ -45,7 +45,7 @@ pub fn init() !void {
 }
 
 fn acpiv1(rsdp: *const Rsdp) !void {
-    if (arch.cpu_id() == 0)
+    if (arch.cpuId() == 0)
         log.info("ACPI v1", .{});
 
     // FIXME: this is unaligned most of the time, but zig doesnt like that
@@ -61,7 +61,7 @@ fn acpiv1(rsdp: *const Rsdp) !void {
 }
 
 fn acpiv2(rsdp: *const Rsdp) !void {
-    if (arch.cpu_id() == 0)
+    if (arch.cpuId() == 0)
         log.info("ACPI v2", .{});
 
     const xsdp: *const Xsdp = @ptrCast(rsdp);
@@ -84,7 +84,7 @@ fn walkTables(comptime T: type, pointers: []align(1) const T) !void {
     var maybe_apic: ?*const SdtHeader = null;
     var maybe_hpet: ?*const SdtHeader = null;
 
-    if (arch.cpu_id() == 0)
+    if (arch.cpuId() == 0)
         log.info("SDT Headers:", .{});
     for (pointers) |sdt_ptr| {
         const sdt: *const SdtHeader = addr.Phys.fromInt(sdt_ptr).toHhdm().toPtr(*const SdtHeader);
@@ -93,7 +93,7 @@ fn walkTables(comptime T: type, pointers: []align(1) const T) !void {
             continue;
         }
 
-        if (arch.cpu_id() == 0)
+        if (arch.cpuId() == 0)
             log.info(" - {s}", .{sdt.signature});
 
         // FIXME: load APIC always before HPET, because HPET uses APIC

@@ -74,12 +74,12 @@ pub fn main() noreturn {
     };
 
     // boot up a few processors
-    arch.smp_init();
+    arch.smpInit();
 
     // set up arch specific things: GDT, TSS, IDT, syscalls, ...
-    const id = arch.next_cpu_id();
+    const id = arch.nextCpuId();
     log.info("initializing CPU-{}", .{id});
-    arch.init_cpu(id, null) catch |err| {
+    arch.initCpu(id, null) catch |err| {
         std.debug.panic("failed to initialize CPU-{}: {}", .{ id, err });
     };
 
@@ -114,7 +114,7 @@ pub fn main() noreturn {
     };
 
     log.info("entering user-space", .{});
-    proc_enter();
+    procEnter();
 }
 
 // the actual _smpstart is in arch/x86_64.zig
@@ -122,12 +122,12 @@ pub fn smpmain(smpinfo: *limine.SmpInfo) noreturn {
     const log = std.log.scoped(.main);
 
     // boot up a few processors
-    arch.smp_init();
+    arch.smpInit();
 
     // set up arch specific things: GDT, TSS, IDT, syscalls, ...
-    const id = arch.next_cpu_id();
+    const id = arch.nextCpuId();
     log.info("initializing CPU-{}", .{id});
-    arch.init_cpu(id, smpinfo) catch |err| {
+    arch.initCpu(id, smpinfo) catch |err| {
         std.debug.panic("failed to initialize CPU-{}: {}", .{ id, err });
     };
 
@@ -138,10 +138,10 @@ pub fn smpmain(smpinfo: *limine.SmpInfo) noreturn {
     };
 
     log.info("entering user-space", .{});
-    proc_enter();
+    procEnter();
 }
 
-fn proc_enter() noreturn {
+fn procEnter() noreturn {
     var trap: arch.SyscallRegs = undefined;
     proc.yield(&trap);
     arch.sysret(&trap);
@@ -161,7 +161,7 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
         return;
     };
 
-    const locals = arch.cpu_local();
+    const locals = arch.cpuLocal();
     const thread = locals.current_thread.?;
 
     if (conf.LOG_SYSCALLS)
@@ -211,7 +211,7 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
             trap.syscall_id = abi.sys.encode(0);
         },
         .debug => {
-            if (caps.get_capability(thread, @truncate(trap.arg0))) |obj| {
+            if (caps.getCapability(thread, @truncate(trap.arg0))) |obj| {
                 defer obj.lock.unlock();
                 trap.syscall_id = abi.sys.encode(@intFromEnum(obj.type));
             } else |err| {

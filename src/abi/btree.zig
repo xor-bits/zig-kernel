@@ -84,13 +84,13 @@ pub fn BTreeMap(comptime K: type, comptime V: type, comptime cfg: Config) type {
             }
         }
 
-        fn insert_arr(comptime T: type, arr: []T, len: usize, i: usize, val: T) void {
+        fn insertArr(comptime T: type, arr: []T, len: usize, i: usize, val: T) void {
             std.debug.assert(i <= len and len <= arr.len);
             arr[len] = val;
             std.mem.rotate(T, arr[0 .. len + 1][i..], 1);
         }
 
-        fn remove_arr(comptime T: type, arr: []T, len: usize, i: usize) T {
+        fn removeArr(comptime T: type, arr: []T, len: usize, i: usize) T {
             std.debug.assert(i < len and len <= arr.len);
             const val = arr[i];
             std.mem.copyForwards(T, arr[i .. len - 1], arr[i + 1 .. len]);
@@ -155,12 +155,12 @@ pub fn BTreeMap(comptime K: type, comptime V: type, comptime cfg: Config) type {
 
             // split full nodes pre-emptitively
             const root = getNode(self.root, self.depth) orelse unreachable;
-            if (root.used.* == root.max) try self.split_root(alloc);
+            if (root.used.* == root.max) try self.splitRoot(alloc);
 
-            return insert_recurse(alloc, key, val, self.root, self.depth);
+            return insertRecurse(alloc, key, val, self.root, self.depth);
         }
 
-        fn insert_recurse(
+        fn insertRecurse(
             alloc: std.mem.Allocator,
             key: K,
             val: V,
@@ -183,8 +183,8 @@ pub fn BTreeMap(comptime K: type, comptime V: type, comptime cfg: Config) type {
             // if its a leaf node: insert
             // if its a branch node: continue
             if (depth == 0) {
-                insert_arr(K, node.keys[0..], node.used.*, i, key);
-                insert_arr(V, node.vals[0..], node.used.*, i, val);
+                insertArr(K, node.keys[0..], node.used.*, i, key);
+                insertArr(V, node.vals[0..], node.used.*, i, val);
                 node.used.* += 1;
                 return null;
             } else {
@@ -194,16 +194,16 @@ pub fn BTreeMap(comptime K: type, comptime V: type, comptime cfg: Config) type {
                     if (key > node.keys[i]) i += 1;
                 }
 
-                return insert_recurse(alloc, key, val, node.ptrs[i], depth - 1);
+                return insertRecurse(alloc, key, val, node.ptrs[i], depth - 1);
             }
         }
 
         pub fn debug(self: *@This()) void {
             if (self.root == 0) return;
-            debug_recurse(self.root, self.depth);
+            debugRecurse(self.root, self.depth);
         }
 
-        fn debug_recurse(root: usize, depth: usize) void {
+        fn debugRecurse(root: usize, depth: usize) void {
             const node = getNode(root, depth) orelse return;
 
             if (depth == 0) {
@@ -218,13 +218,13 @@ pub fn BTreeMap(comptime K: type, comptime V: type, comptime cfg: Config) type {
 
             if (depth != 0) {
                 for (node.ptrs[0 .. node.used.* + 1]) |next| {
-                    debug_recurse(next, depth - 1);
+                    debugRecurse(next, depth - 1);
                 }
             }
         }
 
         /// insert `val` at `key`, returning it if it already exists
-        pub fn try_insert(self: *@This(), key: K, val: V) ?V {
+        pub fn tryInsert(self: *@This(), key: K, val: V) ?V {
             _ = .{ self, key, val };
         }
 
@@ -233,10 +233,10 @@ pub fn BTreeMap(comptime K: type, comptime V: type, comptime cfg: Config) type {
         }
 
         pub fn get(self: *const @This(), key: K) ?*V {
-            return get_recurse(key, self.root, self.depth);
+            return getRecurse(key, self.root, self.depth);
         }
 
-        fn get_recurse(key: K, root: usize, depth: usize) ?*V {
+        fn getRecurse(key: K, root: usize, depth: usize) ?*V {
             const node = getNode(root, depth) orelse return null;
 
             const i = switch (indexOf(key, node.keys[0..node.used.*])) {
@@ -247,7 +247,7 @@ pub fn BTreeMap(comptime K: type, comptime V: type, comptime cfg: Config) type {
             if (depth == 0) {
                 return null;
             } else {
-                return get_recurse(key, node.ptrs[i], depth - 1);
+                return getRecurse(key, node.ptrs[i], depth - 1);
             }
         }
 
@@ -283,17 +283,17 @@ pub fn BTreeMap(comptime K: type, comptime V: type, comptime cfg: Config) type {
             if (depth != 1) // move the children also if its a branch node
                 std.mem.copyForwards(usize, new_node.ptrs[0..], full_node.ptrs[full_node.min + 2 ..]);
             // move the first one from the right half to the parent
-            insert_arr(K, parent.keys[0..], parent.used, n, full_node.keys[full_node.min]);
-            insert_arr(V, parent.vals[0..], parent.used, n, full_node.vals[full_node.min]);
+            insertArr(K, parent.keys[0..], parent.used, n, full_node.keys[full_node.min]);
+            insertArr(V, parent.vals[0..], parent.used, n, full_node.vals[full_node.min]);
             // add the new child
-            insert_arr(V, parent.ptrs[0..], parent.used + 1, n + 1, new_node.ptr);
+            insertArr(V, parent.ptrs[0..], parent.used + 1, n + 1, new_node.ptr);
 
             full_node.used.* = full_node.min;
             new_node.used.* = full_node.max - full_node.min - 1;
             parent.used += 1;
         }
 
-        fn split_root(self: *@This(), alloc: std.mem.Allocator) Error!void {
+        fn splitRoot(self: *@This(), alloc: std.mem.Allocator) Error!void {
             const new_root = try alloc.create(BranchNode);
             new_root.* = .{};
             new_root.ptrs[0] = self.root;

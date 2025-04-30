@@ -8,7 +8,7 @@ const sys = @import("sys.zig");
 
 pub var root_ipc: caps.Sender = .{ .cap = 0 };
 
-pub fn install_rt() void {
+pub fn installRuntime() void {
     @export(&_start, .{
         .name = "_start",
         .linkage = .strong,

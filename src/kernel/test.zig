@@ -11,7 +11,7 @@ const log = std.log.scoped(.@"test");
 
 //
 
-pub fn run_tests() !void {
+pub fn runTests() !void {
     // help the LSP
     const test_fns: []const std.builtin.TestFn = builtin.test_functions;
 

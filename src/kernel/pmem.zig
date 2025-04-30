@@ -146,7 +146,7 @@ var used = std.atomic.Value(u32).init(0);
 var usable = std.atomic.Value(u32).init(0);
 
 pub fn allocChunk(size: abi.ChunkSize) ?addr.Phys {
-    if (debug_assert_initialized()) return null;
+    if (debugAssertInitialized()) return null;
 
     const bitmap: []std.atomic.Value(u64) = bitmaps[@intFromEnum(size)].bitmap;
     for (bitmap, 0..) |*bucket, i| {
@@ -197,7 +197,7 @@ pub fn deallocChunk(ptr: addr.Phys, size: abi.ChunkSize) void {
     // illustration: (0=allocated, left side is the buddy and right side is the current chunk)
     // 00 -> 01 (parent: 0->0), 10 -> 00 (parent: 0->1)
 
-    if (debug_assert_initialized()) return;
+    if (debugAssertInitialized()) return;
 
     const chunk_id = ptr.raw / size.sizeBytes();
     const bucket_id = chunk_id / 64;
@@ -418,7 +418,7 @@ fn _remap(_: *anyopaque, buf: []u8, _: std.mem.Alignment, new_len: usize, _: usi
 
 const IS_DEBUG = builtin.mode == .Debug or builtin.mode == .ReleaseSafe;
 
-fn debug_assert_initialized() bool {
+fn debugAssertInitialized() bool {
     if (IS_DEBUG and !initialized) {
         log.err("physical memory manager not initialized", .{});
         return true;

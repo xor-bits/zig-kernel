@@ -38,7 +38,7 @@ const APIC_TIMER_DIV: u32 = 0b0010; // div by 8
 
 /// parse Multiple APIC Description Table
 pub fn init(madt: *const Madt) !void {
-    log.info("init APIC-{}", .{arch.cpu_id()});
+    log.info("init APIC-{}", .{arch.cpuId()});
 
     if (builtin.target.cpu.arch == .x86_64) {
         disablePic();
@@ -60,7 +60,7 @@ pub fn init(madt: *const Madt) !void {
             1 => {
                 const entry: *const IoApic = @ptrCast(entry_base);
                 // _ = entry;
-                if (arch.cpu_id() == 0)
+                if (arch.cpuId() == 0)
                     log.info("found I/O APIC addr: 0x{x}", .{entry.io_apic_addr});
                 // TODO: this is going to be used later for I/O APIC
             },
@@ -95,7 +95,7 @@ pub fn init(madt: *const Madt) !void {
         }
     }
 
-    if (arch.cpu_id() == 0)
+    if (arch.cpuId() == 0)
         log.info("found Local APIC addr: 0x{x}", .{lapic_addr});
     const lapic: *volatile LocalApicRegs = addr.Phys.fromInt(lapic_addr).toHhdm().toPtr(*volatile LocalApicRegs);
     // const lapic_id = lapic.lapic_id.val >> 24;
@@ -126,7 +126,7 @@ pub fn enable() void {
     );
 
     // enable timer interrupts
-    const period = measure_apic_timer_speed(lapic) * 500;
+    const period = measureApicTimerSpeed(lapic) * 500;
     lapic.divide_configuration.val = APIC_TIMER_DIV;
     lapic.lvt_timer.val = IRQ_TIMER | APIC_TIMER_MODE_PERIODIC;
     lapic.initial_count.val = period;
@@ -134,15 +134,15 @@ pub fn enable() void {
     lapic.lvt_error.val = 0;
     lapic.divide_configuration.val = APIC_TIMER_DIV; // buggy hardware fix
 
-    if (arch.cpu_id() == 0)
+    if (arch.cpuId() == 0)
         log.info("APIC initialized", .{});
 }
 
 /// returns the apic period for 1ms
-fn measure_apic_timer_speed(lapic: *volatile LocalApicRegs) u32 {
+fn measureApicTimerSpeed(lapic: *volatile LocalApicRegs) u32 {
     lapic.divide_configuration.val = APIC_TIMER_DIV;
 
-    hpet.hpet_spin_wait(1_000, struct {
+    hpet.hpetSpinWait(1_000, struct {
         lapic: *volatile LocalApicRegs,
         pub fn run(s: *const @This()) void {
             s.lapic.initial_count.val = 0xFFFF_FFFF;
@@ -152,7 +152,7 @@ fn measure_apic_timer_speed(lapic: *volatile LocalApicRegs) u32 {
     lapic.lvt_timer.val = APIC_DISABLE;
     const count = 0xFFFF_FFFF - lapic.current_count.val;
 
-    if (arch.cpu_id() == 0)
+    if (arch.cpuId() == 0)
         log.info("APIC timer speed: 1ms = {d} ticks", .{count});
 
     return count;
@@ -398,7 +398,7 @@ fn disablePic() void {
 
     log.info("obliterating PIC because PIC sucks", .{});
     const outb = arch.x86_64.outb;
-    const io_wait = arch.x86_64.io_wait;
+    const io_wait = arch.x86_64.ioWait;
 
     // the PIC is shit (not APIC, APIC is great)
     // AND its enabled by default usually

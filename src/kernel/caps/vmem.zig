@@ -27,7 +27,7 @@ var kernel_table: Vmem = undefined;
 
 pub fn growCapArray() u32 {
     const current_len = caps.capability_array_len.raw;
-    const new_page_addr = addr.Virt.fromPtr(&caps.capability_array_unchecked().ptr[current_len]);
+    const new_page_addr = addr.Virt.fromPtr(&caps.capabilityArrayUnchecked().ptr[current_len]);
 
     const last_byte_of_prev = new_page_addr.raw - 1;
     const last_byte_of_next = new_page_addr.raw + @sizeOf(caps.Object) - 1;
@@ -40,7 +40,7 @@ pub fn growCapArray() u32 {
         caps.array_grow_lock.lock();
         defer caps.array_grow_lock.unlock();
 
-        kernel_table.mapFrame(alloc_page(), last_page, .{
+        kernel_table.mapFrame(allocPage(), last_page, .{
             .readable = true,
             .writable = true,
             .user_accessible = false,
@@ -55,12 +55,12 @@ pub fn growCapArray() u32 {
     return @truncate(next);
 }
 
-fn alloc_page() addr.Phys {
+fn allocPage() addr.Phys {
     return pmem.allocChunk(.@"4KiB") orelse std.debug.panic("OOM", .{});
 }
 
-fn alloc_table() addr.Phys {
-    const table = alloc_page();
+fn allocTable() addr.Phys {
+    const table = allocPage();
     const entries = table.toHhdm().toPtr([*]volatile Entry)[0..512];
     @memset(entries, .{});
     return table;
@@ -82,7 +82,7 @@ fn nextLevelFromEntry(comptime create: bool, entry: *volatile Entry) Error!addr.
             .present = 1,
             .writable = 1,
             .user_accessible = 1,
-            .page_index = alloc_table().toParts().page,
+            .page_index = allocTable().toParts().page,
         };
     } else if (entry.present == 0) {
         return error.EntryNotPresent;
@@ -128,7 +128,7 @@ pub const Vmem = struct {
         switch (call_id) {
             .map => {
                 // lock the frame temporarily, mark it as mapped and unmark it if an error occurs
-                const frame_obj = try caps.get_capability(thread, @truncate(trap.arg2));
+                const frame_obj = try caps.getCapability(thread, @truncate(trap.arg2));
                 if (frame_obj.next != 0) {
                     frame_obj.lock.unlock();
                     return Error.AlreadyMapped;
@@ -188,7 +188,7 @@ pub const Vmem = struct {
             },
             .unmap => {
                 // lock the frame temporarily, check that it is mapped here and unmark it
-                const frame_obj = try caps.get_capability(thread, @truncate(trap.arg2));
+                const frame_obj = try caps.getCapability(thread, @truncate(trap.arg2));
                 if (frame_obj.next != @as(u32, @truncate(trap.arg0))) {
                     frame_obj.lock.unlock();
                     return Error.NotMapped;
@@ -269,7 +269,7 @@ pub const Vmem = struct {
                 log.err("canMap() returned true but doMap() failed: {}", .{err});
                 unreachable;
             };
-            arch.flush_tlb_addr(vaddr.raw);
+            arch.flushTlbAddr(vaddr.raw);
             paddr.raw += page_size;
             vaddr.raw += page_size;
         }
@@ -304,7 +304,7 @@ pub const Vmem = struct {
                 log.err("canUnmap() returned true but doUnmap() failed: {}", .{err});
                 unreachable;
             };
-            arch.flush_tlb_addr(vaddr.raw); // FIXME: this is not enough with SMP
+            arch.flushTlbAddr(vaddr.raw); // FIXME: this is not enough with SMP
             vaddr.raw += page_size;
         }
     }

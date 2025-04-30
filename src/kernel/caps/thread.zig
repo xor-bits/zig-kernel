@@ -94,7 +94,7 @@ pub const Thread = struct {
                 if ((self.extra_types & (@as(u128, 1) << @as(u7, @truncate(idx)))) == 0) continue;
 
                 const cap_id: u32 = @truncate(self.extra_regs[idx]);
-                _ = try caps.get_capability(self, cap_id);
+                _ = try caps.getCapability(self, cap_id);
 
                 locked_count += 1;
             }
@@ -179,7 +179,7 @@ pub const Thread = struct {
                 if (target_thread.ptr().status != .stopped) return Error.NotStopped;
 
                 // TODO: require stopping the thread or something
-                const vmem_obj = try caps.get_capability(thread, @truncate(trap.arg2));
+                const vmem_obj = try caps.getCapability(thread, @truncate(trap.arg2));
                 defer vmem_obj.lock.unlock();
                 const vmem = try vmem_obj.as(caps.Vmem);
 
@@ -189,7 +189,7 @@ pub const Thread = struct {
                 target_thread.ptr().priority = @truncate(trap.arg2);
             },
             .transfer_cap => {
-                const cap = try caps.get_capability(thread, @truncate(trap.arg2));
+                const cap = try caps.getCapability(thread, @truncate(trap.arg2));
                 defer cap.lock.unlock();
 
                 if (Thread.vmemOf(target_thread.ptr())) |vmem| {

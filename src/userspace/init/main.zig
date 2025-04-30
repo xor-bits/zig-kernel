@@ -14,5 +14,5 @@ pub fn main() !void {
 }
 
 comptime {
-    abi.rt.install_rt();
+    abi.rt.installRuntime();
 }

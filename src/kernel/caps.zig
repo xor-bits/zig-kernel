@@ -33,20 +33,20 @@ pub fn init() !void {
     try caps_vmem.init();
 
     // push the null capability
-    _ = push_capability(.{});
+    _ = pushCapability(.{});
 
-    debug_type(Object);
-    debug_type(Memory);
-    debug_type(Thread);
-    debug_type(Vmem);
-    debug_type(Receiver);
-    debug_type(Sender);
+    debugType(Object);
+    debugType(Memory);
+    debugType(Thread);
+    debugType(Vmem);
+    debugType(Receiver);
+    debugType(Sender);
 }
 
 /// create a capability out of an object
-pub fn push_capability(obj: Object) u32 {
+pub fn pushCapability(obj: Object) u32 {
     const cap_id = allocate();
-    const cap = &capability_array_unchecked()[cap_id];
+    const cap = &capabilityArrayUnchecked()[cap_id];
 
     cap.lock.lock();
     cap.* = obj;
@@ -57,11 +57,11 @@ pub fn push_capability(obj: Object) u32 {
 
 /// returns an object from a capability,
 /// the returned object is locked
-pub fn get_capability(thread: *Thread, cap_id: u32) Error!*Object {
+pub fn getCapability(thread: *Thread, cap_id: u32) Error!*Object {
     if (cap_id == 0)
         return Error.InvalidCapability;
 
-    const caps = capability_array();
+    const caps = capabilityArray();
     if (cap_id >= caps.len)
         return Error.InvalidCapability;
 
@@ -87,12 +87,12 @@ pub fn get_capability(thread: *Thread, cap_id: u32) Error!*Object {
 
 /// gets a capability when its already locked and checked to be owned
 pub fn getCapabilityLocked(cap_id: u32) *Object {
-    return &capability_array_unchecked()[cap_id];
+    return &capabilityArrayUnchecked()[cap_id];
 }
 
 /// a single bidirectional call
 pub fn call(thread: *Thread, cap_id: u32, trap: *arch.SyscallRegs) Error!void {
-    const obj = try get_capability(thread, cap_id);
+    const obj = try getCapability(thread, cap_id);
     defer obj.lock.unlock();
 
     return obj.call(thread, trap);
@@ -100,7 +100,7 @@ pub fn call(thread: *Thread, cap_id: u32, trap: *arch.SyscallRegs) Error!void {
 
 /// Receiver specific unidirectional call
 pub fn recv(thread: *Thread, cap_id: u32, trap: *arch.SyscallRegs) Error!void {
-    const obj = try get_capability(thread, cap_id);
+    const obj = try getCapability(thread, cap_id);
     defer obj.lock.unlock();
 
     return obj.recv(thread, trap);
@@ -108,14 +108,14 @@ pub fn recv(thread: *Thread, cap_id: u32, trap: *arch.SyscallRegs) Error!void {
 
 /// Receiver specific unidirectional call
 pub fn reply(thread: *Thread, cap_id: u32, trap: *arch.SyscallRegs) Error!void {
-    const obj = try get_capability(thread, cap_id);
+    const obj = try getCapability(thread, cap_id);
     defer obj.lock.unlock();
 
     return obj.reply(thread, trap);
 }
 
 pub fn replyRecv(thread: *Thread, cap_id: u32, trap: *arch.SyscallRegs) Error!void {
-    const obj = try get_capability(thread, cap_id);
+    const obj = try getCapability(thread, cap_id);
     defer obj.lock.unlock();
 
     return obj.replyRecv(thread, trap);
@@ -131,12 +131,12 @@ pub fn capAssertNotNull(cap: u32, trap: *arch.SyscallRegs) bool {
 
 //
 
-pub fn capability_array() []Object {
+pub fn capabilityArray() []Object {
     const len = @min(capability_array_len.load(.acquire), 2 << 32);
     return @as([*]Object, @ptrFromInt(CAPABILITY_ARRAY_POINTER))[0..len];
 }
 
-pub fn capability_array_unchecked() []Object {
+pub fn capabilityArrayUnchecked() []Object {
     return @as([*]Object, @ptrFromInt(CAPABILITY_ARRAY_POINTER))[0 .. 2 << 32];
 }
 
@@ -147,7 +147,7 @@ pub fn allocate() u32 {
 
         if (free_list != 0) {
             const head = free_list;
-            const new_head = capability_array_unchecked()[free_list];
+            const new_head = capabilityArrayUnchecked()[free_list];
             free_list = new_head.next;
             return head;
         }
@@ -161,7 +161,7 @@ pub fn deallocate(cap: u32) void {
     defer free_list_lock.unlock();
 
     if (free_list != 0) {
-        const new_head = &capability_array_unchecked()[cap];
+        const new_head = &capabilityArrayUnchecked()[cap];
         new_head.* = .{ .next = free_list };
     }
 
@@ -313,6 +313,6 @@ pub const Object = struct {
     }
 };
 
-fn debug_type(comptime T: type) void {
+fn debugType(comptime T: type) void {
     std.log.info("{s}: size={} align={}", .{ @typeName(T), @sizeOf(T), @alignOf(T) });
 }

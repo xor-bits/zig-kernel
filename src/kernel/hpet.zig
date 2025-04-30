@@ -10,18 +10,18 @@ const log = std.log.scoped(.hpet);
 //
 
 pub fn init(hpet: *const Hpet) !void {
-    if (arch.cpu_id() == 0)
+    if (arch.cpuId() == 0)
         log.info("found HPET addr: 0x{x}", .{hpet.address});
 
     hpet_regs = addr.Phys.fromInt(hpet.address).toHhdm().toPtr(*volatile HpetRegs);
     const regs = hpet_regs.?;
 
     regs.config.enable_config = 1;
-    if (arch.cpu_id() == 0)
+    if (arch.cpuId() == 0)
         log.info("HPET speed: 1ms = {d} ticks", .{1_000_000_000_000 / @as(u64, regs.caps_and_id.counter_period_femtoseconds)});
 }
 
-pub fn hpet_spin_wait(micros: u32, just_before: anytype) void {
+pub fn hpetSpinWait(micros: u32, just_before: anytype) void {
     const regs = hpet_regs.?;
 
     const ticks = (@as(u64, micros) * 1_000_000_000) / regs.caps_and_id.counter_period_femtoseconds;

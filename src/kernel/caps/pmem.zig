@@ -40,7 +40,7 @@ pub const Memory = struct {
                 };
 
                 const obj = try caps.Object.alloc(obj_ty, thread, dyn_size);
-                const cap = caps.push_capability(obj);
+                const cap = caps.pushCapability(obj);
                 trap.arg0 = cap;
             },
         }

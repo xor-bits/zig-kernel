@@ -115,7 +115,7 @@ fn loadElfHandler(ctx: *System, sender: u32, req: struct { usize, caps.Frame, us
     ctx.self_vmem.map(frame, ELF_TMP, .{ .writable = true }, .{}) catch
         unreachable;
 
-    load_elf(
+    loadElf(
         ctx,
         @as([*]const u8, @ptrFromInt(ELF_TMP))[offset..][0..length],
         addr_spc,
@@ -157,7 +157,7 @@ fn newThreadHandler(ctx: *System, sender: u32, req: struct { usize }) struct { E
 // the bootstrap ELF loader was just a mini loader for vm
 //
 // this should support relocation, dynamic linking, lazy loading,
-fn load_elf(system: *System, elf_bytes: []const u8, as: *AddressSpace) !void {
+fn loadElf(system: *System, elf_bytes: []const u8, as: *AddressSpace) !void {
     var elf = std.io.fixedBufferStream(elf_bytes);
 
     const header = try std.elf.Header.read(&elf);
@@ -264,5 +264,5 @@ fn newThread(system: *System, as: *AddressSpace) !caps.Thread {
 }
 
 comptime {
-    abi.rt.install_rt();
+    abi.rt.installRuntime();
 }
