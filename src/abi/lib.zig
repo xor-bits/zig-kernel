@@ -182,6 +182,36 @@ pub const RootRequest = enum(u8) {
     vfs,
 };
 
+pub const RootProtocol = Protocol(struct {
+    /// request a physical memory allocator capability
+    /// only system processes are allowed request this
+    memory: fn () struct { sys.Error!void, caps.Memory },
+
+    /// request self vmem capability
+    /// only vm can use this
+    selfVmem: fn () struct { sys.Error!void, caps.Vmem },
+
+    /// request a sender to the vm server
+    /// only pm can use this
+    vm: fn () struct { sys.Error!void, caps.Sender },
+
+    /// provide a sender to the vm server
+    /// only vm can use this
+    vmReady: fn (vm_sender: caps.Sender) struct { sys.Error!void },
+
+    /// request a sender to the pm server
+    pm: fn () struct { sys.Error!void, caps.Sender },
+
+    /// install a new pm sender that all new .pm requests get
+    pmReady: fn (pm_sender: caps.Sender) struct { sys.Error!void },
+
+    // /// install a new vfs sender that all new .vfs requests get
+    // vfs_install,
+
+    // /// request a sender to the vfs server
+    // vfs,
+});
+
 pub const VmProtocol = Protocol(struct {
     /// create a new empty address space
     /// returns a handle that can be used to create threads
@@ -388,10 +418,10 @@ pub fn Protocol(comptime spec: type) type {
                     }
                 }
 
-                pub fn reply(self: @This(), comptime id: MessageVariant, output: VariantOf(id).output_ty) sys.Error!void {
+                pub fn reply(rx: caps.Receiver, comptime id: MessageVariant, output: VariantOf(id).output_ty) sys.Error!void {
                     var msg: sys.Message = undefined;
                     variants_const[@intFromEnum(id)].output_converter.serialize(&msg, output);
-                    try self.rx.reply();
+                    try rx.reply(&msg);
                 }
 
                 pub fn run(self: @This()) !void {

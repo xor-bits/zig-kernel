@@ -16,13 +16,11 @@ const Error = abi.sys.Error;
 pub fn main() !void {
     log.info("hello from pm", .{});
 
-    const root = abi.rt.root_ipc;
+    const root = abi.RootProtocol.Client().init(abi.rt.root_ipc);
 
     log.debug("requesting memory", .{});
-    var msg: abi.sys.Message = .{ .arg0 = @intFromEnum(abi.RootRequest.memory) };
-    try root.call(&msg);
-    try abi.sys.decodeVoid(msg.arg0);
-    const memory = caps.Memory{ .cap = @truncate(abi.sys.getExtra(0)) };
+    const res0: Error!void, const memory: caps.Memory = try root.call(.memory, void{});
+    try res0;
 
     // endpoint for pm server <-> unix app communication
     log.debug("allocating pm endpoint", .{});
@@ -31,10 +29,8 @@ pub fn main() !void {
 
     // inform the root that pm is ready
     log.debug("pm ready", .{});
-    msg = .{ .extra = 1, .arg0 = @intFromEnum(abi.RootRequest.pm_ready) };
-    abi.sys.setExtra(0, pm_send.cap, true);
-    try root.call(&msg);
-    _ = try abi.sys.decode(msg.arg0);
+    const res2: struct { Error!void } = try root.call(.pmReady, .{pm_send});
+    try res2.@"0";
 
     // const server = abi.PmProtocol.Server(.{}).init(pm_recv);
     // try server.run();

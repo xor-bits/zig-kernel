@@ -18,18 +18,15 @@ const ELF_TMP: usize = 0x2000_0000_0000;
 pub fn main() !void {
     log.info("hello from vm", .{});
 
-    const root = abi.rt.root_ipc;
+    const root = abi.RootProtocol.Client().init(abi.rt.root_ipc);
 
     log.debug("requesting memory", .{});
-    var msg: abi.sys.Message = .{ .arg0 = @intFromEnum(abi.RootRequest.memory) };
-    try root.call(&msg);
-    try abi.sys.decodeVoid(msg.arg0);
-    const memory = caps.Memory{ .cap = @truncate(abi.sys.getExtra(0)) };
+    const res0: Error!void, const memory: caps.Memory = try root.call(.memory, void{});
+    try res0;
 
     log.debug("requesting self vmem", .{});
-    msg = .{ .arg0 = @intFromEnum(abi.RootRequest.self_vmem) };
-    try root.call(&msg);
-    const self_vmem = caps.Vmem{ .cap = @truncate(abi.sys.getExtra(0)) };
+    const res1: Error!void, const self_vmem: caps.Vmem = try root.call(.selfVmem, void{});
+    try res1;
 
     // endpoint for pm server <-> vm server communication
     log.debug("allocating vm endpoint", .{});
@@ -37,10 +34,8 @@ pub fn main() !void {
     const vm_send = try vm_recv.subscribe();
 
     // inform the root that vm is ready
-    msg = .{ .extra = 1, .arg0 = @intFromEnum(abi.RootRequest.vm_ready) };
-    abi.sys.setExtra(0, vm_send.cap, true);
-    try root.call(&msg);
-    _ = try abi.sys.decode(msg.arg0);
+    const res2: struct { Error!void } = try root.call(.vmReady, .{vm_send});
+    try res2.@"0";
 
     // TODO: install page fault handlers
 
