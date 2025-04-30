@@ -11,7 +11,7 @@ pub const ROOT_BOOT_INFO: Frame = .{ .cap = 4 };
 //
 
 /// capability that allows kernel object allocation
-pub const Memory = struct {
+pub const Memory = extern struct {
     cap: u32 = 0,
 
     pub const Type: abi.ObjectType = .memory;
@@ -28,7 +28,7 @@ pub const Memory = struct {
 };
 
 /// capability to manage a single thread control block (TCB)
-pub const Thread = struct {
+pub const Thread = extern struct {
     cap: u32 = 0,
 
     pub const Type: abi.ObjectType = .thread;
@@ -63,7 +63,7 @@ pub const Thread = struct {
 };
 
 /// capability to the virtual memory structure
-pub const Vmem = struct {
+pub const Vmem = extern struct {
     cap: u32 = 0,
 
     pub const Type: abi.ObjectType = .vmem;
@@ -80,7 +80,7 @@ pub const Vmem = struct {
 };
 
 /// capability to a physical memory region (sized `ChunkSize`)
-pub const Frame = struct {
+pub const Frame = extern struct {
     cap: u32 = 0,
 
     pub const Type: abi.ObjectType = .frame;
@@ -88,7 +88,7 @@ pub const Frame = struct {
 
 /// capability to **the** receiver end of an endpoint,
 /// there can only be a single receiver
-pub const Receiver = struct {
+pub const Receiver = extern struct {
     cap: u32,
 
     pub const Type: abi.ObjectType = .receiver;
@@ -113,7 +113,7 @@ pub const Receiver = struct {
 
 /// capability to **a** sender end of an endpoint,
 /// there can be multiple senders
-pub const Sender = struct {
+pub const Sender = extern struct {
     cap: u32 = 0,
 
     pub const Type: abi.ObjectType = .sender;

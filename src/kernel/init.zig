@@ -14,6 +14,7 @@ const Error = abi.sys.Error;
 
 //
 
+export var fb_request: limine.FramebufferRequest = .{};
 // pub export var memory: limine.MemoryMapRequest = .{};
 
 /// load and exec the root process
@@ -23,8 +24,6 @@ pub fn exec(a: args.Args) !void {
     (arch.Cr3{
         .pml4_phys_base = vmem.paddr.toParts().page,
     }).write();
-
-    const boot_info = try mapRoot(vmem.ptr(), a);
 
     const init_thread = try caps.Ref(caps.Thread).alloc(null);
     init_thread.ptr().* = .{
@@ -36,6 +35,8 @@ pub fn exec(a: args.Args) !void {
 
     const init_memory = try caps.Ref(caps.Memory).alloc(null);
 
+    const boot_info = try caps.Ref(caps.Frame).alloc(abi.ChunkSize.of(@sizeOf(abi.BootInfo)));
+
     var id: u32 = undefined;
     id = caps.pushCapability(vmem.object(init_thread.ptr()));
     std.debug.assert(id == abi.caps.ROOT_SELF_VMEM.cap);
@@ -46,18 +47,24 @@ pub fn exec(a: args.Args) !void {
     id = caps.pushCapability(boot_info.object(init_thread.ptr()));
     std.debug.assert(id == abi.caps.ROOT_BOOT_INFO.cap);
 
+    try mapRoot(init_thread.ptr(), vmem.ptr(), boot_info.ptr(), a);
+
     try proc.start(init_thread);
     proc.init();
 }
 
-fn mapRoot(vmem: *caps.Vmem, a: args.Args) !caps.Ref(caps.Frame) {
+const Result = struct {
+    boot_info: caps.Ref(caps.Frame),
+    framebuffer: ?caps.Ref(caps.Frame),
+};
+
+fn mapRoot(thread: *caps.Thread, vmem: *caps.Vmem, boot_info: *caps.Frame, a: args.Args) !void {
     const data_len = a.root_data.len + a.root_path.len + a.initfs_data.len + a.initfs_path.len;
 
     const low = addr.Virt.fromInt(abi.ROOT_EXE);
     const high = addr.Virt.fromInt(abi.ROOT_EXE + data_len);
 
-    const boot_info = try caps.Ref(caps.Frame).alloc(abi.ChunkSize.of(@sizeOf(abi.BootInfo)));
-    const boot_info_ptr: *volatile abi.BootInfo = @ptrCast(boot_info.ptr());
+    const boot_info_ptr: *volatile abi.BootInfo = @ptrCast(boot_info);
 
     boot_info_ptr.* = .{
         .root_data = @ptrFromInt(abi.ROOT_EXE),
@@ -69,6 +76,17 @@ fn mapRoot(vmem: *caps.Vmem, a: args.Args) !caps.Ref(caps.Frame) {
         .initfs_path = @ptrFromInt(abi.ROOT_EXE + a.root_data.len + a.root_path.len + a.initfs_data.len),
         .initfs_path_len = a.initfs_path.len,
     };
+
+    if (fb_request.response) |resp| {
+        if (resp.framebuffer_count != 0) {
+            const fb = resp.framebuffers()[0];
+            const fb_paddr = addr.Virt.fromPtr(fb.address).hhdmToPhys();
+            const framebuffer: caps.Ref(caps.Frame) = .{ .paddr = fb_paddr };
+
+            const id = caps.pushCapability(framebuffer.object(thread));
+            boot_info_ptr.framebuffer = .{ .cap = id };
+        }
+    }
 
     log.info("root virtual memory size: 0x{x}", .{data_len});
     log.info("mapping root   [ 0x{x:0>16}..0x{x:0>16} ]", .{
@@ -126,5 +144,4 @@ fn mapRoot(vmem: *caps.Vmem, a: args.Args) !caps.Ref(caps.Frame) {
     );
 
     log.info("root mapped and copied", .{});
-    return boot_info;
 }

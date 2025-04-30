@@ -120,6 +120,7 @@ pub const BootInfo = extern struct {
     initfs_data_len: usize,
     initfs_path: [*]u8,
     initfs_path_len: usize,
+    framebuffer: caps.Frame = .{},
 
     pub fn rootData(self: @This()) []u8 {
         return self.root_data[0..self.root_data_len];

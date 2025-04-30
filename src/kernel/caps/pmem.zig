@@ -66,9 +66,13 @@ pub const Frame = struct {
         const dyn_size = _dyn_size orelse return Error.InvalidArgument;
         // log.info("frame alloc {}", .{dyn_size});
         const chunk: addr.Phys = pmem.allocChunk(dyn_size) orelse return Error.OutOfMemory;
+        return new(chunk, dyn_size);
+    }
+
+    pub fn new(paddr: addr.Phys, size: abi.ChunkSize) addr.Phys {
         return addr.Phys.fromParts(.{
-            .offset = @intFromEnum(dyn_size),
-            .page = chunk.toParts().page,
+            .offset = @intFromEnum(size),
+            .page = paddr.toParts().page,
         });
     }
 
