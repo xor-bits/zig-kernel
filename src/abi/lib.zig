@@ -207,11 +207,11 @@ pub const RootProtocol = Protocol(struct {
     /// install a new pm sender that all new .pm requests get
     pmReady: fn (pm_sender: caps.Sender) struct { sys.Error!void },
 
-    // /// install a new vfs sender that all new .vfs requests get
-    // vfs_install,
+    /// request a sender to the vfs server
+    vfs: fn () struct { sys.Error!void, caps.Sender },
 
-    // /// request a sender to the vfs server
-    // vfs,
+    /// install a new vfs sender that all new .vfs requests get
+    vfsReady: fn (vfs_sender: caps.Sender) struct { sys.Error!void },
 });
 
 pub const VmProtocol = Protocol(struct {

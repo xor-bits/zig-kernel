@@ -47,6 +47,8 @@ pub fn main() !noreturn {
         .recv = recv,
         .vm_bin = try binBytes("/sbin/vm"),
         .pm_bin = try binBytes("/sbin/pm"),
+        .vfs_bin = try binBytes("/sbin/vfs"),
+        .init_bin = try binBytes("/sbin/init"),
     };
 
     // FIXME: figure out a way to reclaim capabilities from crashed processes
@@ -106,6 +108,8 @@ const Proto = abi.RootProtocol.Server(.{
     .vmReady = vmReadyHandler,
     .pm = pmHandler,
     .pmReady = pmReadyHandler,
+    .vfs = vfsHandler,
+    .vfsReady = vfsReadyHandler,
 });
 
 const System = struct {
@@ -122,10 +126,20 @@ const System = struct {
     pm_bin: []const u8,
     pm_sender: caps.Sender = .{},
     pm_endpoint: u32 = 0,
+
+    vfs: caps.Thread = .{},
+    vfs_bin: []const u8,
+    vfs_sender: caps.Sender = .{},
+    vfs_endpoint: u32 = 0,
+
+    init: caps.Thread = .{},
+    init_bin: []const u8,
+    init_sender: caps.Sender = .{},
+    init_endpoint: u32 = 0,
 };
 
 fn memoryHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.Memory } {
-    if (ctx.vm_endpoint != sender and ctx.pm_endpoint != sender) {
+    if (ctx.vm_endpoint != sender and ctx.pm_endpoint != sender and ctx.vfs_endpoint != sender) {
         return .{ Error.PermissionDenied, .{} };
     }
 
@@ -151,7 +165,7 @@ fn selfVmemHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps
 
 fn vmHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.Sender } {
     _ = .{ ctx, sender };
-    @panic("todo");
+    return .{ Error.Unimplemented, .{} };
 }
 
 fn vmReadyHandler(ctx: *System, sender: u32, req: struct { caps.Sender }) struct { Error!void } {
@@ -169,10 +183,22 @@ fn vmReadyHandler(ctx: *System, sender: u32, req: struct { caps.Sender }) struct
     };
 
     log.info("vm ready, exec pm", .{});
-    execPm(ctx) catch |err| {
+    var endpoint: caps.Sender = undefined;
+    endpoint = execWithVm(ctx, ctx.pm_bin) catch |err| {
         log.err("failed to exec pm: {}", .{err});
         return .{void{}};
     };
+    ctx.pm_endpoint = endpoint.cap;
+    endpoint = execWithVm(ctx, ctx.vfs_bin) catch |err| {
+        log.err("failed to exec vfs: {}", .{err});
+        return .{void{}};
+    };
+    ctx.vfs_endpoint = endpoint.cap;
+    endpoint = execWithVm(ctx, ctx.init_bin) catch |err| {
+        log.err("failed to exec init: {}", .{err});
+        return .{void{}};
+    };
+    ctx.init_endpoint = endpoint.cap;
 
     return .{void{}};
 }
@@ -193,58 +219,68 @@ fn pmReadyHandler(ctx: *System, sender: u32, req: struct { caps.Sender }) struct
     return .{void{}};
 }
 
-fn execPm(ctx: *System) !void {
-    // send the pm server elf file to vm server using shared memory IPC
+fn vfsHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.Sender } {
+    _ = .{ ctx, sender };
+    return .{ Error.Unimplemented, .{} };
+}
+
+fn vfsReadyHandler(ctx: *System, sender: u32, req: struct { caps.Sender }) struct { Error!void } {
+    if (ctx.vfs_endpoint != sender) {
+        return .{Error.PermissionDenied};
+    }
+
+    // FIXME: verify that it is a cap
+    ctx.vfs_sender = req.@"0";
+
+    return .{void{}};
+}
+
+fn execWithVm(ctx: *System, bin: []const u8) !caps.Sender {
+    // send the file to vm server using shared memory IPC
+
     const frame = try abi.caps.ROOT_MEMORY.allocSized(
         abi.caps.Frame,
-        abi.ChunkSize.of(ctx.pm_bin.len) orelse {
-            log.err("pm binary too large", .{});
-            return error.PmTooLarge;
+        abi.ChunkSize.of(bin.len) orelse {
+            log.err("binary too large", .{});
+            return error.BinaryTooLarge;
         },
     );
 
-    log.info("mapping shared mem", .{});
     try abi.caps.ROOT_SELF_VMEM.map(
         frame,
         LOADER_TMP,
         .{ .writable = true },
         .{},
     );
-    log.info("copying shared mem", .{});
     abi.util.copyForwardsVolatile(
         u8,
-        @as([*]volatile u8, @ptrFromInt(LOADER_TMP))[0..ctx.pm_bin.len],
-        ctx.pm_bin,
+        @as([*]volatile u8, @ptrFromInt(LOADER_TMP))[0..bin.len],
+        bin,
     );
-    log.info("unmapping shared mem", .{});
     try abi.caps.ROOT_SELF_VMEM.unmap(
         frame,
         LOADER_TMP,
     );
 
-    log.info("creating new vmem", .{});
     const vm_sender = abi.VmProtocol.Client().init(ctx.vm_sender);
-    const res0, const pm_vm_handle = try vm_sender.call(.newVmem, void{});
+    const res0, const vmem_handle = try vm_sender.call(.newVmem, void{});
     _ = try res0;
 
-    log.info("sending shared mem", .{});
     const res1 = try vm_sender.call(.loadElf, .{
-        pm_vm_handle,
+        vmem_handle,
         frame,
         0,
-        ctx.pm_bin.len,
+        bin.len,
     });
     _ = try res1.@"0";
 
-    log.info("new pm thread", .{});
     const res2, const thread = try vm_sender.call(.newThread, .{
-        pm_vm_handle,
+        vmem_handle,
     });
     _ = try res2;
 
     const sender = try ctx.recv.subscribe();
 
-    log.info("start pm", .{});
     try thread.setPrio(0);
     try thread.transferCap(sender.cap);
     var regs: abi.sys.ThreadRegs = undefined;
@@ -252,7 +288,8 @@ fn execPm(ctx: *System) !void {
     regs.arg0 = sender.cap; // set RDI to the sender cap
     try thread.writeRegs(&regs);
     try thread.start();
-    ctx.pm_endpoint = sender.cap;
+
+    return sender;
 }
 
 pub fn mapNaive(frame: abi.caps.Frame, vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
