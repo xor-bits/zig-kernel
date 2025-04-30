@@ -366,30 +366,33 @@ pub fn Protocol(comptime spec: type) type {
                     return .{ .ctx = ctx, .rx = rx };
                 }
 
+                pub fn process(self: @This(), msg: *sys.Message) void {
+                    const variant = variants_const[0].input_converter.deserializeVariant(msg).?; // FIXME:
+
+                    // hopefully gets converted into a switch
+                    inline for (&variants_const, 0..) |v, i| {
+                        if (i == @intFromEnum(variant)) {
+                            const sender = msg.cap;
+                            const input = v.input_converter.deserialize(msg) orelse {
+                                // FIXME: handle invalid input
+                                std.log.err("invalid input", .{});
+                                return;
+                            };
+
+                            const handler = @field(self.handlers, v.handler);
+                            // @compileLog(@TypeOf(tuplePopFirst(input)));
+                            const output = handler(self.ctx, sender, tuplePopFirst(input));
+
+                            v.output_converter.serialize(msg, output);
+                        }
+                    }
+                }
+
                 pub fn run(self: @This()) !void {
                     var msg: sys.Message = undefined;
                     try self.rx.recv(&msg);
                     while (true) {
-                        const variant = variants_const[0].input_converter.deserializeVariant(&msg).?; // FIXME:
-
-                        // hopefully gets converted into a switch
-                        inline for (&variants_const, 0..) |v, i| {
-                            if (i == @intFromEnum(variant)) {
-                                const sender = msg.cap;
-                                const input = v.input_converter.deserialize(&msg) orelse {
-                                    // FIXME: handle invalid input
-                                    std.log.err("invalid input", .{});
-                                    return;
-                                };
-
-                                const handler = @field(self.handlers, v.handler);
-                                // @compileLog(@TypeOf(tuplePopFirst(input)));
-                                const output = handler(self.ctx, sender, tuplePopFirst(input));
-
-                                v.output_converter.serialize(&msg, output);
-                            }
-                        }
-
+                        self.process(&msg);
                         try self.rx.replyRecv(&msg);
                     }
                 }
@@ -625,7 +628,7 @@ const MessageUsage = struct {
                 }
             }
 
-            pub fn deserializeVariant(msg: *sys.Message) ?self.data[0].fake_type {
+            pub fn deserializeVariant(msg: *const sys.Message) ?self.data[0].fake_type {
                 var data_as_regs: [regs]u64 = undefined;
                 data_as_regs[0] = msg.arg0;
                 const data: Struct = @bitCast(data_as_regs);
