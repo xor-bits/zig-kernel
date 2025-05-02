@@ -122,3 +122,27 @@ pub const Sender = extern struct {
         return sys.call(self.cap, msg);
     }
 };
+
+/// capability to **a** notify object
+/// there can be multiple of them
+pub const Notify = extern struct {
+    cap: u32 = 0,
+
+    pub const Type: abi.ObjectType = .notify;
+
+    pub fn wait(self: @This()) sys.Error!u32 {
+        return sys.notifyWait(self.cap);
+    }
+
+    pub fn poll(self: @This()) sys.Error!?u32 {
+        return sys.notifyPoll(self.cap);
+    }
+
+    pub fn notify(self: @This()) sys.Error!bool {
+        return sys.notifyNotify(self.cap);
+    }
+
+    pub fn clone(self: @This()) sys.Error!u32 {
+        return sys.notifyClone(self.cap);
+    }
+};

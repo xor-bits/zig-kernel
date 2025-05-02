@@ -311,6 +311,51 @@ pub fn receiverSubscribe(recv_cap: u32) Error!u32 {
 
 // SENDER CAPABILITY CALLS
 
+// NOTIFY CAPABILITY CALLS
+
+pub const NotifyCallId = enum(u8) {
+    wait,
+    poll,
+    notify,
+    clone,
+};
+
+// returns the cap id of whoever notified this thread first
+pub fn notifyWait(notify_cap: u32) Error!u32 {
+    var msg: Message = .{
+        .arg0 = @intFromEnum(NotifyCallId.wait),
+    };
+    try call(notify_cap, &msg);
+    return @truncate(msg.cap);
+}
+
+// returns the cap id of whoever notified this thread first
+pub fn notifyPoll(notify_cap: u32) Error!?u32 {
+    var msg: Message = .{
+        .arg0 = @intFromEnum(NotifyCallId.poll),
+    };
+    try call(notify_cap, &msg);
+    return if ((msg.cap) == 0) null else @truncate(msg.cap);
+}
+
+/// returns true if it was already signaled
+pub fn notifyNotify(notify_cap: u32) Error!bool {
+    var msg: Message = .{
+        .arg0 = @intFromEnum(NotifyCallId.notify),
+    };
+    try call(notify_cap, &msg);
+    return msg.arg0 != 0;
+}
+
+/// clone the capability, the clone points to the same notify object
+pub fn notifyClone(notify_cap: u32) Error!u32 {
+    var msg: Message = .{
+        .arg0 = @intFromEnum(NotifyCallId.clone),
+    };
+    try call(notify_cap, &msg);
+    return @truncate(msg.arg0);
+}
+
 // SYSCALLS
 
 pub const Message = extern struct {

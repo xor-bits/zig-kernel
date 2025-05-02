@@ -141,7 +141,12 @@ pub const Receiver = struct {
 
 pub const Sender = struct {
     pub fn alloc(_: ?abi.ChunkSize) Error!addr.Phys {
+        // receiver can be cloned to make senders
         return Error.InvalidArgument;
+    }
+
+    pub fn init(_: caps.Ref(@This())) void {
+        unreachable;
     }
 
     // block until the receiver is free, then switch to the receiver
@@ -196,3 +201,75 @@ pub const Sender = struct {
 };
 
 // pub const Reply = struct {};
+
+pub const Notify = struct {
+    notified: std.atomic.Value(u32) = .init(0),
+
+    // waiter queue
+    queue_lock: spin.Mutex = .{},
+    queue: util.Queue(caps.Thread, "next", "prev") = .{},
+
+    pub fn init(self: caps.Ref(@This())) void {
+        self.ptr().* = .{};
+    }
+
+    pub fn alloc(_: ?abi.ChunkSize) Error!addr.Phys {
+        return pmem.alloc(@sizeOf(@This())) orelse return Error.OutOfMemory;
+    }
+
+    pub fn call(paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
+        const call_id = std.meta.intToEnum(abi.sys.NotifyCallId, trap.arg1) catch {
+            return Error.InvalidArgument;
+        };
+
+        if (conf.LOG_OBJ_CALLS)
+            log.debug("notify call \"{s}\"", .{@tagName(call_id)});
+
+        const self_ref = caps.Ref(Notify){ .paddr = paddr };
+        const self = self_ref.ptr();
+
+        switch (call_id) {
+            .wait => {
+                // early test if its active
+                trap.arg1 = self.notified.swap(0, .acquire);
+                if (trap.arg1 != 0) {
+                    return;
+                }
+
+                // save the state and go to sleep
+                thread.status = .waiting;
+                thread.trap = trap.*;
+                self.queue_lock.lock();
+                self.queue.pushBack(thread);
+                defer self.queue_lock.unlock();
+
+                // while holding the lock: if it became active before locking but after the swap, then test it again
+                trap.arg1 = self.notified.swap(0, .acquire);
+                if (trap.arg1 != 0) {
+                    std.debug.assert(self.queue.popBack() == thread);
+                    thread.status = .running;
+                    return;
+                }
+            },
+            .poll => {
+                trap.arg1 = self.notified.swap(0, .acquire);
+            },
+            .notify => {
+                const notifier: u32 = @truncate(trap.arg0);
+
+                self.queue_lock.lock();
+                if (self.queue.popFront()) |waiter| {
+                    waiter.trap.arg1 = notifier;
+                    proc.ready(waiter);
+                    trap.arg1 = @intFromBool(false);
+                } else {
+                    trap.arg1 = @intFromBool(null != self.notified.cmpxchgStrong(0, notifier, .monotonic, .monotonic));
+                }
+                self.queue_lock.unlock();
+            },
+            .clone => {
+                trap.arg1 = caps.pushCapability(self_ref.object(thread));
+            },
+        }
+    }
+};

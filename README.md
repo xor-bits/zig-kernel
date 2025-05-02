@@ -65,7 +65,6 @@ zig build run --prominent-compile-errors --summary none -freference-trace \
   - [x] binary loader
   - [x] message IPC, shared memory IPC
     - [ ] multiple parallel recvs and calls to the same endpoint
-  - [ ] signaling system (IPC without messages)
   - [ ] figure out userland interrupts (ps2 keyboard, ..)
   - [x] capabilities
     - [x] allocate capabilities
@@ -75,6 +74,14 @@ zig build run --prominent-compile-errors --summary none -freference-trace \
     - [x] send capabilities
     - [x] disallow mapping a frame twice without cloning the cap
     - [x] disallow overlapping maps
+    - [ ] objects
+      - [x] Memory
+      - [x] Thread
+      - [x] Vmem
+      - [x] Frame
+      - [x] Receiver
+      - [x] Sender
+      - [x] Notify
   - [x] syscalls
 
 - [x] root + initfsd process

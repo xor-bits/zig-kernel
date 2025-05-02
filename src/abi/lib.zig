@@ -70,6 +70,9 @@ pub const ObjectType = enum(u8) {
     /// capability to **a** sender end of an endpoint,
     /// there can be multiple senders
     sender,
+    /// capability to **a** notify object
+    /// there can be multiple of them
+    notify,
 };
 
 /// kernel object size in bit-width (minus 12)

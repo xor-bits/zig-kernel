@@ -48,7 +48,7 @@ pub fn main() !noreturn {
 
     const recv = try abi.caps.ROOT_MEMORY.alloc(abi.caps.Receiver);
 
-    initfsd.wait();
+    try initfsd.wait();
 
     var system: System = .{
         .recv = recv,

@@ -72,6 +72,8 @@ pub fn init(initfs: []const u8) !void {
     log.info("starting initfs thread", .{});
     initfs_tar_gz = std.io.fixedBufferStream(initfs);
 
+    initfs_ready = try caps.ROOT_MEMORY.alloc(caps.Notify);
+
     const stack = try caps.ROOT_MEMORY.allocSized(caps.Frame, .@"256KiB");
     try caps.ROOT_SELF_VMEM.map(stack, main.INITFS_STACK_BOTTOM, .{ .writable = true }, .{});
 
@@ -85,25 +87,29 @@ pub fn init(initfs: []const u8) !void {
     try thread.start();
 }
 
-pub fn wait() void {
-    while (!initfs_ready.load(.acquire)) abi.sys.yield();
+pub fn wait() !void {
+    _ = try initfs_ready.wait();
 }
 
 var thread: caps.Thread = undefined;
 var initfs_tar_gz: std.io.FixedBufferStream([]const u8) = undefined;
-var initfs_ready: std.atomic.Value(bool) = .init(false);
+var initfs_ready: caps.Notify = .{};
 
 pub fn run() callconv(.SysV) noreturn {
     log.info("decompressing", .{});
     std.compress.flate.inflate.decompress(.gzip, initfs_tar_gz.reader(), initfs_tar.writer()) catch |err| {
-        std.debug.panic("failed to decompress initfs: {}", .{err});
+        log.err("failed to decompress initfs: {}", .{err});
         thread.stop() catch {};
         unreachable;
     };
     std.debug.assert(std.mem.eql(u8, initfs_tar.items[257..][0..8], "ustar\x20\x20\x00"));
     log.info("decompressed initfs size: 0x{x}", .{initfs_tar.items.len});
 
-    initfs_ready.store(true, .release);
+    _ = initfs_ready.notify() catch |err| {
+        log.err("failed to notify that initfs is ready: {}", .{err});
+        thread.stop() catch {};
+        unreachable;
+    };
 
     thread.stop() catch {};
     unreachable;

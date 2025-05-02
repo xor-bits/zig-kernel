@@ -24,6 +24,7 @@ pub const Thread = caps_thread.Thread;
 pub const Vmem = caps_vmem.Vmem;
 pub const Receiver = caps_ipc.Receiver;
 pub const Sender = caps_ipc.Sender;
+pub const Notify = caps_ipc.Notify;
 
 //
 
@@ -238,7 +239,8 @@ pub const Object = struct {
             Frame => .frame,
             Receiver => .receiver,
             Sender => .sender,
-            else => @compileError(std.fmt.comptimePrint("invalid Capability type: {}", .{@typeName(T)})),
+            Notify => .notify,
+            else => @compileError(std.fmt.comptimePrint("invalid Capability type: {s}", .{@typeName(T)})),
         };
     }
 
@@ -259,7 +261,8 @@ pub const Object = struct {
             .vmem => (try Ref(Vmem).alloc(dyn_size)).object(owner),
             .frame => (try Ref(Frame).alloc(dyn_size)).object(owner),
             .receiver => (try Ref(Receiver).alloc(dyn_size)).object(owner),
-            .sender => Error.InvalidType, // receiver can be cloned to make senders
+            .sender => (try Ref(Sender).alloc(dyn_size)).object(owner),
+            .notify => (try Ref(Notify).alloc(dyn_size)).object(owner),
         };
     }
 
@@ -273,6 +276,7 @@ pub const Object = struct {
             .frame => Error.InvalidArgument,
             .receiver => Receiver.call(self.paddr, thread, trap),
             .sender => Sender.call(self.paddr, thread, trap),
+            .notify => Notify.call(self.paddr, thread, trap),
         };
     }
 
@@ -285,6 +289,7 @@ pub const Object = struct {
             .frame => Error.InvalidArgument,
             .receiver => Receiver.recv(self.paddr, thread, trap),
             .sender => Error.InvalidArgument,
+            .notify => Error.InvalidArgument,
         };
     }
 
@@ -297,6 +302,7 @@ pub const Object = struct {
             .frame => Error.InvalidArgument,
             .receiver => Receiver.reply(self.paddr, thread, trap),
             .sender => Error.InvalidArgument,
+            .notify => Error.InvalidArgument,
         };
     }
 
@@ -309,6 +315,7 @@ pub const Object = struct {
             .frame => Error.InvalidArgument,
             .receiver => Receiver.replyRecv(self.paddr, thread, trap),
             .sender => Error.InvalidArgument,
+            .notify => Error.InvalidArgument,
         };
     }
 };
