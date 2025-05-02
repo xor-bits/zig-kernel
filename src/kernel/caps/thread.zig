@@ -30,6 +30,8 @@ pub const Thread = struct {
     next: ?*Thread = null,
     /// scheduler linked list
     prev: ?*Thread = null,
+    /// ipc reply target
+    reply: ?*Thread = null,
 
     /// extra ipc registers
     /// controlled by Receiver and Sender
@@ -66,7 +68,51 @@ pub const Thread = struct {
         }
     }
 
-    pub fn moveExtra(self: *@This(), target: *@This(), count: u7) Error!void {
+    pub fn prelockExtras(self: *@This(), count: u7) Error!void {
+        if (count == 0) {
+            @branchHint(.likely);
+            return;
+        }
+
+        var partially_locked_count: usize = 0;
+
+        // unlock everything that was locked, if one couldn't be locked
+        errdefer {
+            for (0..count) |idx| {
+                if ((self.extra_types & (@as(u128, 1) << @as(u7, @truncate(idx)))) == 0) continue;
+                if (partially_locked_count == 0) break;
+                partially_locked_count -= 1;
+
+                const cap_id: u32 = @truncate(self.extra_regs[idx]);
+                const obj = caps.getCapabilityLocked(cap_id);
+                obj.lock.unlock();
+            }
+        }
+
+        // lock all caps
+        for (0..count) |idx| {
+            if ((self.extra_types & (@as(u128, 1) << @as(u7, @truncate(idx)))) == 0) continue;
+
+            const cap_id: u32 = @truncate(self.extra_regs[idx]);
+            _ = try caps.getCapability(self, cap_id);
+
+            partially_locked_count += 1;
+        }
+    }
+
+    pub fn unlockExtras(self: *@This(), count: u7) void {
+        for (0..count) |idx| {
+            if ((self.extra_types & (@as(u128, 1) << @as(u7, @truncate(idx)))) == 0) continue;
+
+            const cap_id: u32 = @truncate(self.extra_regs[idx]);
+            const obj = caps.getCapabilityLocked(cap_id);
+            std.debug.assert(obj.lock.isLocked());
+            obj.lock.unlock();
+        }
+    }
+
+    /// requires `prelockExtras` to be called before
+    pub fn moveExtra(self: *@This(), target: *@This(), count: u7) void {
         // both current and target threads are locked
 
         if (count == 0) {
@@ -74,40 +120,14 @@ pub const Thread = struct {
             return;
         }
 
-        {
-            var locked_count: usize = 0;
+        // transfer ownership
+        for (0..count) |idx| {
+            if ((self.extra_types & (@as(u128, 1) << @as(u7, @truncate(idx)))) == 0) continue;
 
-            defer {
-                for (0..count) |idx| {
-                    if ((self.extra_types & (@as(u128, 1) << @as(u7, @truncate(idx)))) == 0) continue;
-                    if (locked_count == 0) break;
-                    locked_count -= 1;
-
-                    const cap_id: u32 = @truncate(self.extra_regs[idx]);
-                    const obj = caps.getCapabilityLocked(cap_id);
-                    obj.lock.unlock();
-                }
-            }
-
-            // lock all caps
-            for (0..count) |idx| {
-                if ((self.extra_types & (@as(u128, 1) << @as(u7, @truncate(idx)))) == 0) continue;
-
-                const cap_id: u32 = @truncate(self.extra_regs[idx]);
-                _ = try caps.getCapability(self, cap_id);
-
-                locked_count += 1;
-            }
-
-            // transfer ownership
-            for (0..count) |idx| {
-                if ((self.extra_types & (@as(u128, 1) << @as(u7, @truncate(idx)))) == 0) continue;
-
-                const cap_id: u32 = @truncate(self.extra_regs[idx]);
-                const obj = caps.getCapabilityLocked(cap_id);
-
-                obj.owner.store(Thread.vmemOf(target), .release);
-            }
+            const cap_id: u32 = @truncate(self.extra_regs[idx]);
+            const obj = caps.getCapabilityLocked(cap_id);
+            std.debug.assert(obj.lock.isLocked());
+            obj.owner.store(Thread.vmemOf(target), .release);
         }
 
         // resets all target extra registers and moves `count` registers over
@@ -115,6 +135,9 @@ pub const Thread = struct {
         target.extra_types = self.extra_types;
         std.mem.copyForwards(u64, target.extra_regs[0..], self.extra_regs[0..count]);
         self.extra_regs = std.mem.zeroes([128]u64);
+
+        // unlock all transferred caps
+        target.unlockExtras(count);
     }
 
     // FIXME: pass Ref(Self) instead of addr.Phys

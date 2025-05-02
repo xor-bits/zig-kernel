@@ -274,7 +274,7 @@ pub fn Queue(
         head: ?*T = null,
         tail: ?*T = null,
 
-        pub fn push(self: *@This(), new: *T) void {
+        pub fn pushBack(self: *@This(), new: *T) void {
             if (self.tail) |tail| {
                 @field(new, prev_field) = tail;
                 @field(tail, next_field) = new;
@@ -287,7 +287,23 @@ pub fn Queue(
             self.tail = new;
         }
 
-        pub fn pop(self: *@This()) ?*T {
+        // pub fn pushFront() void {}
+
+        pub fn popBack(self: *@This()) ?*T {
+            const head = self.head orelse return null;
+            const tail = self.tail orelse return null;
+
+            if (head == tail) {
+                self.head = null;
+                self.tail = null;
+            } else {
+                self.tail = @field(tail, prev_field).?; // assert that its not null
+            }
+
+            return tail;
+        }
+
+        pub fn popFront(self: *@This()) ?*T {
             const head = self.head orelse return null;
             const tail = self.tail orelse return null;
 

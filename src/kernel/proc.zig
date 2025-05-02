@@ -57,6 +57,7 @@ pub fn switchNow(trap: *arch.SyscallRegs) void {
 }
 
 /// switch to another thread, skipping the scheduler entirely
+/// does **NOT** save the previous context or set its status
 pub fn switchTo(trap: *arch.SyscallRegs, thread: *caps.Thread) void {
     const local = arch.cpuLocal();
     local.current_thread = thread;
@@ -97,7 +98,7 @@ pub fn ready(thread: *caps.Thread) void {
     queue_locks[prio].lock();
     defer queue_locks[prio].unlock();
 
-    queues[prio].push(thread);
+    queues[prio].pushBack(thread);
 
     // notify a single sleeping processor
     for (&waiters) |*w| {
@@ -140,7 +141,7 @@ pub fn tryNext() ?*caps.Thread {
         lock.lock();
         defer lock.unlock();
 
-        if (queue.pop()) |next_thread| {
+        if (queue.popFront()) |next_thread| {
             if (next_thread.status == .stopped) {
                 continue;
             } else {

@@ -5,8 +5,10 @@ const addr = @import("../addr.zig");
 const arch = @import("../arch.zig");
 const caps = @import("../caps.zig");
 const conf = @import("../conf.zig");
-const proc = @import("../proc.zig");
 const pmem = @import("../pmem.zig");
+const proc = @import("../proc.zig");
+const spin = @import("../spin.zig");
+const util = @import("../util.zig");
 
 const log = std.log.scoped(.caps);
 const Error = abi.sys.Error;
@@ -14,8 +16,13 @@ const Error = abi.sys.Error;
 //
 
 pub const Receiver = struct {
+    // TODO: remove a thread from here if gets stopped
+    /// the currently waiting receiver thread
     receiver: std.atomic.Value(?*caps.Thread) = .init(null),
-    sender: std.atomic.Value(?*caps.Thread) = .init(null),
+
+    /// a linked list of
+    queue_lock: spin.Mutex = .{},
+    queue: util.Queue(caps.Thread, "next", "prev") = .{},
 
     pub fn init(self: caps.Ref(@This())) void {
         self.ptr().* = .{};
@@ -48,82 +55,87 @@ pub const Receiver = struct {
 
         const self = (caps.Ref(@This()){ .paddr = paddr }).ptr();
 
-        thread.status = .waiting;
-        thread.trap = trap.*;
-        if (null != self.receiver.cmpxchgStrong(null, thread, .seq_cst, .monotonic)) {
-            // TODO: already listening
-            return Error.Unimplemented;
-        }
+        self.recvNoFail(thread, trap);
     }
 
-    pub fn reply(paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
+    // might block the user-space thread (kernel-space should only ever block after a syscall is complete)
+    fn recvNoFail(self: *@This(), thread: *caps.Thread, trap: *arch.SyscallRegs) void {
+        // stop the thread early to hold the lock for a shorter time
+        thread.status = .waiting;
+        thread.trap = trap.*;
+
+        // check if a sender is already waiting
+        self.queue_lock.lock();
+        if (self.queue.popFront()) |immediate| {
+            self.queue_lock.unlock();
+            // copy over the message
+            const msg = immediate.trap.readMessage();
+            trap.writeMessage(msg);
+            immediate.moveExtra(thread, @truncate(msg.extra)); // the caps are already locked in `Sender.call`
+
+            // save the reply target
+            std.debug.assert(thread.reply == null);
+            thread.reply = immediate;
+
+            // undo stopping the thread
+            thread.status = .running;
+            return;
+        }
+
+        if (null != self.receiver.cmpxchgStrong(null, thread, .seq_cst, .monotonic)) {
+            unreachable; // the receiver cannot be cloned ... _yet_
+        }
+        self.queue_lock.unlock();
+
+        // thread is set to waiting and will yield at the end of the main syscall handler
+    }
+
+    pub fn reply(_: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
         if (conf.LOG_OBJ_CALLS)
             log.debug("receiver reply", .{});
 
-        const self = (caps.Ref(@This()){ .paddr = paddr }).ptr();
+        // const self = (caps.Ref(@This()){ .paddr = paddr }).ptr();
 
-        const sender = self.sender.swap(null, .seq_cst) orelse {
-            // TODO: not listening
-            return Error.Unimplemented;
-        };
+        const sender = try Receiver.replyGetSender(thread, trap);
 
-        if (sender.status != .waiting) {
-            // TODO: idk
-            return Error.Unimplemented;
-        }
+        // set the original caller thread as ready to run again, but return to the current thread
+        proc.ready(sender);
+    }
 
+    fn replyGetSender(thread: *caps.Thread, trap: *arch.SyscallRegs) Error!*caps.Thread {
+        // prepare cap transfer
         var msg = trap.readMessage();
         msg.cap = 0; // call doesnt get to know the Receiver capability id
+        if (conf.LOG_OBJ_CALLS)
+            log.debug("replying {}", .{msg});
+        try thread.prelockExtras(@truncate(msg.extra));
 
-        try thread.moveExtra(sender, @truncate(msg.extra));
+        const sender = thread.reply orelse {
+            @branchHint(.cold);
+            thread.unlockExtras(@truncate(msg.extra));
+            return Error.InvalidCapability;
+        };
+        std.debug.assert(sender.status == .waiting);
+        thread.reply = null;
 
-        // set the current thread as ready to run again
-        thread.status = .waiting;
-        thread.trap = trap.*;
-        proc.ready(thread);
+        // copy over the reply message
+        sender.trap.writeMessage(msg);
+        thread.moveExtra(sender, @truncate(msg.extra));
 
-        // switch to the caller thread
-        proc.switchTo(trap, sender);
-
-        trap.writeMessage(msg);
+        return sender;
     }
 
     pub fn replyRecv(paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
         if (conf.LOG_OBJ_CALLS)
             log.debug("receiver reply", .{});
 
+        const sender = try Receiver.replyGetSender(thread, trap);
+
         const self = (caps.Ref(@This()){ .paddr = paddr }).ptr();
+        self.recvNoFail(thread, trap);
 
-        // FIXME: race conditions
-
-        if (null != self.receiver.cmpxchgStrong(null, thread, .seq_cst, .monotonic)) {
-            // TODO: already listening
-            return Error.Unimplemented;
-        }
-
-        const sender = self.sender.swap(null, .seq_cst) orelse {
-            // TODO: not listening
-            return Error.Unimplemented;
-        };
-
-        if (sender.status != .waiting) {
-            // TODO: idk
-            return Error.Unimplemented;
-        }
-
-        var msg = trap.readMessage();
-        msg.cap = 0; // call doesnt get to know the Receiver capability id
-
-        try thread.moveExtra(sender, @truncate(msg.extra));
-
-        // save the current thread, it is already set as the receiver
-        thread.status = .waiting;
-        thread.trap = trap.*;
-
-        // switch to the caller thread
+        // switch to the original caller thread
         proc.switchTo(trap, sender);
-
-        trap.writeMessage(msg);
     }
 };
 
@@ -139,27 +151,47 @@ pub const Sender = struct {
 
         const self = (caps.Ref(Receiver){ .paddr = paddr }).ptr();
 
-        const listener = self.receiver.swap(null, .seq_cst) orelse {
-            // TODO: not listening
-            return Error.Unimplemented;
-        };
-
-        if (listener.status != .waiting) {
-            // TODO: idk
-            return Error.Unimplemented;
-        }
-
+        // prepare cap transfer
         const msg = trap.readMessage();
-        // recv gets to know the Sender capability id (just the number)
+        if (conf.LOG_OBJ_CALLS)
+            log.debug("sending {}", .{msg});
+        try thread.prelockExtras(@truncate(msg.extra)); // keep them locked even if a listener isn't ready
 
-        try thread.moveExtra(listener, @truncate(msg.extra));
+        // acquire a listener or switch threads
+        const listener = self.receiver.swap(null, .seq_cst) orelse b: {
+            @branchHint(.cold);
 
+            // first push the thread into the sleep queue
+            self.queue_lock.lock();
+            self.queue.pushBack(thread);
+            self.queue_lock.unlock();
+
+            // then check again
+            if (self.receiver.swap(null, .seq_cst)) |second_try| {
+                // receiver just got ready
+                @branchHint(.cold);
+                std.debug.assert(self.queue.popBack() == thread);
+                break :b second_try;
+            } else {
+                // this sender thread is in the sleep queue now without a receiver ready, switch threads
+                thread.status = .waiting;
+                return;
+            }
+        };
+        std.debug.assert(listener.status == .waiting);
+
+        // copy over the message
+        listener.trap.writeMessage(msg);
+        thread.moveExtra(listener, @truncate(msg.extra));
+
+        // save the reply target
+        std.debug.assert(listener.reply == null);
+        listener.reply = thread;
+
+        // switch to the listener
         thread.status = .waiting;
         thread.trap = trap.*;
-        self.sender.store(thread, .seq_cst);
         proc.switchTo(trap, listener);
-
-        trap.writeMessage(msg);
     }
 };
 
