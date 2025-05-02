@@ -117,25 +117,103 @@ fn framebufferSplash(boot_info: *const abi.BootInfo) !void {
     const pitch = boot_info.framebuffer_pitch / 4;
     const framebuffer = @as([*]volatile u32, @ptrFromInt(FRAMEBUFFER))[0 .. width * pitch];
 
+    const fb_info: FbInfo = .{
+        .width = width,
+        .height = height,
+        .pitch = pitch,
+        .buffer = framebuffer,
+    };
+
     const mid_x = width / 2;
     const mid_y = height / 2;
 
-    // draw a small circle to let the user know at least something happened
-    for (mid_y - 25..mid_y + 25) |y| {
-        for (mid_x - 25..mid_x + 25) |x| {
+    var millis: f32 = 0.0;
+    while (true) {
+        drawFrame(&fb_info, mid_x, mid_y, millis);
+        millis += 4.0;
+    }
+
+    try abi.caps.ROOT_SELF_VMEM.unmap(boot_info.framebuffer, FRAMEBUFFER);
+}
+
+const speed: f32 = 0.001;
+
+const FbInfo = struct {
+    width: usize,
+    height: usize,
+    pitch: usize,
+    buffer: []volatile u32,
+};
+
+fn drawFrame(fb: *const FbInfo, mid_x: usize, mid_y: usize, millis: f32) void {
+    dim(fb, mid_x, mid_y);
+
+    for (0..40) |i| {
+        const phase = @as(f32, @floatFromInt(i)) / 40.0;
+        drawTriangleDot(fb, mid_x, mid_y, phase * 3.0 - millis * speed, millis, 0xFF8000);
+    }
+}
+
+fn dim(fb: *const FbInfo, mid_x: usize, mid_y: usize) void {
+    // FIXME: use a backbuffer for reads
+    const minx = @max(mid_x, 120) - 120;
+    const miny = @max(mid_y, 120) - 120;
+    const maxx = mid_x + 121;
+    const maxy = mid_y + 121;
+
+    for (miny..maxy) |y| {
+        for (minx..maxx) |x| {
+            var col: Pixel = @bitCast(fb.buffer[x + y * fb.pitch]);
+            col.r = @max(col.r, 3) - 3;
+            col.g = @max(col.g, 3) - 3;
+            col.b = @max(col.b, 3) - 3;
+            fb.buffer[x + y * fb.pitch] = @bitCast(col);
+        }
+    }
+}
+
+const Pixel = extern struct {
+    r: u8,
+    g: u8,
+    b: u8,
+    _p: u8,
+};
+
+fn drawTriangleDot(fb: *const FbInfo, mid_x: usize, mid_y: usize, t: f32, millis: f32, col: u32) void {
+    const a = (std.math.floor(t) + millis * speed) * 2.0 * std.math.pi / 3.0;
+    const b = (std.math.ceil(t) + millis * speed) * 2.0 * std.math.pi / 3.0;
+    const ft = t - std.math.floor(t);
+
+    const pt_x = ft * std.math.cos(b) + (1.0 - ft) * std.math.cos(a);
+    const pt_y = ft * std.math.sin(b) + (1.0 - ft) * std.math.sin(a);
+
+    drawDot(
+        fb,
+        @as(usize, @intFromFloat(pt_x * 100.0 + @as(f32, @floatFromInt(mid_x)))),
+        @as(usize, @intFromFloat(pt_y * 100.0 + @as(f32, @floatFromInt(mid_y)))),
+        col,
+    );
+}
+
+fn drawDot(fb: *const FbInfo, mid_x: usize, mid_y: usize, col: u32) void {
+    const minx = @max(mid_x, 5) - 5;
+    const miny = @max(mid_y, 5) - 5;
+    const maxx = mid_x + 6;
+    const maxy = mid_y + 6;
+
+    for (miny..maxy) |y| {
+        for (minx..maxx) |x| {
             const dx = if (mid_x > x) mid_x - x else x - mid_x;
             const dy = if (mid_y > y) mid_y - y else y - mid_y;
             const dsqr = dx * dx + dy * dy;
 
-            if (16 * 16 <= dsqr and dsqr <= 20 * 20) {
-                framebuffer[x + y * pitch] = 0xFFFFFF;
-            } else if (16 * 16 - 10 <= dsqr and dsqr <= 20 * 20 + 10) {
-                framebuffer[x + y * pitch] = 0x888888;
+            if (dsqr <= 3 * 3 - 2) {
+                fb.buffer[x + y * fb.pitch] = col;
+            } else if (dsqr <= 3 * 3 + 2) {
+                // fb.buffer[x + y * fb.pitch] = (col >> 4) & 0x0F0F0F0F;
             }
         }
     }
-
-    try abi.caps.ROOT_SELF_VMEM.unmap(boot_info.framebuffer, FRAMEBUFFER);
 }
 
 fn binBytes(path: []const u8) ![]const u8 {
