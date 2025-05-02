@@ -64,7 +64,8 @@ zig build run --prominent-compile-errors --summary none -freference-trace \
   - [x] scheduler
   - [x] binary loader
   - [x] message IPC, shared memory IPC
-    - [ ] multiple parallel recvs and calls to the same endpoint
+    - [ ] multiple parallel recvs to the same endpoint
+    - [x] multiple parallel calls to the same endpoint
   - [ ] figure out userland interrupts (ps2 keyboard, ..)
   - [x] capabilities
     - [x] allocate capabilities
