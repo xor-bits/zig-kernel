@@ -57,7 +57,7 @@ zig build run --prominent-compile-errors --summary none -freference-trace \
           write-through, write-protect, write-back and uncached
   - [x] GDT, TSS, IDT
   - [x] ACPI, APIC
-  - [ ] SMP
+  - [x] SMP
   - [x] user space
   - [ ] HPET
   - [ ] TSC
