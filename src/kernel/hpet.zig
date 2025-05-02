@@ -4,6 +4,7 @@ const arch = @import("arch.zig");
 const addr = @import("addr.zig");
 const acpi = @import("acpi.zig");
 const lazy = @import("lazy.zig");
+const spin = @import("spin.zig");
 
 const log = std.log.scoped(.hpet);
 
@@ -33,26 +34,58 @@ pub fn hpetSpinWait(micros: u32, just_before: anytype) void {
     }
 }
 
-pub fn now() u64 {
-    const regs = hpet_regs.?;
-    return regs.main_counter_value;
-}
+// pub fn now() u64 {
+//     const regs = hpet_regs.?;
+//     return regs.main_counter_value;
+// }
 
-pub fn asNanos(t: u64) u128 {
-    const regs = hpet_regs.?;
-    return @as(u128, t) * regs.caps_and_id.counter_period_femtoseconds / 1_000_000;
-}
+// pub fn asNanos(t: u64) u128 {
+//     const regs = hpet_regs.?;
+//     return @as(u128, t) * regs.caps_and_id.counter_period_femtoseconds / 1_000_000;
+// }
 
-pub fn elapsedNanos(from_then: u64) u128 {
-    const regs = hpet_regs.?;
-    return @as(u128, regs.main_counter_value - from_then) * regs.caps_and_id.counter_period_femtoseconds / 1_000_000;
-}
+// pub fn elapsedNanos(from_then: u64) u128 {
+//     const regs = hpet_regs.?;
+//     return @as(u128, regs.main_counter_value - from_then) * regs.caps_and_id.counter_period_femtoseconds / 1_000_000;
+// }
+
+// pub fn timestampNanos() u128 {
+//     const regs = hpet_regs.?;
+//     regs.caps_and_id.counter_period_femtoseconds;
+//     return regs.main_counter_value * regs.caps_and_id.counter_period_femtoseconds / 1_000_000;
+// }
+
+// pub fn sleepDeadline(timestamp_nanos: u128) void {
+//     const regs = hpet_regs.?;
+//     const counter = timestamp_nanos * 1_000_000 / regs.caps_and_id.counter_period_femtoseconds;
+//     if (counter > std.math.maxInt(u64)) {
+//         @branchHint(.cold);
+//         log.err("FIXME: deadline val is bigger than max main counter val", .{});
+//         return;
+//     }
+
+//     const n_timers: usize = regs.caps_and_id.n_timers_minus_one + 1;
+//     const timer_i = arch.cpuId() % n_timers;
+//     const timer_regs = regs.timer(timer_i); // distribute comparators a bit
+//     const timer = &timers[timer_i];
+// }
 
 //
 
 var hpet_regs: ?*volatile HpetRegs = null;
 
+// var timers: [32]Timer = &.{.{}} ** 32;
+
 //
+
+// const Timer = struct {
+//     lock: spin.Mutex = .{},
+//     deadlines: std.PriorityQueue(u64, void, struct {
+//         fn inner(_: void, a: u64, b: u64) std.math.Order {
+//             return std.math.order(a, b);
+//         }
+//     }.inner) = .{},
+// };
 
 const Hpet = extern struct {
     header: acpi.SdtHeader align(1),
