@@ -68,7 +68,10 @@ var initfs_tar: std.ArrayList(u8) = .init(vmm_vector);
 
 //
 
-pub fn init(initfs: []const u8) !void {
+pub fn init() !void {
+    const boot_info: *const abi.BootInfo = @ptrFromInt(main.BOOT_INFO);
+    const initfs: []const u8 = boot_info.initfsData();
+
     log.info("starting initfs thread", .{});
     initfs_tar_gz = std.io.fixedBufferStream(initfs);
 

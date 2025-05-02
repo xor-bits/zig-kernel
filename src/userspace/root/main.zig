@@ -25,6 +25,8 @@ pub const STACK_TOP = 0x8000_0000_0000 - 0x2000;
 pub const STACK_BOTTOM = STACK_TOP - STACK_SIZE;
 pub const INITFS_STACK_TOP = STACK_BOTTOM - 0x2000;
 pub const INITFS_STACK_BOTTOM = INITFS_STACK_TOP - STACK_SIZE;
+pub const SPINNER_STACK_TOP = INITFS_STACK_BOTTOM - 0x2000;
+pub const SPINNER_STACK_BOTTOM = SPINNER_STACK_TOP - STACK_SIZE;
 /// boot info location
 pub const BOOT_INFO = 0x8000_0000_0000 - 0x1000;
 
@@ -40,11 +42,9 @@ pub fn main() !noreturn {
         .{},
     );
     log.info("boot info mapped", .{});
-    const boot_info = @as(*const abi.BootInfo, @ptrFromInt(BOOT_INFO));
 
-    try initfsd.init(boot_info.initfsData());
-
-    try framebufferSplash(boot_info);
+    try startSpinner();
+    try initfsd.init();
 
     const recv = try abi.caps.ROOT_MEMORY.alloc(abi.caps.Receiver);
 
@@ -96,6 +96,32 @@ pub fn main() !noreturn {
         else
             try server.rx.recv(&msg);
     }
+}
+
+fn startSpinner() !void {
+    log.info("starting spinner thread", .{});
+
+    const stack = try caps.ROOT_MEMORY.allocSized(caps.Frame, .@"256KiB");
+    try caps.ROOT_SELF_VMEM.map(stack, SPINNER_STACK_BOTTOM, .{ .writable = true }, .{});
+
+    spinner_thread = try caps.ROOT_MEMORY.alloc(caps.Thread);
+    try spinner_thread.setPrio(0);
+    try spinner_thread.setVmem(caps.ROOT_SELF_VMEM);
+    try spinner_thread.writeRegs(&.{
+        .user_stack_ptr = SPINNER_STACK_TOP,
+        .user_instr_ptr = @intFromPtr(&spinnerMain),
+    });
+    try spinner_thread.start();
+}
+
+var spinner_thread: caps.Thread = .{};
+
+fn spinnerMain() callconv(.SysV) noreturn {
+    framebufferSplash(@ptrFromInt(BOOT_INFO)) catch |err| {
+        log.warn("spinner failed: {}", .{err});
+    };
+    spinner_thread.stop() catch {};
+    unreachable;
 }
 
 fn framebufferSplash(boot_info: *const abi.BootInfo) !void {
