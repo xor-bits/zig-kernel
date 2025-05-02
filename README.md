@@ -148,5 +148,6 @@ while (true) {
 
 ## Gallery
     
-![zig-kernel](https://github.com/user-attachments/assets/e508b174-1ccd-4830-aa00-68ec27faba77)
+![image](https://github.com/user-attachments/assets/e508b174-1ccd-4830-aa00-68ec27faba77)
+![image](https://github.com/user-attachments/assets/a11dbcd1-6afb-4f2f-ba08-40af514a712b)
 
