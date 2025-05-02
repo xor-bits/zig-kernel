@@ -4,6 +4,7 @@ const abi = @import("abi");
 const main = @import("main.zig");
 
 const log = std.log.scoped(.initfsd);
+const caps = abi.caps;
 
 //
 
@@ -68,14 +69,44 @@ var initfs_tar: std.ArrayList(u8) = .init(vmm_vector);
 //
 
 pub fn init(initfs: []const u8) !void {
-    var initfs_tar_gz = std.io.fixedBufferStream(initfs);
-    log.info("decompressing", .{});
-    try std.compress.flate.inflate.decompress(.gzip, initfs_tar_gz.reader(), initfs_tar.writer());
-    std.debug.assert(std.mem.eql(u8, initfs_tar.items[257..][0..8], "ustar\x20\x20\x00"));
+    log.info("starting initfs thread", .{});
+    initfs_tar_gz = std.io.fixedBufferStream(initfs);
+
+    const stack = try caps.ROOT_MEMORY.allocSized(caps.Frame, .@"256KiB");
+    try caps.ROOT_SELF_VMEM.map(stack, main.INITFS_STACK_BOTTOM, .{ .writable = true }, .{});
+
+    thread = try caps.ROOT_MEMORY.alloc(caps.Thread);
+    try thread.setPrio(0);
+    try thread.setVmem(caps.ROOT_SELF_VMEM);
+    try thread.writeRegs(&.{
+        .user_stack_ptr = main.INITFS_STACK_TOP,
+        .user_instr_ptr = @intFromPtr(&run),
+    });
+    try thread.start();
 }
 
-pub fn run() noreturn {
-    @panic("todo");
+pub fn wait() void {
+    while (!initfs_ready.load(.acquire)) abi.sys.yield();
+}
+
+var thread: caps.Thread = undefined;
+var initfs_tar_gz: std.io.FixedBufferStream([]const u8) = undefined;
+var initfs_ready: std.atomic.Value(bool) = .init(false);
+
+pub fn run() callconv(.SysV) noreturn {
+    log.info("decompressing", .{});
+    std.compress.flate.inflate.decompress(.gzip, initfs_tar_gz.reader(), initfs_tar.writer()) catch |err| {
+        std.debug.panic("failed to decompress initfs: {}", .{err});
+        thread.stop() catch {};
+        unreachable;
+    };
+    std.debug.assert(std.mem.eql(u8, initfs_tar.items[257..][0..8], "ustar\x20\x20\x00"));
+    log.info("decompressed initfs size: 0x{x}", .{initfs_tar.items.len});
+
+    initfs_ready.store(true, .release);
+
+    thread.stop() catch {};
+    unreachable;
 }
 
 pub fn openFile(path: []const u8) ?usize {

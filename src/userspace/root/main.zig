@@ -23,6 +23,8 @@ pub const FRAMEBUFFER = 0x4000_0000_0000;
 pub const STACK_SIZE = 0x40000;
 pub const STACK_TOP = 0x8000_0000_0000 - 0x2000;
 pub const STACK_BOTTOM = STACK_TOP - STACK_SIZE;
+pub const INITFS_STACK_TOP = STACK_BOTTOM - 0x2000;
+pub const INITFS_STACK_BOTTOM = INITFS_STACK_TOP - STACK_SIZE;
 /// boot info location
 pub const BOOT_INFO = 0x8000_0000_0000 - 0x1000;
 
@@ -40,11 +42,13 @@ pub fn main() !noreturn {
     log.info("boot info mapped", .{});
     const boot_info = @as(*const abi.BootInfo, @ptrFromInt(BOOT_INFO));
 
-    try framebufferSplash(boot_info);
-
     try initfsd.init(boot_info.initfsData());
 
+    try framebufferSplash(boot_info);
+
     const recv = try abi.caps.ROOT_MEMORY.alloc(abi.caps.Receiver);
+
+    initfsd.wait();
 
     var system: System = .{
         .recv = recv,
