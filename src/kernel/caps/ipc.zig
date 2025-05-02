@@ -20,7 +20,7 @@ pub const Receiver = struct {
     /// the currently waiting receiver thread
     receiver: std.atomic.Value(?*caps.Thread) = .init(null),
 
-    /// a linked list of
+    /// a linked list of waiting callers
     queue_lock: spin.Mutex = .{},
     queue: util.Queue(caps.Thread, "next", "prev") = .{},
 
