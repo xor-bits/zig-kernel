@@ -36,11 +36,15 @@ fn vmmVectorResize(_: *anyopaque, _: []u8, _: std.mem.Alignment, _: usize, _: us
 
 fn vmmVectorRemap(_top: *anyopaque, memory: []u8, _: std.mem.Alignment, new_len: usize, _: usize) ?[*]u8 {
     const top: *usize = @alignCast(@ptrCast(_top));
-    vmmVectorGrow(top, std.math.divCeil(
-        usize,
-        new_len,
-        0x10000,
-    ) catch return null) catch return null;
+    const current_len = top.* - main.INITFS_TAR;
+    if (current_len < new_len) {
+        vmmVectorGrow(top, std.math.divCeil(
+            usize,
+            new_len - current_len,
+            0x10000,
+        ) catch return null) catch return null;
+    }
+
     return memory.ptr;
 }
 
