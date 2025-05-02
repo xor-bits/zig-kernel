@@ -596,6 +596,18 @@ const MessageUsage = struct {
         // @compileLog(Io);
 
         return struct {
+            fn extraCount() comptime_int {
+                var extra_count = @max(regs, 5) - 5;
+
+                inline for (self.data[0 .. self.data_cnt - 1]) |f| {
+                    if (f.encode_type == .cap) {
+                        extra_count += 1;
+                    }
+                }
+
+                return extra_count;
+            }
+
             pub fn serialize(msg: *sys.Message, inputs: Io) void {
                 var data: Struct = undefined;
 
@@ -649,6 +661,9 @@ const MessageUsage = struct {
                         extra_idx += 1;
                     }
                 }
+
+                std.debug.assert(extra_idx == extraCount());
+                msg.extra = extra_idx;
             }
 
             pub fn deserializeVariant(msg: *const sys.Message) ?self.data[0].fake_type {
@@ -661,7 +676,10 @@ const MessageUsage = struct {
                 ) catch null;
             }
 
-            pub fn deserialize(msg: *sys.Message) ?Io {
+            pub fn deserialize(msg: *const sys.Message) ?Io {
+                if (msg.extra != extraCount())
+                    return null;
+
                 var ret: Io = undefined;
 
                 var extra_idx: u7 = 0;
