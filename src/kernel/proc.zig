@@ -8,6 +8,7 @@ const caps = @import("caps.zig");
 const conf = @import("conf.zig");
 const main = @import("main.zig");
 const spin = @import("spin.zig");
+const util = @import("util.zig");
 
 const log = std.log.scoped(.proc);
 const Error = abi.sys.Error;
@@ -17,43 +18,12 @@ const Error = abi.sys.Error;
 // TODO: maybe a fastpath ring buffer before the linked list to reduce locking
 
 var active_threads: std.atomic.Value(usize) = .init(1);
-var queues: [4]Queue = .{ .{}, .{}, .{}, .{} };
-var queue_locks: [4]spin.Mutex = .{ .new(), .new(), .new(), .new() };
+var queues: [4]Queue = .{Queue{}} ** 4;
+var queue_locks: [4]spin.Mutex = .{spin.Mutex{}} ** 4;
+var waiters: [256]Waiter = .{Waiter.init(null)} ** 256;
 
-var waiters = [_]std.atomic.Value(?*main.CpuLocalStorage){.init(null)} ** 256;
-
-const Queue = struct {
-    head: ?caps.Ref(caps.Thread) = null,
-    tail: ?caps.Ref(caps.Thread) = null,
-
-    pub fn push(self: *@This(), thread: caps.Ref(caps.Thread)) void {
-        if (self.tail) |tail| {
-            thread.ptr().prev = tail;
-            tail.ptr().next = thread;
-        } else {
-            const thread_ptr = thread.ptr();
-            thread_ptr.next = null;
-            thread_ptr.prev = null;
-            self.head = thread;
-        }
-
-        self.tail = thread;
-    }
-
-    pub fn pop(self: *@This()) ?caps.Ref(caps.Thread) {
-        const head = self.head orelse return null;
-        const tail = self.tail orelse return null;
-
-        if (head.paddr.raw == tail.paddr.raw) {
-            self.head = null;
-            self.tail = null;
-        } else {
-            self.head = head.ptr().next.?; // assert that its not null
-        }
-
-        return head;
-    }
-};
+const Queue = util.Queue(caps.Thread, "next", "prev");
+const Waiter = std.atomic.Value(?*main.CpuLocalStorage);
 
 //
 
@@ -83,7 +53,7 @@ pub fn yield(trap: *arch.SyscallRegs) void {
 
 /// switch to another thread without adding the thread back to the ready queue
 pub fn switchNow(trap: *arch.SyscallRegs) void {
-    switchTo(trap, next().ptr());
+    switchTo(trap, next());
 }
 
 /// switch to another thread, skipping the scheduler entirely
@@ -127,7 +97,7 @@ pub fn ready(thread: *caps.Thread) void {
     queue_locks[prio].lock();
     defer queue_locks[prio].unlock();
 
-    queues[prio].push(caps.Ref(caps.Thread){ .paddr = addr.Virt.fromPtr(thread).hhdmToPhys() });
+    queues[prio].push(thread);
 
     // notify a single sleeping processor
     for (&waiters) |*w| {
@@ -141,7 +111,7 @@ pub fn ready(thread: *caps.Thread) void {
     // (if its current priority is lower than this new one)
 }
 
-pub fn next() caps.Ref(caps.Thread) {
+pub fn next() *caps.Thread {
     if (active_threads.load(.monotonic) == 0) {
         log.err("NO ACTIVE THREADS", .{});
         log.err("THIS IS A USER-SPACE ERROR", .{});
@@ -165,13 +135,13 @@ pub fn next() caps.Ref(caps.Thread) {
     }
 }
 
-pub fn tryNext() ?caps.Ref(caps.Thread) {
+pub fn tryNext() ?*caps.Thread {
     for (&queue_locks, &queues) |*lock, *queue| {
         lock.lock();
         defer lock.unlock();
 
         if (queue.pop()) |next_thread| {
-            if (next_thread.ptr().status == .stopped) {
+            if (next_thread.status == .stopped) {
                 continue;
             } else {
                 return next_thread;

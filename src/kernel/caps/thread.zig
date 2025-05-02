@@ -27,9 +27,9 @@ pub const Thread = struct {
     /// is the thread stopped/running/ready/waiting
     status: enum { stopped, running, ready, waiting } = .stopped,
     /// scheduler linked list
-    next: ?caps.Ref(Thread) = null,
+    next: ?*Thread = null,
     /// scheduler linked list
-    prev: ?caps.Ref(Thread) = null,
+    prev: ?*Thread = null,
 
     /// extra ipc registers
     /// controlled by Receiver and Sender

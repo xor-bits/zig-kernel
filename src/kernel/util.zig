@@ -262,3 +262,43 @@ const Pixel = struct {
     green: u8,
     blue: u8,
 };
+
+//
+
+pub fn Queue(
+    comptime T: type,
+    comptime next_field: []const u8,
+    comptime prev_field: []const u8,
+) type {
+    return struct {
+        head: ?*T = null,
+        tail: ?*T = null,
+
+        pub fn push(self: *@This(), new: *T) void {
+            if (self.tail) |tail| {
+                @field(new, prev_field) = tail;
+                @field(tail, next_field) = new;
+            } else {
+                @field(new, prev_field) = null;
+                @field(new, next_field) = null;
+                self.head = new;
+            }
+
+            self.tail = new;
+        }
+
+        pub fn pop(self: *@This()) ?*T {
+            const head = self.head orelse return null;
+            const tail = self.tail orelse return null;
+
+            if (head == tail) {
+                self.head = null;
+                self.tail = null;
+            } else {
+                self.head = @field(head, next_field).?; // assert that its not null
+            }
+
+            return head;
+        }
+    };
+}
