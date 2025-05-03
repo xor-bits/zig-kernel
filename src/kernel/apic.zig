@@ -136,8 +136,6 @@ pub fn init(madt: *const Madt) !void {
 
     const lapic_id = lapic.lapic_id.val;
     if (lapic_id <= 0xF) {
-        fillHandlers(&arch.cpuLocal().cpu_config.idt);
-
         ioapic_lapic_lock.lock();
         defer ioapic_lapic_lock.unlock();
         try ioapic_lapics.append(.{
@@ -147,20 +145,6 @@ pub fn init(madt: *const Madt) !void {
     }
 
     apic_base.initNow(lapic);
-}
-
-fn fillHandlers(idt: *arch.Idt) void {
-    inline for (0..IRQ_AVAIL_COUNT) |i| {
-        idt.entries[i + IRQ_AVAIL_LOW] = arch.Entry.generate(struct {
-            pub fn handler(_: *const arch.InterruptStackFrame) void {
-                // log.info("extra interrupt i=0x{x}", .{i + IRQ_AVAIL_LOW});
-                defer eoi();
-
-                const notify = arch.cpuLocal().interrupt_handlers[i].load(.acquire) orelse return;
-                _ = notify.notify(0);
-            }
-        }).asInt();
-    }
 }
 
 pub fn enable() void {
@@ -215,18 +199,6 @@ fn measureApicTimerSpeed(lapic: *volatile LocalApicRegs) u32 {
         log.info("APIC timer speed: 1ms = {d} ticks", .{count});
 
     return count;
-}
-
-pub fn spurious(_: *const anyopaque) void {
-    eoi();
-}
-
-pub fn timer(_: *const anyopaque) void {
-    eoi();
-}
-
-pub fn ipi(_: *const anyopaque) void {
-    eoi();
 }
 
 pub fn eoi() void {

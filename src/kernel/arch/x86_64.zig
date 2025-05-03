@@ -813,7 +813,11 @@ pub const Idt = extern struct {
 
         entries[apic.IRQ_SPURIOUS] = Entry.generate(struct {
             fn handler(interrupt_stack_frame: *const InterruptStackFrame) void {
-                apic.spurious(interrupt_stack_frame);
+                const is_user = interrupt_stack_frame.code_segment == @as(u16, GdtDescriptor.user_code_selector);
+                if (is_user) swapgs();
+                defer if (is_user) swapgs();
+
+                apic.eoi();
             }
         }).asInt();
         entries[apic.IRQ_TIMER] = Entry.generate(struct {
@@ -822,7 +826,7 @@ pub const Idt = extern struct {
                 if (is_user) swapgs();
                 defer if (is_user) swapgs();
 
-                apic.timer(interrupt_stack_frame);
+                apic.eoi();
             }
         }).asInt();
         entries[apic.IRQ_IPI] = Entry.generate(struct {
@@ -831,9 +835,25 @@ pub const Idt = extern struct {
                 if (is_user) swapgs();
                 defer if (is_user) swapgs();
 
-                apic.ipi(interrupt_stack_frame);
+                apic.eoi();
             }
         }).asInt();
+
+        inline for (0..apic.IRQ_AVAIL_COUNT) |i| {
+            entries[i + apic.IRQ_AVAIL_LOW] = Entry.generate(struct {
+                pub fn handler(interrupt_stack_frame: *const InterruptStackFrame) void {
+                    const is_user = interrupt_stack_frame.code_segment == @as(u16, GdtDescriptor.user_code_selector);
+                    if (is_user) swapgs();
+                    defer if (is_user) swapgs();
+
+                    // log.info("extra interrupt i=0x{x}", .{i + IRQ_AVAIL_LOW});
+                    defer apic.eoi();
+
+                    const notify = cpuLocal().interrupt_handlers[i].load(.acquire) orelse return;
+                    _ = notify.notify(0);
+                }
+            }).asInt();
+        }
 
         return Self{
             .ptr = undefined,
