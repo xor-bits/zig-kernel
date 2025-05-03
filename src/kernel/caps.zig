@@ -12,7 +12,7 @@ const caps_ipc = @import("caps/ipc.zig");
 const caps_pmem = @import("caps/pmem.zig");
 const caps_thread = @import("caps/thread.zig");
 const caps_vmem = @import("caps/vmem.zig");
-const caps_port = @import("caps/port.zig");
+const caps_x86 = @import("caps/x86.zig");
 
 const log = std.log.scoped(.caps);
 const Error = abi.sys.Error;
@@ -26,8 +26,8 @@ pub const Vmem = caps_vmem.Vmem;
 pub const Receiver = caps_ipc.Receiver;
 pub const Sender = caps_ipc.Sender;
 pub const Notify = caps_ipc.Notify;
-pub const X86IoPortAllocator = caps_port.X86IoPortAllocator;
-pub const X86IoPort = caps_port.X86IoPort;
+pub const X86IoPortAllocator = caps_x86.X86IoPortAllocator;
+pub const X86IoPort = caps_x86.X86IoPort;
 
 //
 
