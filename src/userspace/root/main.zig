@@ -43,20 +43,25 @@ pub fn main() !noreturn {
     );
     log.info("boot info mapped", .{});
 
-    const kb_port = try caps.ROOT_X86_IOPORT_ALLOCATOR.alloc(0x60);
+    try startSpinner();
+    try initfsd.init();
+
+    const kb_port_data = try caps.ROOT_X86_IOPORT_ALLOCATOR.alloc(0x60);
+    const kb_port_status = try caps.ROOT_X86_IOPORT_ALLOCATOR.alloc(0x64);
     const kb_irq = try caps.ROOT_X86_IRQ_ALLOCATOR.alloc(1);
     const kb_irq_notify = try caps.ROOT_MEMORY.alloc(caps.Notify);
 
     try kb_irq.subscribe(kb_irq_notify);
 
     while (true) {
+        log.info("waiting for keyboard interrupt", .{});
         _ = try kb_irq_notify.wait();
-        const inb = try kb_port.inb();
-        log.info("keyboard: 0b{b:0>8}", .{inb});
-    }
 
-    try startSpinner();
-    try initfsd.init();
+        while (try kb_port_status.inb() & 0b1 == 1) {
+            const inb = try kb_port_data.inb();
+            log.info("keyboard: 0b{b:0>8}", .{inb});
+        }
+    }
 
     const recv = try abi.caps.ROOT_MEMORY.alloc(abi.caps.Receiver);
 
@@ -169,6 +174,7 @@ fn framebufferSplash(boot_info: *const abi.BootInfo) !void {
     while (true) {
         drawFrame(&fb_info, mid_x, mid_y, millis);
         millis += 4.0;
+        abi.sys.yield();
     }
 
     try abi.caps.ROOT_SELF_VMEM.unmap(boot_info.framebuffer, FRAMEBUFFER);
