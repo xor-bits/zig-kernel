@@ -475,6 +475,11 @@ const MessageUsage = struct {
             caps.Frame,
             caps.Receiver,
             caps.Sender,
+            caps.Notify,
+            caps.X86IoPortAllocator,
+            caps.X86IoPort,
+            caps.X86IrqAllocator,
+            caps.X86Irq,
             => {
                 real_ty = u32;
                 enc = .cap;
