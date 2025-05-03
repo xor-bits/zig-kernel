@@ -39,6 +39,8 @@ pub fn exec(a: args.Args) !void {
 
     const x86_ioport_allocator = caps.Ref(caps.X86IoPortAllocator){ .paddr = .fromInt(0) };
 
+    const x86_irq_allocator = caps.Ref(caps.X86IrqAllocator){ .paddr = .fromInt(0) };
+
     var id: u32 = undefined;
     id = caps.pushCapability(vmem.object(init_thread.ptr()));
     std.debug.assert(id == abi.caps.ROOT_SELF_VMEM.cap);
@@ -50,6 +52,8 @@ pub fn exec(a: args.Args) !void {
     std.debug.assert(id == abi.caps.ROOT_BOOT_INFO.cap);
     id = caps.pushCapability(x86_ioport_allocator.object(init_thread.ptr()));
     std.debug.assert(id == abi.caps.ROOT_X86_IOPORT_ALLOCATOR.cap);
+    id = caps.pushCapability(x86_irq_allocator.object(init_thread.ptr()));
+    std.debug.assert(id == abi.caps.ROOT_X86_IRQ_ALLOCATOR.cap);
 
     try mapRoot(init_thread.ptr(), vmem.ptr(), boot_info.ptr(), a);
 

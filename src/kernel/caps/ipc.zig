@@ -262,9 +262,6 @@ pub const Notify = struct {
             .clone => {
                 trap.arg1 = caps.pushCapability(self_ref.object(thread));
             },
-            .tmp1 => {
-                apic.registerExternalInterrupt(1, self).?;
-            },
         }
     }
 

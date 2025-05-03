@@ -28,6 +28,8 @@ pub const Sender = caps_ipc.Sender;
 pub const Notify = caps_ipc.Notify;
 pub const X86IoPortAllocator = caps_x86.X86IoPortAllocator;
 pub const X86IoPort = caps_x86.X86IoPort;
+pub const X86IrqAllocator = caps_x86.X86IrqAllocator;
+pub const X86Irq = caps_x86.X86Irq;
 
 //
 
@@ -266,6 +268,8 @@ pub const Object = struct {
             Notify => .notify,
             X86IoPortAllocator => .x86_ioport_allocator,
             X86IoPort => .x86_ioport,
+            X86IrqAllocator => .x86_irq_allocator,
+            X86Irq => .x86_irq,
             else => @compileError(std.fmt.comptimePrint("invalid Capability type: {s}", .{@typeName(T)})),
         };
     }
@@ -291,6 +295,8 @@ pub const Object = struct {
             .notify => (try Ref(Notify).alloc(dyn_size)).object(owner),
             .x86_ioport_allocator => (try Ref(X86IoPortAllocator).alloc(dyn_size)).object(owner),
             .x86_ioport => (try Ref(X86IoPort).alloc(dyn_size)).object(owner),
+            .x86_irq_allocator => (try Ref(X86IrqAllocator).alloc(dyn_size)).object(owner),
+            .x86_irq => (try Ref(X86Irq).alloc(dyn_size)).object(owner),
         };
     }
 
@@ -307,6 +313,8 @@ pub const Object = struct {
             .notify => Notify.call(self.paddr, thread, trap),
             .x86_ioport_allocator => X86IoPortAllocator.call(self.paddr, thread, trap),
             .x86_ioport => X86IoPort.call(self.paddr, thread, trap),
+            .x86_irq_allocator => X86IrqAllocator.call(self.paddr, thread, trap),
+            .x86_irq => X86Irq.call(self.paddr, thread, trap),
         };
     }
 
@@ -322,6 +330,8 @@ pub const Object = struct {
             .notify => Error.InvalidArgument,
             .x86_ioport_allocator => Error.InvalidArgument,
             .x86_ioport => Error.InvalidArgument,
+            .x86_irq_allocator => Error.InvalidArgument,
+            .x86_irq => Error.InvalidArgument,
         };
     }
 
@@ -337,6 +347,8 @@ pub const Object = struct {
             .notify => Error.InvalidArgument,
             .x86_ioport_allocator => Error.InvalidArgument,
             .x86_ioport => Error.InvalidArgument,
+            .x86_irq_allocator => Error.InvalidArgument,
+            .x86_irq => Error.InvalidArgument,
         };
     }
 
@@ -352,6 +364,8 @@ pub const Object = struct {
             .notify => Error.InvalidArgument,
             .x86_ioport_allocator => Error.InvalidArgument,
             .x86_ioport => Error.InvalidArgument,
+            .x86_irq_allocator => Error.InvalidArgument,
+            .x86_irq => Error.InvalidArgument,
         };
     }
 };

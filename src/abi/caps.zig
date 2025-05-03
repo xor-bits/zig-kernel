@@ -8,6 +8,7 @@ pub const ROOT_SELF_THREAD: Thread = .{ .cap = 2 };
 pub const ROOT_MEMORY: Memory = .{ .cap = 3 };
 pub const ROOT_BOOT_INFO: Frame = .{ .cap = 4 };
 pub const ROOT_X86_IOPORT_ALLOCATOR: X86IoPortAllocator = .{ .cap = 5 };
+pub const ROOT_X86_IRQ_ALLOCATOR: X86IrqAllocator = .{ .cap = 6 };
 
 //
 
@@ -175,5 +176,35 @@ pub const X86IoPort = extern struct {
 
     pub fn outb(self: @This(), byte: u8) sys.Error!void {
         return sys.x86IoPortOutb(self.cap, byte);
+    }
+};
+
+/// x86 specific capability that allows allocating `x86_irq` capabilities
+pub const X86IrqAllocator = extern struct {
+    cap: u32 = 0,
+
+    pub const Type: abi.ObjectType = .x86_irq_allocator;
+
+    pub fn alloc(self: @This(), global_system_interrupt: u8) sys.Error!X86Irq {
+        return .{ .cap = try sys.x86IrqAllocatorAlloc(self.cap, global_system_interrupt) };
+    }
+
+    pub fn clone(self: @This()) sys.Error!@This() {
+        return .{ .cap = try sys.x86IrqAllocatorClone(self.cap) };
+    }
+};
+
+/// x86 specific capability that gives access to one IRQ (= interrupt request)
+pub const X86Irq = extern struct {
+    cap: u32 = 0,
+
+    pub const Type: abi.ObjectType = .x86_irq;
+
+    pub fn subscribe(self: @This(), notify: Notify) sys.Error!void {
+        return sys.x86IrqSubscribe(self.cap, notify.cap);
+    }
+
+    pub fn unsubscribe(self: @This(), notify: Notify) sys.Error!void {
+        return sys.x86IrqUnsubscribe(self.cap, notify.cap);
     }
 };

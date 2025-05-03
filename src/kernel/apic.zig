@@ -261,20 +261,22 @@ pub fn interProcessorInterrupt(target_lapic_id: u8) void {
 /// source IRQ would be the source like keyboard at 1
 /// destination IRQ would be the IDT handler index
 pub fn registerExternalInterrupt(source_irq: u8, notify: *caps.Notify) ?void {
-    log.info("registering interrupt {}", .{source_irq});
+    // log.info("registering interrupt {}", .{source_irq});
 
     ioapic_lapic_lock.lock();
     defer ioapic_lapic_lock.unlock();
     ioapic_lock.lock();
     defer ioapic_lock.unlock();
 
+    // FIXME: read the overrides
+
     const lapic_id, const handler, const i = findUsableHandler() orelse return null;
     const ioapic, const low_index = findUsableRedirectEntry(source_irq) orelse return null;
     const high_index = low_index + 1;
 
-    log.info("lapic_id={} i={}", .{
-        source_irq, i,
-    });
+    // log.info("lapic_id={} i={}", .{
+    //     source_irq, i,
+    // });
 
     var low = ioapicRead(ioapic, low_index);
     var high = ioapicRead(ioapic, high_index);
@@ -294,11 +296,6 @@ pub fn registerExternalInterrupt(source_irq: u8, notify: *caps.Notify) ?void {
 
     ioapicWrite(ioapic, high_index, high);
     ioapicWrite(ioapic, low_index, low);
-
-    log.info("listening", .{});
-
-    // FIXME: read the overrides
-
 }
 
 /// `ioapic_lapic_lock` has to be held
@@ -337,7 +334,7 @@ fn findUsableRedirectEntry(source_irq: u32) ?struct { *volatile IoApicRegs, u32 
         // log.info("ioapic={*} entry={} val={}", .{ ioapic.addr, source_irq - min, val });
 
         if (val.vector == 0) {
-            log.info("slot {}", .{source_irq - min});
+            // log.info("slot {}", .{source_irq - min});
             return .{ ioapic.addr, low_index };
         }
     }

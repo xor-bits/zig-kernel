@@ -69,6 +69,9 @@ pub const Error = error{
     PermissionDenied,
     Internal,
     NoReplyTarget,
+    NotifyAlreadySubscribed,
+    IrqAlreadySubscribed,
+    TooManyIrqs,
 
     UnknownError,
 };
@@ -110,6 +113,9 @@ fn encodeError(err: Error) usize {
         error.PermissionDenied => 18,
         error.Internal => 19,
         error.NoReplyTarget => 20,
+        error.NotifyAlreadySubscribed => 21,
+        error.IrqAlreadySubscribed => 22,
+        error.TooManyIrqs => 23,
 
         error.UnknownError => std.debug.panic("unknown error shouldn't be encoded", .{}),
     }));
@@ -141,6 +147,9 @@ pub fn decode(v: usize) Error!usize {
         18 => error.PermissionDenied,
         19 => error.Internal,
         20 => error.NoReplyTarget,
+        21 => error.NotifyAlreadySubscribed,
+        22 => error.IrqAlreadySubscribed,
+        23 => error.TooManyIrqs,
 
         else => return error.UnknownError,
     };
@@ -318,7 +327,6 @@ pub const NotifyCallId = enum(u8) {
     poll,
     notify,
     clone,
-    tmp1,
 };
 
 // returns the cap id of whoever notified this thread first
@@ -355,13 +363,6 @@ pub fn notifyClone(notify_cap: u32) Error!u32 {
     };
     try call(notify_cap, &msg);
     return @truncate(msg.arg0);
-}
-
-pub fn tmp1(notify_cap: u32) Error!void {
-    var msg: Message = .{
-        .arg0 = @intFromEnum(NotifyCallId.tmp1),
-    };
-    try call(notify_cap, &msg);
 }
 
 // X86IOPORTALLOCATOR CAPABILITY CALLS
@@ -409,6 +410,53 @@ pub fn x86IoPortOutb(x86_ioport_cap_id: u32, byte: u8) Error!void {
         .arg1 = @truncate(byte),
     };
     try call(x86_ioport_cap_id, &msg);
+}
+
+// X86IRQALLOCATOR CAPABILITY CALLS
+
+pub const X86IrqAllocatorCallId = enum(u8) {
+    alloc,
+    clone,
+};
+
+pub fn x86IrqAllocatorAlloc(x86_irq_allocator_cap_id: u32, global_system_interrupt: u8) Error!u32 {
+    var msg: Message = .{
+        .arg0 = @intFromEnum(X86IrqAllocatorCallId.alloc),
+        .arg1 = global_system_interrupt,
+    };
+    try call(x86_irq_allocator_cap_id, &msg);
+    return @truncate(msg.arg0);
+}
+
+pub fn x86IrqAllocatorClone(x86_irq_allocator_cap_id: u32) Error!u32 {
+    var msg: Message = .{
+        .arg0 = @intFromEnum(X86IrqAllocatorCallId.clone),
+    };
+    try call(x86_irq_allocator_cap_id, &msg);
+    return @truncate(msg.arg0);
+}
+
+// X86IRQ CAPABILITY CALLS
+
+pub const X86IrqCallId = enum(u8) {
+    subscribe,
+    unsubscribe,
+};
+
+pub fn x86IrqSubscribe(x86_irq_cap_id: u32, notify_cap_id: u32) Error!void {
+    var msg: Message = .{
+        .arg0 = @intFromEnum(X86IrqCallId.subscribe),
+        .arg1 = notify_cap_id,
+    };
+    try call(x86_irq_cap_id, &msg);
+}
+
+pub fn x86IrqUnsubscribe(x86_irq_cap_id: u32, notify_cap_id: u32) Error!void {
+    var msg: Message = .{
+        .arg0 = @intFromEnum(X86IrqCallId.unsubscribe),
+        .arg1 = notify_cap_id,
+    };
+    try call(x86_irq_cap_id, &msg);
 }
 
 // SYSCALLS

@@ -78,6 +78,10 @@ pub const ObjectType = enum(u8) {
     x86_ioport_allocator,
     /// x86 specific capability that gives access to one IO port
     x86_ioport,
+    /// x86 specific capability that allows allocating `x86_irq` capabilities
+    x86_irq_allocator,
+    /// x86 specific capability that gives access to one IRQ (= interrupt request)
+    x86_irq,
 };
 
 /// kernel object size in bit-width (minus 12)
