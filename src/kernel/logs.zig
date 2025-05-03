@@ -77,6 +77,16 @@ pub fn panic(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace, ret_
     arch.hcf();
 }
 
+pub fn addr2line(address: usize) void {
+    if (getSelfDwarf()) |_dwarf| {
+        var dwarf = _dwarf;
+        defer dwarf.deinit(pmem.page_allocator);
+        printSourceAtAddress(&dwarf, address);
+    } else |err| {
+        std.log.err("failed to open DWARF info: {}", .{err});
+    }
+}
+
 fn printSourceAtAddress(debug_info: *std.debug.Dwarf, address: usize) void {
     const sym = debug_info.getSymbolName(address) orelse {
         print("  \x1B[90m?? @ 0x{x:0>16}\x1B[0m", .{address});

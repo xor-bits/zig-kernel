@@ -6,6 +6,7 @@ const apic = @import("../apic.zig");
 const addr = @import("../addr.zig");
 const main = @import("../main.zig");
 const pmem = @import("../pmem.zig");
+const proc = @import("../proc.zig");
 
 const log = std.log.scoped(.arch);
 
@@ -722,7 +723,12 @@ pub const Idt = extern struct {
                     interrupt_stack_frame.sp,
                 });
 
-                std.debug.panic("unhandled CPU exception", .{});
+                if (pfec.user_mode) {
+                    proc.enter();
+                } else {
+                    @import("../logs.zig").addr2line(interrupt_stack_frame.ip);
+                    std.debug.panic("unhandled CPU exception", .{});
+                }
             }
         }).withStack(1).asInt();
         // reserved
