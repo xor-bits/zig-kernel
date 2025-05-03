@@ -12,6 +12,7 @@ const caps_ipc = @import("caps/ipc.zig");
 const caps_pmem = @import("caps/pmem.zig");
 const caps_thread = @import("caps/thread.zig");
 const caps_vmem = @import("caps/vmem.zig");
+const caps_port = @import("caps/port.zig");
 
 const log = std.log.scoped(.caps);
 const Error = abi.sys.Error;
@@ -25,6 +26,8 @@ pub const Vmem = caps_vmem.Vmem;
 pub const Receiver = caps_ipc.Receiver;
 pub const Sender = caps_ipc.Sender;
 pub const Notify = caps_ipc.Notify;
+pub const X86IoPortAllocator = caps_port.X86IoPortAllocator;
+pub const X86IoPort = caps_port.X86IoPort;
 
 //
 
@@ -261,6 +264,8 @@ pub const Object = struct {
             Receiver => .receiver,
             Sender => .sender,
             Notify => .notify,
+            X86IoPortAllocator => .x86_ioport_allocator,
+            X86IoPort => .x86_ioport,
             else => @compileError(std.fmt.comptimePrint("invalid Capability type: {s}", .{@typeName(T)})),
         };
     }
@@ -284,6 +289,8 @@ pub const Object = struct {
             .receiver => (try Ref(Receiver).alloc(dyn_size)).object(owner),
             .sender => (try Ref(Sender).alloc(dyn_size)).object(owner),
             .notify => (try Ref(Notify).alloc(dyn_size)).object(owner),
+            .x86_ioport_allocator => (try Ref(X86IoPortAllocator).alloc(dyn_size)).object(owner),
+            .x86_ioport => (try Ref(X86IoPort).alloc(dyn_size)).object(owner),
         };
     }
 
@@ -298,6 +305,8 @@ pub const Object = struct {
             .receiver => Receiver.call(self.paddr, thread, trap),
             .sender => Sender.call(self.paddr, thread, trap),
             .notify => Notify.call(self.paddr, thread, trap),
+            .x86_ioport_allocator => X86IoPortAllocator.call(self.paddr, thread, trap),
+            .x86_ioport => X86IoPort.call(self.paddr, thread, trap),
         };
     }
 
@@ -311,6 +320,8 @@ pub const Object = struct {
             .receiver => Receiver.recv(self.paddr, thread, trap),
             .sender => Error.InvalidArgument,
             .notify => Error.InvalidArgument,
+            .x86_ioport_allocator => Error.InvalidArgument,
+            .x86_ioport => Error.InvalidArgument,
         };
     }
 
@@ -324,6 +335,8 @@ pub const Object = struct {
             .receiver => Receiver.reply(self.paddr, thread, trap),
             .sender => Error.InvalidArgument,
             .notify => Error.InvalidArgument,
+            .x86_ioport_allocator => Error.InvalidArgument,
+            .x86_ioport => Error.InvalidArgument,
         };
     }
 
@@ -337,6 +350,8 @@ pub const Object = struct {
             .receiver => Receiver.replyRecv(self.paddr, thread, trap),
             .sender => Error.InvalidArgument,
             .notify => Error.InvalidArgument,
+            .x86_ioport_allocator => Error.InvalidArgument,
+            .x86_ioport => Error.InvalidArgument,
         };
     }
 };

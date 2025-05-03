@@ -37,6 +37,8 @@ pub fn exec(a: args.Args) !void {
 
     const boot_info = try caps.Ref(caps.Frame).alloc(abi.ChunkSize.of(@sizeOf(abi.BootInfo)));
 
+    const x86_ioport_allocator = caps.Ref(caps.X86IoPortAllocator){ .paddr = .fromInt(0) };
+
     var id: u32 = undefined;
     id = caps.pushCapability(vmem.object(init_thread.ptr()));
     std.debug.assert(id == abi.caps.ROOT_SELF_VMEM.cap);
@@ -46,6 +48,8 @@ pub fn exec(a: args.Args) !void {
     std.debug.assert(id == abi.caps.ROOT_MEMORY.cap);
     id = caps.pushCapability(boot_info.object(init_thread.ptr()));
     std.debug.assert(id == abi.caps.ROOT_BOOT_INFO.cap);
+    id = caps.pushCapability(x86_ioport_allocator.object(init_thread.ptr()));
+    std.debug.assert(id == abi.caps.ROOT_X86_IOPORT_ALLOCATOR.cap);
 
     try mapRoot(init_thread.ptr(), vmem.ptr(), boot_info.ptr(), a);
 

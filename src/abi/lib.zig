@@ -73,6 +73,11 @@ pub const ObjectType = enum(u8) {
     /// capability to **a** notify object
     /// there can be multiple of them
     notify,
+
+    /// x86 specific capability that allows allocating `x86_ioport` capabilities
+    x86_ioport_allocator,
+    /// x86 specific capability that gives access to one IO port
+    x86_ioport,
 };
 
 /// kernel object size in bit-width (minus 12)

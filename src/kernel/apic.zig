@@ -153,11 +153,8 @@ fn fillHandlers(idt: *arch.Idt) void {
     inline for (0..IRQ_AVAIL_COUNT) |i| {
         idt.entries[i + IRQ_AVAIL_LOW] = arch.Entry.generate(struct {
             pub fn handler(_: *const arch.InterruptStackFrame) void {
-                log.info("extra interrupt i=0x{x}", .{i + IRQ_AVAIL_LOW});
+                // log.info("extra interrupt i=0x{x}", .{i + IRQ_AVAIL_LOW});
                 defer eoi();
-
-                const kb_byte = arch.inb(0x60);
-                log.info("kbbyte={}", .{kb_byte});
 
                 const notify = arch.cpuLocal().interrupt_handlers[i].load(.acquire) orelse return;
                 _ = notify.notify(0);

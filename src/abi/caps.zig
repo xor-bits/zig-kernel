@@ -7,6 +7,7 @@ pub const ROOT_SELF_VMEM: Vmem = .{ .cap = 1 };
 pub const ROOT_SELF_THREAD: Thread = .{ .cap = 2 };
 pub const ROOT_MEMORY: Memory = .{ .cap = 3 };
 pub const ROOT_BOOT_INFO: Frame = .{ .cap = 4 };
+pub const ROOT_X86_IOPORT_ALLOCATOR: X86IoPortAllocator = .{ .cap = 5 };
 
 //
 
@@ -144,5 +145,35 @@ pub const Notify = extern struct {
 
     pub fn clone(self: @This()) sys.Error!u32 {
         return sys.notifyClone(self.cap);
+    }
+};
+
+/// x86 specific capability that allows allocating `x86_ioport` capabilities
+pub const X86IoPortAllocator = extern struct {
+    cap: u32 = 0,
+
+    pub const Type: abi.ObjectType = .x86_ioport_allocator;
+
+    pub fn alloc(self: @This(), port: u16) sys.Error!X86IoPort {
+        return .{ .cap = try sys.x86IoPortAllocatorAlloc(self.cap, port) };
+    }
+
+    pub fn clone(self: @This()) sys.Error!@This() {
+        return .{ .cap = try sys.x86IoPortAllocatorClone(self.cap) };
+    }
+};
+
+/// x86 specific capability that gives access to one IO port
+pub const X86IoPort = extern struct {
+    cap: u32 = 0,
+
+    pub const Type: abi.ObjectType = .x86_ioport;
+
+    pub fn inb(self: @This()) sys.Error!u8 {
+        return sys.x86IoPortInb(self.cap);
+    }
+
+    pub fn outb(self: @This(), byte: u8) sys.Error!void {
+        return sys.x86IoPortOutb(self.cap, byte);
     }
 };

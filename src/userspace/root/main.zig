@@ -43,11 +43,13 @@ pub fn main() !noreturn {
     );
     log.info("boot info mapped", .{});
 
+    const kb_port = try caps.ROOT_X86_IOPORT_ALLOCATOR.alloc(0x60);
     const kb = try abi.caps.ROOT_MEMORY.alloc(abi.caps.Notify);
     try abi.sys.tmp1(kb.cap);
     while (true) {
-        const notifier = try kb.wait();
-        log.info("notified: {}", .{notifier});
+        _ = try kb.wait();
+        const inb = try kb_port.inb();
+        log.info("keyboard: 0b{b:0>8}", .{inb});
     }
 
     try startSpinner();

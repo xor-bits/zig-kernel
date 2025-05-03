@@ -364,6 +364,53 @@ pub fn tmp1(notify_cap: u32) Error!void {
     try call(notify_cap, &msg);
 }
 
+// X86IOPORTALLOCATOR CAPABILITY CALLS
+
+pub const X86IoPortAllocatorCallId = enum(u8) {
+    alloc,
+    clone,
+};
+
+pub fn x86IoPortAllocatorAlloc(x86_ioport_allocator_cap_id: u32, port: u16) Error!u32 {
+    var msg: Message = .{
+        .arg0 = @intFromEnum(X86IoPortAllocatorCallId.alloc),
+        .arg1 = port,
+    };
+    try call(x86_ioport_allocator_cap_id, &msg);
+    return @truncate(msg.arg0);
+}
+
+pub fn x86IoPortAllocatorClone(x86_ioport_allocator_cap_id: u32) Error!u32 {
+    var msg: Message = .{
+        .arg0 = @intFromEnum(X86IoPortAllocatorCallId.clone),
+    };
+    try call(x86_ioport_allocator_cap_id, &msg);
+    return @truncate(msg.arg0);
+}
+
+// X86IOPORT CAPABILITY CALLS
+
+pub const X86IoPortCallId = enum(u8) {
+    inb,
+    outb,
+};
+
+pub fn x86IoPortInb(x86_ioport_cap_id: u32) Error!u8 {
+    var msg: Message = .{
+        .arg0 = @intFromEnum(X86IoPortCallId.inb),
+    };
+    try call(x86_ioport_cap_id, &msg);
+    return @truncate(msg.arg0);
+}
+
+pub fn x86IoPortOutb(x86_ioport_cap_id: u32, byte: u8) Error!void {
+    var msg: Message = .{
+        .arg0 = @intFromEnum(X86IoPortCallId.outb),
+        .arg1 = @truncate(byte),
+    };
+    try call(x86_ioport_cap_id, &msg);
+}
+
 // SYSCALLS
 
 pub const Message = extern struct {
