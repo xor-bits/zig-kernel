@@ -20,7 +20,7 @@ pub const LOG_SERVERS: bool = true;
 
 pub const std_options: std.Options = .{
     .logFn = logFn,
-    .log_level = .debug,
+    .log_level = if (@hasDecl(root, "log_level")) root.log_level else .debug,
 };
 
 fn logFn(comptime message_level: std.log.Level, comptime scope: @TypeOf(.enum_literal), comptime format: []const u8, args: anytype) void {
