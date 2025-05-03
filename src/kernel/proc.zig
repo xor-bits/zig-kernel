@@ -32,6 +32,13 @@ pub fn init() void {
     _ = active_threads.fetchSub(1, .seq_cst);
 }
 
+/// forgets the current thread and jumps into the main syscall loop
+pub fn enter() noreturn {
+    var trap: arch.SyscallRegs = undefined;
+    yield(&trap);
+    arch.sysret(&trap);
+}
+
 /// add the current thread back to the ready queue (if ready) and maybe switch to another thread
 pub fn yield(trap: *arch.SyscallRegs) void {
     const local = arch.cpuLocal();

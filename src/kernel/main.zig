@@ -119,7 +119,7 @@ pub fn main() noreturn {
     };
 
     log.info("entering user-space", .{});
-    procEnter();
+    proc.enter();
 }
 
 // the actual _smpstart is in arch/x86_64.zig
@@ -143,13 +143,7 @@ pub fn smpmain(smpinfo: *limine.SmpInfo) noreturn {
     };
 
     log.info("entering user-space", .{});
-    procEnter();
-}
-
-fn procEnter() noreturn {
-    var trap: arch.SyscallRegs = undefined;
-    proc.yield(&trap);
-    arch.sysret(&trap);
+    proc.enter();
 }
 
 pub fn syscall(trap: *arch.SyscallRegs) void {
