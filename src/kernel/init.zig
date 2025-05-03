@@ -31,6 +31,7 @@ pub fn exec(a: args.Args) !void {
             .user_instr_ptr = abi.ROOT_EXE,
         },
         .vmem = vmem,
+        .priority = 0,
     };
 
     const init_memory = try caps.Ref(caps.Memory).alloc(null);
