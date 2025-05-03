@@ -192,8 +192,8 @@ const FbInfo = struct {
 fn drawFrame(fb: *const FbInfo, mid_x: usize, mid_y: usize, millis: f32) void {
     dim(fb, mid_x, mid_y);
 
-    for (0..40) |i| {
-        const phase = @as(f32, @floatFromInt(i)) / 40.0;
+    for (0..20) |i| {
+        const phase = @as(f32, @floatFromInt(i)) / 20.0;
         drawTriangleDot(fb, mid_x, mid_y, phase * 3.0 - millis * speed, millis, 0xFF8000);
     }
 }
@@ -233,8 +233,8 @@ fn drawTriangleDot(fb: *const FbInfo, mid_x: usize, mid_y: usize, t: f32, millis
 
     drawDot(
         fb,
-        @as(usize, @intFromFloat(pt_x * 100.0 + @as(f32, @floatFromInt(mid_x)))),
-        @as(usize, @intFromFloat(pt_y * 100.0 + @as(f32, @floatFromInt(mid_y)))),
+        @as(usize, @intFromFloat(pt_x * 60.0 + @as(f32, @floatFromInt(mid_x)))),
+        @as(usize, @intFromFloat(pt_y * 60.0 + @as(f32, @floatFromInt(mid_y)))),
         col,
     );
 }
