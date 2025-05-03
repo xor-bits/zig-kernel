@@ -43,6 +43,13 @@ pub fn main() !noreturn {
     );
     log.info("boot info mapped", .{});
 
+    const kb = try abi.caps.ROOT_MEMORY.alloc(abi.caps.Notify);
+    try abi.sys.tmp1(kb.cap);
+    while (true) {
+        const notifier = try kb.wait();
+        log.info("notified: {}", .{notifier});
+    }
+
     try startSpinner();
     try initfsd.init();
 

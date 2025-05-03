@@ -86,6 +86,27 @@ pub fn getCapability(thread: *Thread, cap_id: u32) Error!*Object {
     return obj;
 }
 
+/// returns an object from a capability,
+/// the returned object is locked
+pub fn getCapabilityAnyOwner(cap_id: u32) Error!*Object {
+    if (cap_id == 0)
+        return Error.InvalidCapability;
+
+    const caps = capabilityArray();
+    if (cap_id >= caps.len)
+        return Error.InvalidCapability;
+
+    const obj = &caps[cap_id];
+
+    errdefer if (conf.LOG_OBJ_CALLS)
+        log.debug("obj was cap={} type={}", .{ cap_id, obj.type });
+
+    if (!obj.lock.tryLock())
+        return Error.ThreadSafety;
+
+    return obj;
+}
+
 /// gets a capability when its already locked and checked to be owned
 pub fn getCapabilityLocked(cap_id: u32) *Object {
     return &capabilityArrayUnchecked()[cap_id];

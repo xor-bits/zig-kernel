@@ -318,6 +318,7 @@ pub const NotifyCallId = enum(u8) {
     poll,
     notify,
     clone,
+    tmp1,
 };
 
 // returns the cap id of whoever notified this thread first
@@ -354,6 +355,13 @@ pub fn notifyClone(notify_cap: u32) Error!u32 {
     };
     try call(notify_cap, &msg);
     return @truncate(msg.arg0);
+}
+
+pub fn tmp1(notify_cap: u32) Error!void {
+    var msg: Message = .{
+        .arg0 = @intFromEnum(NotifyCallId.tmp1),
+    };
+    try call(notify_cap, &msg);
 }
 
 // SYSCALLS

@@ -4,17 +4,18 @@ const abi = @import("abi");
 const limine = @import("limine");
 
 const acpi = @import("acpi.zig");
+const addr = @import("addr.zig");
+const apic = @import("apic.zig");
 const arch = @import("arch.zig");
 const args = @import("args.zig");
-const addr = @import("addr.zig");
-const conf = @import("conf.zig");
-const logs = @import("logs.zig");
-const spin = @import("spin.zig");
-const proc = @import("proc.zig");
-const util = @import("util.zig");
-const init = @import("init.zig");
 const caps = @import("caps.zig");
+const conf = @import("conf.zig");
+const init = @import("init.zig");
+const logs = @import("logs.zig");
 const pmem = @import("pmem.zig");
+const proc = @import("proc.zig");
+const spin = @import("spin.zig");
+const util = @import("util.zig");
 
 //
 
@@ -39,6 +40,10 @@ pub const CpuLocalStorage = struct {
     current_thread: ?*caps.Thread = null,
     id: u32,
     lapic_id: u8,
+
+    // FIXME: remove notify caps from here
+    interrupt_handlers: [apic.IRQ_AVAIL_COUNT]apic.Handler =
+        .{apic.Handler.init(null)} ** apic.IRQ_AVAIL_COUNT,
 };
 
 //

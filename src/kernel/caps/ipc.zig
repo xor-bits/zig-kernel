@@ -2,6 +2,7 @@ const std = @import("std");
 const abi = @import("abi");
 
 const addr = @import("../addr.zig");
+const apic = @import("../apic.zig");
 const arch = @import("../arch.zig");
 const caps = @import("../caps.zig");
 const conf = @import("../conf.zig");
@@ -256,20 +257,27 @@ pub const Notify = struct {
             },
             .notify => {
                 const notifier: u32 = @truncate(trap.arg0);
-
-                self.queue_lock.lock();
-                if (self.queue.popFront()) |waiter| {
-                    waiter.trap.arg1 = notifier;
-                    proc.ready(waiter);
-                    trap.arg1 = @intFromBool(false);
-                } else {
-                    trap.arg1 = @intFromBool(null != self.notified.cmpxchgStrong(0, notifier, .monotonic, .monotonic));
-                }
-                self.queue_lock.unlock();
+                trap.arg1 = @intFromBool(self.notify(notifier));
             },
             .clone => {
                 trap.arg1 = caps.pushCapability(self_ref.object(thread));
             },
+            .tmp1 => {
+                apic.registerExternalInterrupt(1, self).?;
+            },
+        }
+    }
+
+    pub fn notify(self: *@This(), notifier: u32) bool {
+        self.queue_lock.lock();
+        if (self.queue.popFront()) |waiter| {
+            self.queue_lock.unlock();
+            waiter.trap.arg1 = notifier;
+            proc.ready(waiter);
+            return false;
+        } else {
+            defer self.queue_lock.unlock();
+            return null != self.notified.cmpxchgStrong(0, notifier, .monotonic, .monotonic);
         }
     }
 };

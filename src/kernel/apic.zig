@@ -4,17 +4,23 @@ const builtin = @import("builtin");
 const acpi = @import("acpi.zig");
 const addr = @import("addr.zig");
 const arch = @import("arch.zig");
-const lazy = @import("lazy.zig");
+const caps = @import("caps.zig");
 const hpet = @import("hpet.zig");
+const lazy = @import("lazy.zig");
+const pmem = @import("pmem.zig");
 const spin = @import("spin.zig");
 
 const log = std.log.scoped(.apic);
 
 //
 
-pub const IRQ_SPURIOUS: u8 = 0xFF;
-pub const IRQ_TIMER: u8 = 0x30;
-pub const IRQ_IPI: u8 = 0x31;
+pub const IRQ_TIMER: u8 = 43;
+pub const IRQ_IPI: u8 = 44;
+pub const IRQ_SPURIOUS: u8 = 255;
+
+pub const IRQ_AVAIL_LOW: u8 = 45;
+pub const IRQ_AVAIL_HIGH: u8 = 254;
+pub const IRQ_AVAIL_COUNT = IRQ_AVAIL_HIGH - IRQ_AVAIL_LOW + 1;
 
 pub const IA32_APIC_XAPIC_ENABLE: u64 = 1 << 11;
 pub const IA32_APIC_X2APIC_ENABLE: u64 = 1 << 10;
@@ -36,6 +42,23 @@ const APIC_TIMER_DIV: u32 = 0b0010; // div by 8
 
 //
 
+var apic_base = lazy.Lazy(*volatile LocalApicRegs).new();
+/// all I/O APICs
+var ioapics = std.ArrayList(IoApicInfo).init(pmem.page_allocator);
+var ioapic_lock: spin.Mutex = .{};
+/// all Local APIC IDs that I/O APICs can use as interrupt destinations
+var ioapic_lapics = std.ArrayList(IoApicLapic).init(pmem.page_allocator);
+var ioapic_lapic_lock: spin.Mutex = .{};
+
+pub const Handler = std.atomic.Value(?*caps.Notify);
+
+const IoApicLapic = struct {
+    lapic_id: u4,
+    handlers: *[IRQ_AVAIL_COUNT]Handler,
+};
+
+//
+
 /// parse Multiple APIC Description Table
 pub fn init(madt: *const Madt) !void {
     log.info("init APIC-{}", .{arch.cpuId()});
@@ -43,6 +66,12 @@ pub fn init(madt: *const Madt) !void {
     if (builtin.target.cpu.arch == .x86_64) {
         disablePic();
     }
+
+    // cpu0 also sets up all I/O APICs
+    if (arch.cpuId() == 0)
+        ioapic_lock.lock();
+    defer if (arch.cpuId() == 0)
+        ioapic_lock.unlock();
 
     var lapic_addr: u64 = madt.lapic_addr;
 
@@ -59,15 +88,21 @@ pub fn init(madt: *const Madt) !void {
             },
             1 => {
                 const entry: *const IoApic = @ptrCast(entry_base);
-                // _ = entry;
-                if (arch.cpuId() == 0)
-                    log.info("found I/O APIC addr: 0x{x}", .{entry.io_apic_addr});
-                // TODO: this is going to be used later for I/O APIC
+                if (arch.cpuId() != 0) continue;
+
+                log.info("found I/O APIC addr: 0x{x}", .{entry.io_apic_addr});
+                try ioapics.append(.{
+                    .addr = addr.Phys.fromInt(entry.io_apic_addr).toHhdm().toPtr(*volatile IoApicRegs),
+                    .io_apic_id = entry.io_apic_id,
+                    .global_system_interrupt_base = entry.global_system_interrupt_base,
+                });
             },
             2 => {
                 const entry: *const IoApicInterruptSourceOverride = @ptrCast(entry_base);
-                _ = entry;
+                if (arch.cpuId() != 0) continue;
+
                 // FIXME: this is prob important
+                log.err("I/O APIC interrupt source override detected but not yet handled: {}", .{entry});
             },
             3 => {
                 const entry: *const IoApicNmiSource = @ptrCast(entry_base);
@@ -98,10 +133,37 @@ pub fn init(madt: *const Madt) !void {
     if (arch.cpuId() == 0)
         log.info("found Local APIC addr: 0x{x}", .{lapic_addr});
     const lapic: *volatile LocalApicRegs = addr.Phys.fromInt(lapic_addr).toHhdm().toPtr(*volatile LocalApicRegs);
-    // const lapic_id = lapic.lapic_id.val >> 24;
-    // arch.cpuLocal().lapic_id.store(@truncate(lapic_id), .seq_cst);
+
+    const lapic_id = lapic.lapic_id.val;
+    if (lapic_id <= 0xF) {
+        fillHandlers(&arch.cpuLocal().cpu_config.idt);
+
+        ioapic_lapic_lock.lock();
+        defer ioapic_lapic_lock.unlock();
+        try ioapic_lapics.append(.{
+            .lapic_id = @truncate(lapic_id),
+            .handlers = &arch.cpuLocal().interrupt_handlers,
+        });
+    }
 
     apic_base.initNow(lapic);
+}
+
+fn fillHandlers(idt: *arch.Idt) void {
+    inline for (0..IRQ_AVAIL_COUNT) |i| {
+        idt.entries[i + IRQ_AVAIL_LOW] = arch.Entry.generate(struct {
+            pub fn handler(_: *const arch.InterruptStackFrame) void {
+                log.info("extra interrupt i=0x{x}", .{i + IRQ_AVAIL_LOW});
+                defer eoi();
+
+                const kb_byte = arch.inb(0x60);
+                log.info("kbbyte={}", .{kb_byte});
+
+                const notify = arch.cpuLocal().interrupt_handlers[i].load(.acquire) orelse return;
+                _ = notify.notify(0);
+            }
+        }).asInt();
+    }
 }
 
 pub fn enable() void {
@@ -177,49 +239,6 @@ pub fn eoi() void {
 pub fn interProcessorInterrupt(target_lapic_id: u8) void {
     const lapic_regs: *volatile LocalApicRegs = apic_base.get().?.*;
 
-    const IcrHigh = packed struct {
-        reserved: u24 = 0,
-        destination: u8,
-    };
-    const IcrLow = packed struct {
-        vector: u8,
-        delivery_mode: enum(u3) {
-            fixed,
-            lowest_priority, // this one is interesting for scheduling
-            smi,
-            reserved0,
-            nmi,
-            init,
-            start_up,
-            reserved1,
-        },
-        destination_mode: enum(u1) {
-            physical,
-            logical,
-        },
-        delivery_status: enum(u1) {
-            idle,
-            send_pending,
-        } = .idle,
-        reserved0: u1 = 0,
-        level: enum(u1) {
-            deassert,
-            assert,
-        },
-        trigger_mode: enum(u1) {
-            edge,
-            level,
-        },
-        reserved1: u2 = 0,
-        destination_shorthand: enum(u2) {
-            no_shorthand,
-            self,
-            all_including_self,
-            all_excluding_self,
-        },
-        reserved2: u12 = 0,
-    };
-
     // log.info("ICR_HIGH: {*}", .{&lapic_regs.interrupt_command[1].val});
     // log.info("ICR_LOW: {*}", .{&lapic_regs.interrupt_command[0].val});
 
@@ -242,14 +261,213 @@ pub fn interProcessorInterrupt(target_lapic_id: u8) void {
     lapic_regs.interrupt_command[0].val = @bitCast(icr_low);
 }
 
-//
+/// source IRQ would be the source like keyboard at 1
+/// destination IRQ would be the IDT handler index
+pub fn registerExternalInterrupt(source_irq: u8, notify: *caps.Notify) ?void {
+    log.info("registering interrupt {}", .{source_irq});
 
-var apic_base = lazy.Lazy(*volatile LocalApicRegs).new();
+    ioapic_lapic_lock.lock();
+    defer ioapic_lapic_lock.unlock();
+    ioapic_lock.lock();
+    defer ioapic_lock.unlock();
+
+    const lapic_id, const handler, const i = findUsableHandler() orelse return null;
+    const ioapic, const low_index = findUsableRedirectEntry(source_irq) orelse return null;
+    const high_index = low_index + 1;
+
+    log.info("lapic_id={} i={}", .{
+        source_irq, i,
+    });
+
+    var low = ioapicRead(ioapic, low_index);
+    var high = ioapicRead(ioapic, high_index);
+
+    var val = @as(IoApicRedirect, @bitCast([2]u32{ low, high }));
+    val.mask = .enable;
+    val.destination_mode = .physical;
+    val.delivery_mode = .fixed;
+    val.vector = i + IRQ_AVAIL_LOW;
+    val._reserved0 = 0;
+    val._reserved1 = 0;
+    val.destination_apic_id = lapic_id;
+
+    low, high = @as([2]u32, @bitCast(val));
+
+    handler.store(notify, .seq_cst);
+
+    ioapicWrite(ioapic, high_index, high);
+    ioapicWrite(ioapic, low_index, low);
+
+    log.info("listening", .{});
+
+    // FIXME: read the overrides
+
+}
+
+/// `ioapic_lapic_lock` has to be held
+fn findUsableHandler() ?struct { u4, *Handler, u8 } {
+    for (ioapic_lapics.items) |lapic| {
+        for (lapic.handlers[0..], 0..) |*handler, i| {
+            // modifying any handler is done behind the `ioapic_lapic_lock`
+            // the 'atomicity' is only for setting the handler
+            // and the handler running at the same time
+
+            if (handler.load(.monotonic) != null) continue;
+
+            return .{ lapic.lapic_id, handler, @truncate(i) };
+        }
+    }
+
+    return null;
+}
+
+fn findUsableRedirectEntry(source_irq: u32) ?struct { *volatile IoApicRegs, u32 } {
+    for (ioapics.items) |ioapic| {
+        const min = ioapic.global_system_interrupt_base;
+        if (min > source_irq) continue;
+
+        const max = @as(IoApicVer, @bitCast(ioapicRead(ioapic.addr, 1))).num_irqs_minus_one + 1 + min;
+        if (max <= source_irq) continue;
+
+        const low_index = 0x10 + (source_irq - min) * 2;
+        const high_index = low_index + 1;
+
+        const low = ioapicRead(ioapic.addr, low_index);
+        const high = ioapicRead(ioapic.addr, high_index);
+
+        const val = @as(IoApicRedirect, @bitCast([2]u32{ low, high }));
+
+        // log.info("ioapic={*} entry={} val={}", .{ ioapic.addr, source_irq - min, val });
+
+        if (val.vector == 0) {
+            log.info("slot {}", .{source_irq - min});
+            return .{ ioapic.addr, low_index };
+        }
+    }
+
+    return null;
+}
+
+fn ioapicRead(ioapic: *volatile IoApicRegs, reg: u32) u32 {
+    ioapic.register_select.val = reg;
+    return ioapic.register_data.val;
+}
+
+fn ioapicWrite(ioapic: *volatile IoApicRegs, reg: u32, val: u32) void {
+    ioapic.register_select.val = reg;
+    ioapic.register_data.val = val;
+}
 
 //
 
 pub const Register = extern struct {
     val: u32 align(16),
+};
+
+pub const IoApicInfo = struct {
+    addr: *volatile IoApicRegs,
+    io_apic_id: u8,
+    global_system_interrupt_base: u32,
+};
+
+pub const IoApicRegs = extern struct {
+    register_select: Register,
+    register_data: Register,
+};
+
+/// I/O APIC register index 0
+pub const IoApicId = packed struct {
+    _reserved0: u24,
+    apic_id: u4,
+    _reserved1: u4,
+};
+
+/// I/O APIC register index 1
+pub const IoApicVer = packed struct {
+    io_apic_version: u8,
+    _reserved0: u8,
+    num_irqs_minus_one: u8,
+    _reserved1: u8,
+};
+
+/// I/O APIC register index 2
+pub const IoApicArb = packed struct {
+    _reserved0: u24,
+    apic_arbitration_id: u4,
+    _reserved1: u4,
+};
+
+/// I/O APIC register index N and N+1
+pub const IoApicRedirect = packed struct {
+    vector: u8, // destination IDT index
+    delivery_mode: DeliveryMode,
+    destination_mode: DestinationMode,
+    delivery_status: DeliveryStatus = .idle,
+    pin_polarity: enum(u1) {
+        active_high,
+        active_low,
+    } = .active_high,
+    remote_irr: u1 = 0, // idk
+    trigger_mode: TriggerMode = .edge,
+    mask: enum(u1) {
+        enable,
+        disable,
+    } = .enable,
+    _reserved0: u39 = 0,
+    destination_apic_id: u4,
+    _reserved1: u4 = 0,
+};
+
+pub const DeliveryMode = enum(u3) {
+    fixed,
+    lowest_priority, // this one is interesting for scheduling
+    smi,
+    reserved0,
+    nmi,
+    init,
+    start_up,
+    reserved1,
+};
+
+pub const DestinationMode = enum(u1) {
+    physical,
+    logical,
+};
+
+pub const DeliveryStatus = enum(u1) {
+    idle,
+    send_pending,
+};
+
+pub const TriggerMode = enum(u1) {
+    edge,
+    level,
+};
+
+pub const IcrHigh = packed struct {
+    reserved: u24 = 0,
+    destination: u8,
+};
+
+pub const IcrLow = packed struct {
+    vector: u8,
+    delivery_mode: DeliveryMode,
+    destination_mode: DestinationMode,
+    delivery_status: DeliveryStatus = .idle,
+    reserved0: u1 = 0,
+    level: enum(u1) {
+        deassert,
+        assert,
+    },
+    trigger_mode: TriggerMode,
+    reserved1: u2 = 0,
+    destination_shorthand: enum(u2) {
+        no_shorthand,
+        self,
+        all_including_self,
+        all_excluding_self,
+    },
+    reserved2: u12 = 0,
 };
 
 pub const LocalApicRegs = extern struct {

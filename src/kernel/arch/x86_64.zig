@@ -848,7 +848,7 @@ pub const Idt = extern struct {
     }
 };
 
-const InterruptStackFrame = extern struct {
+pub const InterruptStackFrame = extern struct {
     /// the instruction right after the instruction that caused this interrupt
     ip: usize,
 
