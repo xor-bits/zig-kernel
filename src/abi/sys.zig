@@ -407,7 +407,7 @@ pub fn x86IoPortInb(x86_ioport_cap_id: u32) Error!u8 {
 pub fn x86IoPortOutb(x86_ioport_cap_id: u32, byte: u8) Error!void {
     var msg: Message = .{
         .arg0 = @intFromEnum(X86IoPortCallId.outb),
-        .arg1 = @truncate(byte),
+        .arg1 = byte,
     };
     try call(x86_ioport_cap_id, &msg);
 }
