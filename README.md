@@ -66,7 +66,7 @@ zig build run --prominent-compile-errors --summary none -freference-trace \
   - [x] message IPC, shared memory IPC
     - [ ] multiple parallel recvs to the same endpoint
     - [x] multiple parallel calls to the same endpoint
-  - [ ] figure out userland interrupts (ps2 keyboard, ..)
+  - [x] figure out userland interrupts (ps2 keyboard, ..)
   - [x] capabilities
     - [x] allocate capabilities
     - [ ] deallocate capabilities
@@ -89,13 +89,16 @@ zig build run --prominent-compile-errors --summary none -freference-trace \
   - [x] decompress initfs.tar.gz
   - [ ] execute initfs:///sbin/init and give it a capability to IPC with the initfs
 
-- [ ] vmm server process
+- [x] initfs:///sbin/vm server process
   - [ ] handles virtual memory for everything
 
-- [ ] proc server process
+- [x] initfs:///sbin/pm server process
   - [ ] handles individual processes and their threads
 
-- [ ] initfs:///sbin/initd process
+- [x] initfs:///sbin/mm server process
+  - [ ] launches a PS/2 keyboard driver if it detects a PS/2 keyboard
+
+- [x] initfs:///sbin/init process
   - [ ] launch initfs:///sbin/rngd
   - [ ] launch initfs:///sbin/vfsd
   - [ ] launch services from initfs://
