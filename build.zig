@@ -193,6 +193,7 @@ fn createInitfsTarGz(
     const initfs_processes = .{
         "vm",
         "pm",
+        "rm",
         "vfs",
         "init",
     };

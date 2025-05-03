@@ -46,58 +46,43 @@ pub fn main() !noreturn {
     try startSpinner();
     try initfsd.init();
 
-    const kb_port_data = try caps.ROOT_X86_IOPORT_ALLOCATOR.alloc(0x60);
-    const kb_port_status = try caps.ROOT_X86_IOPORT_ALLOCATOR.alloc(0x64);
-    const kb_irq = try caps.ROOT_X86_IRQ_ALLOCATOR.alloc(1);
-    const kb_irq_notify = try caps.ROOT_MEMORY.alloc(caps.Notify);
-
-    try kb_irq.subscribe(kb_irq_notify);
-
-    while (true) {
-        log.info("waiting for keyboard interrupt", .{});
-        _ = try kb_irq_notify.wait();
-
-        while (try kb_port_status.inb() & 0b1 == 1) {
-            const inb = try kb_port_data.inb();
-            log.info("keyboard: 0b{b:0>8}", .{inb});
-        }
-    }
-
     const recv = try abi.caps.ROOT_MEMORY.alloc(abi.caps.Receiver);
 
     try initfsd.wait();
 
     var system: System = .{
         .recv = recv,
+
+        // virtual memory manager (system) (server)
+        // maps new processes to memory and manages page faults,
+        // heaps, lazy alloc, shared memory, swapping, etc.
         .vm_bin = try binBytes("/sbin/vm"),
+
+        // process manager (system) (server)
+        // manages unix-like process stuff like permissions, cli args, etc.
         .pm_bin = try binBytes("/sbin/pm"),
+
+        // resource manager (system) (server)
+        // manages ioports, irqs, device memory, etc. should also manage physical memory
+        .rm_bin = try binBytes("/sbin/rm"),
+
+        // virtual filesystem (system) (server)
+        // manages the main VFS tree, everything mounted into it and file descriptors
         .vfs_bin = try binBytes("/sbin/vfs"),
+
+        // init (normal) (process)
+        // all the critial system servers are running, so now "normal" Linux-like init can run
+        // gets a Sender capability to access the initfs part of this root process
+        // just runs normal processes according to the init configuration
+        // launches stuff like the window manager and virtual TTYs
         .init_bin = try binBytes("/sbin/init"),
     };
 
     // FIXME: figure out a way to reclaim capabilities from crashed processes
 
-    // virtual memory manager (system) (server)
-    // maps new processes to memory and manages page faults,
-    // heaps, lazy alloc, shared memory, swapping, etc.
     const vm_sender = try recv.subscribe();
     system.vm, system.vm_vmem = try execElf(system.vm_bin, vm_sender);
     system.vm_endpoint = vm_sender.cap;
-
-    // process manager (system) (server)
-    // manages unix-like process stuff like permissions, cli args, etc.
-    // try execWithVm("/sbin/pm");
-
-    // virtual filesystem (system) (server)
-    // manages the main VFS tree, everything mounted into it and file descriptors
-    // try execWithVm("/sbin/vfs");
-
-    // init (normal) (process)
-    // all the critial system servers are running, so now "normal" Linux-like init can run
-    // gets a Sender capability to access the initfs part of this root process
-    // just runs normal processes according to the init configuration
-    // launches stuff like the window manager and virtual TTYs
-    // try execWithVm("/sbin/init");
 
     const server = Proto.init(&system, system.recv);
 
@@ -273,12 +258,16 @@ const Proto = abi.RootProtocol.Server(.{
 }, .{
     .memory = memoryHandler,
     .selfVmem = selfVmemHandler,
-    .vm = vmHandler,
+    .ioports = ioportsHandler,
+    .irqs = irqsHandler,
     .vmReady = vmReadyHandler,
-    .pm = pmHandler,
     .pmReady = pmReadyHandler,
-    .vfs = vfsHandler,
+    .rmReady = rmReadyHandler,
     .vfsReady = vfsReadyHandler,
+    .vm = vmHandler,
+    .pm = pmHandler,
+    .rm = rmHandler,
+    .vfs = vfsHandler,
 });
 
 const System = struct {
@@ -296,6 +285,11 @@ const System = struct {
     pm_sender: caps.Sender = .{},
     pm_endpoint: u32 = 0,
 
+    rm: caps.Thread = .{},
+    rm_bin: []const u8,
+    rm_sender: caps.Sender = .{},
+    rm_endpoint: u32 = 0,
+
     vfs: caps.Thread = .{},
     vfs_bin: []const u8,
     vfs_sender: caps.Sender = .{},
@@ -308,7 +302,11 @@ const System = struct {
 };
 
 fn memoryHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.Memory } {
-    if (ctx.vm_endpoint != sender and ctx.pm_endpoint != sender and ctx.vfs_endpoint != sender) {
+    if (ctx.vm_endpoint != sender and
+        ctx.pm_endpoint != sender and
+        ctx.rm_endpoint != sender and
+        ctx.vfs_endpoint != sender)
+    {
         return .{ Error.PermissionDenied, .{} };
     }
 
@@ -332,9 +330,28 @@ fn selfVmemHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps
     return .{ void{}, vmem };
 }
 
-fn vmHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.Sender } {
-    _ = .{ ctx, sender };
-    return .{ Error.Unimplemented, .{} };
+fn ioportsHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.X86IoPortAllocator } {
+    if (ctx.rm_endpoint != sender) {
+        return .{ Error.PermissionDenied, .{} };
+    }
+
+    const ioports = caps.ROOT_X86_IOPORT_ALLOCATOR.clone() catch |err| {
+        return .{ err, .{} };
+    };
+
+    return .{ void{}, ioports };
+}
+
+fn irqsHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.X86IrqAllocator } {
+    if (ctx.rm_endpoint != sender) {
+        return .{ Error.PermissionDenied, .{} };
+    }
+
+    const irqs = caps.ROOT_X86_IRQ_ALLOCATOR.clone() catch |err| {
+        return .{ err, .{} };
+    };
+
+    return .{ void{}, irqs };
 }
 
 fn vmReadyHandler(ctx: *System, sender: u32, req: struct { caps.Sender }) struct { Error!void } {
@@ -358,6 +375,11 @@ fn vmReadyHandler(ctx: *System, sender: u32, req: struct { caps.Sender }) struct
         return .{void{}};
     };
     ctx.pm_endpoint = endpoint.cap;
+    endpoint = execWithVm(ctx, ctx.rm_bin) catch |err| {
+        log.err("failed to exec rm: {}", .{err});
+        return .{void{}};
+    };
+    ctx.rm_endpoint = endpoint.cap;
     endpoint = execWithVm(ctx, ctx.vfs_bin) catch |err| {
         log.err("failed to exec vfs: {}", .{err});
         return .{void{}};
@@ -372,11 +394,6 @@ fn vmReadyHandler(ctx: *System, sender: u32, req: struct { caps.Sender }) struct
     return .{void{}};
 }
 
-fn pmHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.Sender } {
-    _ = .{ ctx, sender };
-    return .{ Error.Unimplemented, .{} };
-}
-
 fn pmReadyHandler(ctx: *System, sender: u32, req: struct { caps.Sender }) struct { Error!void } {
     if (ctx.pm_endpoint != sender) {
         return .{Error.PermissionDenied};
@@ -388,9 +405,15 @@ fn pmReadyHandler(ctx: *System, sender: u32, req: struct { caps.Sender }) struct
     return .{void{}};
 }
 
-fn vfsHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.Sender } {
-    _ = .{ ctx, sender };
-    return .{ Error.Unimplemented, .{} };
+fn rmReadyHandler(ctx: *System, sender: u32, req: struct { caps.Sender }) struct { Error!void } {
+    if (ctx.rm_endpoint != sender) {
+        return .{Error.PermissionDenied};
+    }
+
+    // FIXME: verify that it is a cap
+    ctx.rm_sender = req.@"0";
+
+    return .{void{}};
 }
 
 fn vfsReadyHandler(ctx: *System, sender: u32, req: struct { caps.Sender }) struct { Error!void } {
@@ -402,6 +425,26 @@ fn vfsReadyHandler(ctx: *System, sender: u32, req: struct { caps.Sender }) struc
     ctx.vfs_sender = req.@"0";
 
     return .{void{}};
+}
+
+fn vmHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.Sender } {
+    _ = .{ ctx, sender };
+    return .{ Error.Unimplemented, .{} };
+}
+
+fn pmHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.Sender } {
+    _ = .{ ctx, sender };
+    return .{ Error.Unimplemented, .{} };
+}
+
+fn rmHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.Sender } {
+    _ = .{ ctx, sender };
+    return .{ Error.Unimplemented, .{} };
+}
+
+fn vfsHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.Sender } {
+    _ = .{ ctx, sender };
+    return .{ Error.Unimplemented, .{} };
 }
 
 fn execWithVm(ctx: *System, bin: []const u8) !caps.Sender {

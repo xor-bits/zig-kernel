@@ -13,7 +13,8 @@ pub const util = @import("util.zig");
 /// where the kernel places the root binary
 pub const ROOT_EXE = 0x200_0000;
 
-pub const LOG_SERVERS: bool = false;
+// TODO: move kernel/conf.zig here
+pub const LOG_SERVERS: bool = true;
 
 //
 
@@ -42,6 +43,9 @@ pub fn panic(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace, ret_
         if (@hasDecl(root, "name")) root.name else "<unknown>";
     std.log.scoped(.panic).err("{s} panicked: {s}\nstack trace:", .{ name, msg });
     var iter = std.debug.StackIterator.init(ret_addr, @frameAddress());
+    if (ret_addr) |addr| {
+        std.log.scoped(.panic).warn("  0x{x}", .{addr});
+    }
     while (iter.next()) |addr| {
         std.log.scoped(.panic).warn("  0x{x}", .{addr});
     }
@@ -180,25 +184,39 @@ pub const RootProtocol = Protocol(struct {
     /// only vm can use this
     selfVmem: fn () struct { sys.Error!void, caps.Vmem },
 
-    /// request a sender to the vm server
-    /// only pm can use this
-    vm: fn () struct { sys.Error!void, caps.Sender },
+    /// request a x86 ioport allocator capability
+    /// only rm can use this
+    ioports: fn () struct { sys.Error!void, caps.X86IoPortAllocator },
+
+    /// request a x86 irq allocator capability
+    /// only rm can use this
+    irqs: fn () struct { sys.Error!void, caps.X86IrqAllocator },
 
     /// provide a sender to the vm server
     /// only vm can use this
     vmReady: fn (vm_sender: caps.Sender) struct { sys.Error!void },
 
-    /// request a sender to the pm server
-    pm: fn () struct { sys.Error!void, caps.Sender },
-
     /// install a new pm sender that all new .pm requests get
     pmReady: fn (pm_sender: caps.Sender) struct { sys.Error!void },
 
-    /// request a sender to the vfs server
-    vfs: fn () struct { sys.Error!void, caps.Sender },
+    /// install a new rm sender that all new .rm requests get
+    rmReady: fn (pm_sender: caps.Sender) struct { sys.Error!void },
 
     /// install a new vfs sender that all new .vfs requests get
     vfsReady: fn (vfs_sender: caps.Sender) struct { sys.Error!void },
+
+    /// request a sender to the vm server
+    /// only pm can use this
+    vm: fn () struct { sys.Error!void, caps.Sender },
+
+    /// request a sender to the pm server
+    pm: fn () struct { sys.Error!void, caps.Sender },
+
+    /// request a sender to the rm server
+    rm: fn () struct { sys.Error!void, caps.Sender },
+
+    /// request a sender to the vfs server
+    vfs: fn () struct { sys.Error!void, caps.Sender },
 });
 
 pub const VmProtocol = Protocol(struct {
