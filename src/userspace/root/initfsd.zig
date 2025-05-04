@@ -84,7 +84,7 @@ pub fn init() !void {
     try thread.setPrio(0);
     try thread.setVmem(caps.ROOT_SELF_VMEM);
     try thread.writeRegs(&.{
-        .user_stack_ptr = main.INITFS_STACK_TOP,
+        .user_stack_ptr = main.INITFS_STACK_TOP - 0x10, // fixing a bug in Zig where @returnAddress() in noreturn underflows the stack
         .user_instr_ptr = @intFromPtr(&run),
     });
     try thread.start();
@@ -98,7 +98,7 @@ var thread: caps.Thread = undefined;
 var initfs_tar_gz: std.io.FixedBufferStream([]const u8) = undefined;
 var initfs_ready: caps.Notify = .{};
 
-pub fn run() callconv(.SysV) noreturn {
+fn run() callconv(.SysV) noreturn {
     log.info("decompressing", .{});
     std.compress.flate.inflate.decompress(.gzip, initfs_tar_gz.reader(), initfs_tar.writer()) catch |err| {
         log.err("failed to decompress initfs: {}", .{err});

@@ -261,7 +261,7 @@ fn newThread(system: *System, as: *AddressSpace) !caps.Thread {
     try thread.setVmem(as.vmem);
     try thread.writeRegs(&.{
         .user_instr_ptr = as.entry,
-        .user_stack_ptr = as.bottom - 0x10000,
+        .user_stack_ptr = as.bottom - 0x10010,
     });
 
     return thread;
