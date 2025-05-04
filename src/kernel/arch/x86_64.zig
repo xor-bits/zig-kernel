@@ -724,6 +724,8 @@ pub const Idt = extern struct {
                 });
 
                 if (pfec.user_mode) {
+                    cpuLocal().current_thread.?.status = .stopped;
+                    cpuLocal().current_thread = null;
                     proc.enter();
                 } else {
                     @import("../logs.zig").addr2line(interrupt_stack_frame.ip);
