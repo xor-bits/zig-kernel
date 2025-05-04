@@ -126,7 +126,9 @@ fn spinnerMain() callconv(.SysV) noreturn {
     unreachable;
 }
 
-fn framebufferSplash(boot_info: *const abi.BootInfo) !void {
+fn framebufferSplash(_boot_info: *const volatile abi.BootInfo) !void {
+    const boot_info = _boot_info.*;
+
     if (boot_info.framebuffer.cap == 0) return;
 
     if (boot_info.framebuffer_bpp != 32) {

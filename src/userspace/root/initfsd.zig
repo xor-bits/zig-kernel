@@ -69,7 +69,8 @@ var initfs_tar: std.ArrayList(u8) = .init(vmm_vector);
 //
 
 pub fn init() !void {
-    const boot_info: *const abi.BootInfo = @ptrFromInt(main.BOOT_INFO);
+    const _boot_info: *const volatile abi.BootInfo = @ptrFromInt(main.BOOT_INFO);
+    const boot_info = _boot_info.*;
     const initfs: []const u8 = boot_info.initfsData();
 
     log.info("starting initfs thread", .{});

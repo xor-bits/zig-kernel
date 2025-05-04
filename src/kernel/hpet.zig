@@ -17,19 +17,23 @@ pub fn init(hpet: *const Hpet) !void {
     hpet_regs = addr.Phys.fromInt(hpet.address).toHhdm().toPtr(*volatile HpetRegs);
     const regs = hpet_regs.?;
 
-    regs.config.enable_config = 1;
+    const config = @as(*volatile Config, &regs.config);
+    var tmp = config.*;
+    tmp.enable_config = 1;
+    config.* = tmp;
+
     if (arch.cpuId() == 0)
-        log.info("HPET speed: 1ms = {d} ticks", .{1_000_000_000_000 / @as(u64, regs.caps_and_id.counter_period_femtoseconds)});
+        log.info("HPET speed: 1ms = {d} ticks", .{1_000_000_000_000 / @as(u64, @as(*volatile u32, &regs.caps_and_id.counter_period_femtoseconds).*)});
 }
 
 pub fn hpetSpinWait(micros: u32, just_before: anytype) void {
     const regs = hpet_regs.?;
 
-    const ticks = (@as(u64, micros) * 1_000_000_000) / regs.caps_and_id.counter_period_femtoseconds;
+    const ticks = (@as(u64, micros) * 1_000_000_000) / @as(*volatile u32, &regs.caps_and_id.counter_period_femtoseconds).*;
 
     just_before.run();
-    const deadline = regs.main_counter_value + ticks;
-    while (regs.main_counter_value <= deadline) {
+    const deadline = @as(*volatile u64, &regs.main_counter_value).* + ticks;
+    while (@as(*volatile u64, &regs.main_counter_value).* <= deadline) {
         std.atomic.spinLoopHint();
     }
 }
