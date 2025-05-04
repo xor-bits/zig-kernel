@@ -7,8 +7,7 @@ all written in pure Zig
 
 </div>
 
-The plan is to have the kernel be just a scheduler, IPC relay,
-physical memory manager and (probably) a virtual memory manager.
+The plan is for the kernel to be just a scheduler, IPC relay and a physical memory manager.
 
 The system uses seL4-like capabilities, but on a global linear array instead of the CNode tree.
 And physical memory allocation is managed by the kernel.
