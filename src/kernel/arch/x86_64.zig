@@ -1190,6 +1190,7 @@ const syscall_enter = std.fmt.comptimePrint(
     \\ push %r15
 
     // set up the *SyscallRegs argument
+    \\ xorq %rbp, %rbp
     \\ movq %rsp, %rdi
 , .{ @offsetOf(CpuConfig, "rsp_user"), @offsetOf(CpuConfig, "rsp_kernel") });
 
