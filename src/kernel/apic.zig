@@ -134,7 +134,7 @@ pub fn init(madt: *const Madt) !void {
         log.info("found Local APIC addr: 0x{x}", .{lapic_addr});
     const lapic: *volatile LocalApicRegs = addr.Phys.fromInt(lapic_addr).toHhdm().toPtr(*volatile LocalApicRegs);
 
-    const lapic_id = lapic.lapic_id.val;
+    const lapic_id = @as(*volatile u32, &lapic.lapic_id.val).*;
     if (lapic_id <= 0xF) {
         ioapic_lapic_lock.lock();
         defer ioapic_lapic_lock.unlock();
@@ -151,16 +151,16 @@ pub fn enable() void {
     const lapic = apic_base.get().?.*;
 
     // reset APIC to a well-known state
-    lapic.destination_format.val = 0xFFFF_FFFF;
-    lapic.logical_destination.val &= 0x00FF_FFFF;
-    lapic.lvt_timer.val = APIC_DISABLE;
-    lapic.lvt_performance_monitoring_counters.val = APIC_NMI;
-    lapic.lvt_lint0.val = APIC_DISABLE;
-    lapic.lvt_lint1.val = APIC_DISABLE;
-    lapic.task_priority.val = 0;
+    @as(*volatile u32, &lapic.destination_format.val).* = 0xFFFF_FFFF;
+    @as(*volatile u32, &lapic.logical_destination.val).* &= 0x00FF_FFFF;
+    @as(*volatile u32, &lapic.lvt_timer.val).* = APIC_DISABLE;
+    @as(*volatile u32, &lapic.lvt_performance_monitoring_counters.val).* = APIC_NMI;
+    @as(*volatile u32, &lapic.lvt_lint0.val).* = APIC_DISABLE;
+    @as(*volatile u32, &lapic.lvt_lint1.val).* = APIC_DISABLE;
+    @as(*volatile u32, &lapic.task_priority.val).* = 0;
 
     // enable
-    lapic.spurious_interrupt_vector.val = APIC_SW_ENABLE | @as(u32, IRQ_SPURIOUS);
+    @as(*volatile u32, &lapic.spurious_interrupt_vector.val).* = APIC_SW_ENABLE | @as(u32, IRQ_SPURIOUS);
 
     // enable APIC
     arch.x86_64.wrmsr(
@@ -170,12 +170,12 @@ pub fn enable() void {
 
     // enable timer interrupts
     const period = measureApicTimerSpeed(lapic) * 500;
-    lapic.divide_configuration.val = APIC_TIMER_DIV;
-    lapic.lvt_timer.val = IRQ_TIMER | APIC_TIMER_MODE_PERIODIC;
-    lapic.initial_count.val = period;
-    lapic.lvt_thermal_sensor.val = 0;
-    lapic.lvt_error.val = 0;
-    lapic.divide_configuration.val = APIC_TIMER_DIV; // buggy hardware fix
+    @as(*volatile u32, &lapic.divide_configuration.val).* = APIC_TIMER_DIV;
+    @as(*volatile u32, &lapic.lvt_timer.val).* = IRQ_TIMER | APIC_TIMER_MODE_PERIODIC;
+    @as(*volatile u32, &lapic.initial_count.val).* = period;
+    @as(*volatile u32, &lapic.lvt_thermal_sensor.val).* = 0;
+    @as(*volatile u32, &lapic.lvt_error.val).* = 0;
+    @as(*volatile u32, &lapic.divide_configuration.val).* = APIC_TIMER_DIV; // buggy hardware fix
 
     if (arch.cpuId() == 0)
         log.info("APIC initialized", .{});
@@ -183,7 +183,7 @@ pub fn enable() void {
 
 /// returns the apic period for 1ms
 fn measureApicTimerSpeed(lapic: *volatile LocalApicRegs) u32 {
-    lapic.divide_configuration.val = APIC_TIMER_DIV;
+    @as(*volatile u32, &lapic.divide_configuration.val).* = APIC_TIMER_DIV;
 
     hpet.hpetSpinWait(1_000, struct {
         lapic: *volatile LocalApicRegs,
@@ -192,8 +192,8 @@ fn measureApicTimerSpeed(lapic: *volatile LocalApicRegs) u32 {
         }
     }{ .lapic = lapic });
 
-    lapic.lvt_timer.val = APIC_DISABLE;
-    const count = 0xFFFF_FFFF - lapic.current_count.val;
+    @as(*volatile u32, &lapic.lvt_timer.val).* = APIC_DISABLE;
+    const count = 0xFFFF_FFFF - @as(*volatile u32, &lapic.current_count.val).*;
 
     if (arch.cpuId() == 0)
         log.info("APIC timer speed: 1ms = {d} ticks", .{count});
@@ -202,7 +202,7 @@ fn measureApicTimerSpeed(lapic: *volatile LocalApicRegs) u32 {
 }
 
 pub fn eoi() void {
-    apic_base.get().?.*.eoi.val = 0;
+    @as(*volatile u32, &apic_base.get().?.*.eoi.val).* = 0;
 }
 
 pub fn interProcessorInterrupt(target_lapic_id: u8) void {
@@ -226,8 +226,8 @@ pub fn interProcessorInterrupt(target_lapic_id: u8) void {
     // log.info("ICR_HIGH: {}", .{icr_high});
     // log.info("ICR_LOW: {}", .{icr_low});
 
-    lapic_regs.interrupt_command[1].val = @bitCast(icr_high);
-    lapic_regs.interrupt_command[0].val = @bitCast(icr_low);
+    @as(*volatile u32, &lapic_regs.interrupt_command[1].val).* = @bitCast(icr_high);
+    @as(*volatile u32, &lapic_regs.interrupt_command[0].val).* = @bitCast(icr_low);
 }
 
 /// source IRQ would be the source like keyboard at 1
@@ -290,9 +290,9 @@ fn findUsableHandler() ?struct { u4, *Handler, u8 } {
 fn findUsableRedirectEntry(source_irq: u32) ?struct { *volatile IoApicRegs, u32 } {
     for (ioapics.items) |ioapic| {
         const min = ioapic.global_system_interrupt_base;
-        if (min > source_irq) continue;
-
         const max = @as(IoApicVer, @bitCast(ioapicRead(ioapic.addr, 1))).num_irqs_minus_one + 1 + min;
+
+        if (min > source_irq) continue;
         if (max <= source_irq) continue;
 
         const low_index = 0x10 + (source_irq - min) * 2;
@@ -315,13 +315,17 @@ fn findUsableRedirectEntry(source_irq: u32) ?struct { *volatile IoApicRegs, u32 
 }
 
 fn ioapicRead(ioapic: *volatile IoApicRegs, reg: u32) u32 {
-    ioapic.register_select.val = reg;
-    return ioapic.register_data.val;
+    const select: *volatile u32 = &ioapic.register_select.val;
+    const data: *volatile u32 = &ioapic.register_data.val;
+    select.* = reg;
+    return data.*;
 }
 
 fn ioapicWrite(ioapic: *volatile IoApicRegs, reg: u32, val: u32) void {
-    ioapic.register_select.val = reg;
-    ioapic.register_data.val = val;
+    const select: *volatile u32 = &ioapic.register_select.val;
+    const data: *volatile u32 = &ioapic.register_data.val;
+    select.* = reg;
+    data.* = val;
 }
 
 //
