@@ -147,8 +147,8 @@ pub const Vmem = struct {
                 const paddr = frame.paddr;
 
                 const vaddr = try addr.Virt.fromUser(trap.arg3);
-                const rights: abi.sys.Rights = @bitCast(@as(u32, @truncate(trap.arg4)));
-                const flags: abi.sys.MapFlags = @bitCast(@as(u40, @truncate(trap.arg5)));
+                const rights: abi.sys.Rights = .fromInt(@truncate(trap.arg4));
+                const flags: abi.sys.MapFlags = .fromInt(@truncate(trap.arg5));
 
                 const size = caps.Frame.sizeOf(frame).sizeBytes();
                 const size_1gib = comptime abi.ChunkSize.@"1GiB".sizeBytes();

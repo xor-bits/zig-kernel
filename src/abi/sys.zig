@@ -38,6 +38,14 @@ pub const Rights = extern struct {
             .user_accessible = self.user_accessible and other.user_accessible,
         };
     }
+
+    pub fn asInt(self: Rights) u32 {
+        return @as(u32, @bitCast(self));
+    }
+
+    pub fn fromInt(i: u32) Rights {
+        return @as(Rights, @bitCast(i));
+    }
 };
 
 pub const MapFlags = extern struct {
@@ -46,6 +54,14 @@ pub const MapFlags = extern struct {
     huge_page: bool = false,
     global: bool = false,
     protection_key: u8 = 0,
+
+    pub fn asInt(self: MapFlags) u64 {
+        return @as(u40, @bitCast(self));
+    }
+
+    pub fn fromInt(i: u64) MapFlags {
+        return @as(MapFlags, @bitCast(@as(u40, @truncate(i))));
+    }
 };
 
 pub const Error = error{
@@ -285,8 +301,8 @@ pub fn vmemMap(vmem_cap: u32, frame_cap: u32, vaddr: usize, rights: abi.sys.Righ
         .arg0 = @intFromEnum(VmemCallId.map),
         .arg1 = frame_cap,
         .arg2 = vaddr,
-        .arg3 = @as(u32, @bitCast(rights)),
-        .arg4 = @as(u40, @bitCast(flags)),
+        .arg3 = rights.asInt(),
+        .arg4 = flags.asInt(),
     };
     try call(vmem_cap, &msg);
 }
