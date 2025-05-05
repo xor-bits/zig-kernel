@@ -55,10 +55,15 @@ pub fn main() !noreturn {
 
     const recv = try alloc(abi.caps.Receiver);
 
+    var devices = std.EnumArray(abi.Device, caps.Frame).initFill(.{});
+    devices.set(abi.Device.hpet, boot_info.hpet);
+
     try initfsd.wait();
 
     var system: System = .{
         .recv = recv,
+
+        .devices = devices,
 
         // virtual memory manager (system) (server)
         // maps new processes to memory and manages page faults,
@@ -300,6 +305,7 @@ const Proto = abi.RootProtocol.Server(.{
     .selfVmem = selfVmemHandler,
     .ioports = ioportsHandler,
     .irqs = irqsHandler,
+    .device = deviceHandler,
     .vmReady = vmReadyHandler,
     .pmReady = pmReadyHandler,
     .rmReady = rmReadyHandler,
@@ -313,6 +319,8 @@ const Proto = abi.RootProtocol.Server(.{
 const System = struct {
     recv: caps.Receiver,
     dont_reply: bool = false,
+
+    devices: std.EnumArray(abi.Device, caps.Frame),
 
     vm: caps.Thread = .{},
     vm_vmem: ?caps.Vmem = null,
@@ -392,6 +400,20 @@ fn irqsHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.X86
     };
 
     return .{ void{}, irqs };
+}
+
+fn deviceHandler(ctx: *System, sender: u32, req: struct { abi.Device }) struct { Error!void, caps.Frame } {
+    if (ctx.rm_endpoint != sender) {
+        return .{ Error.PermissionDenied, .{} };
+    }
+
+    const kind = req.@"0";
+    const device = ctx.devices.get(kind);
+    ctx.devices.set(kind, .{});
+
+    if (device.cap == 0) return .{ Error.AlreadyMapped, .{} };
+
+    return .{ void{}, device };
 }
 
 fn vmReadyHandler(ctx: *System, sender: u32, req: struct { caps.Sender }) struct { Error!void } {

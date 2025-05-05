@@ -10,7 +10,7 @@ pub const std_options = abi.std_options;
 pub const panic = abi.panic;
 pub const name = "rm";
 const Error = abi.sys.Error;
-pub const log_level = .info;
+pub const log_level = .debug;
 
 //
 
@@ -31,6 +31,11 @@ pub fn main() !void {
     const res2: Error!void, const irqs: caps.X86IrqAllocator = try root.call(.irqs, void{});
     try res2;
 
+    const res3: Error!void, const hpet_frame: caps.Frame = try root.call(.device, .{abi.Device.hpet});
+    try res3;
+
+    _ = hpet_frame;
+
     // endpoint for rm server <-> unix app communication
     log.debug("allocating rm endpoint", .{});
     const rm_recv = try memory.alloc(caps.Receiver);
@@ -38,8 +43,8 @@ pub fn main() !void {
 
     // inform the root that rm is ready
     log.debug("rm ready", .{});
-    const res3: struct { Error!void } = try root.call(.rmReady, .{rm_send});
-    try res3.@"0";
+    const res4: struct { Error!void } = try root.call(.rmReady, .{rm_send});
+    try res4.@"0";
 
     var keyboard = try Keyboard.init(memory, ioports, irqs);
     try keyboard.run();
