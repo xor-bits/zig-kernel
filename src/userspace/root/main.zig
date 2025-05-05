@@ -32,10 +32,15 @@ pub const BOOT_INFO = 0x8000_0000_0000 - 0x1000;
 
 //
 
+pub var self_memory_lock: abi.lock.YieldMutex = .new();
+pub var self_vmem_lock: abi.lock.YieldMutex = .new();
+
+//
+
 pub fn main() !noreturn {
     log.info("I am root", .{});
 
-    try abi.caps.ROOT_SELF_VMEM.map(
+    try map(
         abi.caps.ROOT_BOOT_INFO,
         BOOT_INFO,
         .{ .writable = true },
@@ -43,10 +48,12 @@ pub fn main() !noreturn {
     );
     log.info("boot info mapped", .{});
 
+    const boot_info = @as(*const volatile abi.BootInfo, @ptrFromInt(BOOT_INFO)).*;
+
     try startSpinner();
     try initfsd.init();
 
-    const recv = try abi.caps.ROOT_MEMORY.alloc(abi.caps.Receiver);
+    const recv = try alloc(abi.caps.Receiver);
 
     try initfsd.wait();
 
@@ -100,14 +107,45 @@ pub fn main() !noreturn {
     }
 }
 
+pub fn map(frame: caps.Frame, vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
+    self_vmem_lock.lock();
+    defer self_vmem_lock.unlock();
+    return caps.ROOT_SELF_VMEM.map(frame, vaddr, rights, flags);
+}
+
+pub fn unmap(frame: caps.Frame, vaddr: usize) Error!void {
+    self_vmem_lock.lock();
+    defer self_vmem_lock.unlock();
+    return caps.ROOT_SELF_VMEM.unmap(frame, vaddr);
+}
+
+pub fn alloc(comptime T: type) Error!T {
+    self_memory_lock.lock();
+    defer self_memory_lock.unlock();
+    return caps.ROOT_MEMORY.alloc(T);
+}
+
+pub fn allocSized(comptime T: type, size: abi.ChunkSize) Error!T {
+    self_memory_lock.lock();
+    defer self_memory_lock.unlock();
+    return caps.ROOT_MEMORY.allocSized(T, size);
+}
+
 fn startSpinner() !void {
     log.info("starting spinner thread", .{});
 
-    const stack = try caps.ROOT_MEMORY.allocSized(caps.Frame, .@"256KiB");
-    try caps.ROOT_SELF_VMEM.map(stack, SPINNER_STACK_BOTTOM, .{ .writable = true }, .{});
+    const stack = try allocSized(caps.Frame, .@"256KiB");
+    try map(
+        stack,
+        SPINNER_STACK_BOTTOM,
+        .{ .writable = true },
+        .{},
+    );
 
-    spinner_thread = try caps.ROOT_MEMORY.alloc(caps.Thread);
+    spinner_thread = try alloc(caps.Thread);
     try spinner_thread.setPrio(0);
+    self_vmem_lock.lock();
+    defer self_vmem_lock.unlock();
     try spinner_thread.setVmem(caps.ROOT_SELF_VMEM);
     try spinner_thread.writeRegs(&.{
         .user_stack_ptr = SPINNER_STACK_TOP - 0x10,
@@ -136,7 +174,7 @@ fn framebufferSplash(_boot_info: *const volatile abi.BootInfo) !void {
         return;
     }
 
-    try abi.caps.ROOT_SELF_VMEM.map(boot_info.framebuffer, FRAMEBUFFER, .{ .writable = true }, .{
+    try map(boot_info.framebuffer, FRAMEBUFFER, .{ .writable = true }, .{
         // TODO: PAT
         .write_through = true,
         .cache_disable = true,
@@ -164,7 +202,7 @@ fn framebufferSplash(_boot_info: *const volatile abi.BootInfo) !void {
         abi.sys.yield();
     }
 
-    try abi.caps.ROOT_SELF_VMEM.unmap(boot_info.framebuffer, FRAMEBUFFER);
+    try unmap(boot_info.framebuffer, FRAMEBUFFER);
 }
 
 const speed: f32 = 0.001;
@@ -312,7 +350,7 @@ fn memoryHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.M
         return .{ Error.PermissionDenied, .{} };
     }
 
-    const memory = abi.caps.ROOT_MEMORY.alloc(abi.caps.Memory) catch |err| {
+    const memory = alloc(abi.caps.Memory) catch |err| {
         return .{ err, .{} };
     };
 
@@ -452,7 +490,7 @@ fn vfsHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.Send
 fn execWithVm(ctx: *System, bin: []const u8) !caps.Sender {
     // send the file to vm server using shared memory IPC
 
-    const frame = try abi.caps.ROOT_MEMORY.allocSized(
+    const frame = try allocSized(
         abi.caps.Frame,
         abi.ChunkSize.of(bin.len) orelse {
             log.err("binary too large", .{});
@@ -460,7 +498,7 @@ fn execWithVm(ctx: *System, bin: []const u8) !caps.Sender {
         },
     );
 
-    try abi.caps.ROOT_SELF_VMEM.map(
+    try map(
         frame,
         LOADER_TMP,
         .{ .writable = true },
@@ -471,7 +509,7 @@ fn execWithVm(ctx: *System, bin: []const u8) !caps.Sender {
         @as([*]volatile u8, @ptrFromInt(LOADER_TMP))[0..bin.len],
         bin,
     );
-    try abi.caps.ROOT_SELF_VMEM.unmap(
+    try unmap(
         frame,
         LOADER_TMP,
     );
@@ -518,7 +556,7 @@ fn execElf(elf_bytes: []const u8, sender: abi.caps.Sender) !struct { caps.Thread
     const header = try std.elf.Header.read(&elf);
     var program_headers = header.program_header_iterator(&elf);
 
-    const new_vmem = try abi.caps.ROOT_MEMORY.alloc(abi.caps.Vmem);
+    const new_vmem = try alloc(abi.caps.Vmem);
 
     var heap_bottom: usize = 0;
 
@@ -563,8 +601,12 @@ fn execElf(elf_bytes: []const u8, sender: abi.caps.Sender) !struct { caps.Thread
         // because frame caps use huge and giant pages automatically
 
         const size = segment_vaddr_top - segment_vaddr_bottom;
+        self_memory_lock.lock();
+        defer self_memory_lock.unlock();
         const frames = try abi.util.allocVector(abi.caps.ROOT_MEMORY, size);
 
+        self_vmem_lock.lock();
+        defer self_vmem_lock.unlock();
         try abi.util.mapVector(
             &frames,
             abi.caps.ROOT_SELF_VMEM,
@@ -600,7 +642,7 @@ fn execElf(elf_bytes: []const u8, sender: abi.caps.Sender) !struct { caps.Thread
 
     // map a stack
     // log.info("mapping a stack", .{});
-    const stack = try abi.caps.ROOT_MEMORY.allocSized(abi.caps.Frame, .@"256KiB");
+    const stack = try allocSized(abi.caps.Frame, .@"256KiB");
     try new_vmem.map(
         stack,
         0x7FFF_FFF0_0000,
@@ -610,7 +652,7 @@ fn execElf(elf_bytes: []const u8, sender: abi.caps.Sender) !struct { caps.Thread
 
     // map an initial heap
     // log.info("mapping a heap", .{});
-    const heap = try abi.caps.ROOT_MEMORY.allocSized(abi.caps.Frame, .@"256KiB");
+    const heap = try allocSized(abi.caps.Frame, .@"256KiB");
     try new_vmem.map(
         heap,
         heap_bottom,
@@ -619,7 +661,7 @@ fn execElf(elf_bytes: []const u8, sender: abi.caps.Sender) !struct { caps.Thread
     );
 
     // log.info("creating a new thread", .{});
-    const new_thread = try abi.caps.ROOT_MEMORY.alloc(abi.caps.Thread);
+    const new_thread = try alloc(abi.caps.Thread);
 
     try new_thread.setVmem(new_vmem);
     try new_thread.setPrio(0);
@@ -664,9 +706,9 @@ export fn zigMain() noreturn {
 }
 
 fn mapStack() !void {
-    const frame = try abi.caps.ROOT_MEMORY.allocSized(abi.caps.Frame, .@"256KiB");
+    const frame = try allocSized(abi.caps.Frame, .@"256KiB");
     // log.info("256KiB stack frame allocated", .{});
-    try abi.caps.ROOT_SELF_VMEM.map(
+    try map(
         frame,
         STACK_BOTTOM,
         .{ .writable = true },

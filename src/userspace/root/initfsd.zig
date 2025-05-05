@@ -53,7 +53,9 @@ fn vmmVectorFree(_: *anyopaque, _: []u8, _: std.mem.Alignment, _: usize) void {}
 
 fn vmmVectorGrow(top: *usize, n_pages: usize) !void {
     for (0..n_pages) |_| {
-        const frame = try abi.caps.ROOT_MEMORY.allocSized(abi.caps.Frame, .@"64KiB");
+        const frame = try main.allocSized(abi.caps.Frame, .@"64KiB");
+        main.self_vmem_lock.lock();
+        defer main.self_vmem_lock.unlock();
         try abi.caps.ROOT_SELF_VMEM.map(
             frame,
             top.*,
@@ -76,13 +78,15 @@ pub fn init() !void {
     log.info("starting initfs thread", .{});
     initfs_tar_gz = std.io.fixedBufferStream(initfs);
 
-    initfs_ready = try caps.ROOT_MEMORY.alloc(caps.Notify);
+    initfs_ready = try main.alloc(caps.Notify);
 
-    const stack = try caps.ROOT_MEMORY.allocSized(caps.Frame, .@"256KiB");
-    try caps.ROOT_SELF_VMEM.map(stack, main.INITFS_STACK_BOTTOM, .{ .writable = true }, .{});
+    const stack = try main.allocSized(caps.Frame, .@"256KiB");
+    try main.map(stack, main.INITFS_STACK_BOTTOM, .{ .writable = true }, .{});
 
-    thread = try caps.ROOT_MEMORY.alloc(caps.Thread);
+    thread = try main.alloc(caps.Thread);
     try thread.setPrio(0);
+    main.self_vmem_lock.lock();
+    defer main.self_vmem_lock.unlock();
     try thread.setVmem(caps.ROOT_SELF_VMEM);
     try thread.writeRegs(&.{
         .user_stack_ptr = main.INITFS_STACK_TOP - 0x10, // fixing a bug in Zig where @returnAddress() in noreturn underflows the stack
