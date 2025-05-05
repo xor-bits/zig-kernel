@@ -19,8 +19,8 @@ pub fn main() !void {
     const root = abi.RootProtocol.Client().init(abi.rt.root_ipc);
 
     log.debug("requesting memory", .{});
-    const res0: Error!void, const memory: caps.Memory = try root.call(.memory, void{});
-    try res0;
+    var res: Error!void, const memory: caps.Memory = try root.call(.memory, void{});
+    try res;
 
     // endpoint for vfs server <-> unix app communication
     log.debug("allocating vfs endpoint", .{});
@@ -29,8 +29,10 @@ pub fn main() !void {
 
     // inform the root that vfs is ready
     log.debug("vfs ready", .{});
-    const res2: struct { Error!void } = try root.call(.vfsReady, .{vfs_send});
-    try res2.@"0";
+    res, const vm_sender = try root.call(.vfsReady, .{vfs_send});
+    try res;
+
+    _ = vm_sender;
 
     // const server = abi.vfsProtocol.Server(.{}).init(vfs_recv);
     // try server.run();

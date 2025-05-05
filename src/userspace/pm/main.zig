@@ -19,8 +19,8 @@ pub fn main() !void {
     const root = abi.RootProtocol.Client().init(abi.rt.root_ipc);
 
     log.debug("requesting memory", .{});
-    const res0: Error!void, const memory: caps.Memory = try root.call(.memory, void{});
-    try res0;
+    var res: Error!void, const memory: caps.Memory = try root.call(.memory, void{});
+    try res;
 
     // endpoint for pm server <-> unix app communication
     log.debug("allocating pm endpoint", .{});
@@ -29,8 +29,10 @@ pub fn main() !void {
 
     // inform the root that pm is ready
     log.debug("pm ready", .{});
-    const res2: struct { Error!void } = try root.call(.pmReady, .{pm_send});
-    try res2.@"0";
+    res, const vm_sender = try root.call(.pmReady, .{pm_send});
+    try res;
+
+    _ = vm_sender;
 
     // const server = abi.PmProtocol.Server(.{}).init(pm_recv);
     // try server.run();

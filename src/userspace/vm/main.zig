@@ -32,6 +32,7 @@ pub fn main() !void {
     log.debug("allocating vm endpoint", .{});
     const vm_recv = try memory.alloc(caps.Receiver);
     const vm_send = try vm_recv.subscribe();
+    const root_endpoint = vm_send.cap;
 
     // inform the root that vm is ready
     const res2: struct { Error!void } = try root.call(.vmReady, .{vm_send});
@@ -40,8 +41,10 @@ pub fn main() !void {
     // TODO: install page fault handlers
 
     var system: System = .{
+        .recv = vm_recv,
         .memory = memory,
         .self_vmem = self_vmem,
+        .root_endpoint = root_endpoint,
     };
 
     const server = abi.VmProtocol.Server(.{
@@ -50,7 +53,9 @@ pub fn main() !void {
     }, .{
         .newVmem = newVmemHandler,
         .loadElf = loadElfHandler,
+        .mapFrame = mapFrameHandler,
         .newThread = newThreadHandler,
+        .newSender = newSenderHandler,
     }).init(&system, vm_recv);
 
     log.info("vm waiting for messages", .{});
@@ -58,8 +63,10 @@ pub fn main() !void {
 }
 
 const System = struct {
+    recv: caps.Receiver,
     memory: caps.Memory,
     self_vmem: caps.Vmem,
+    root_endpoint: u32,
     address_spaces: [256]?AddressSpace = .{null} ** 256,
 };
 
@@ -95,7 +102,7 @@ fn newVmemHandler(ctx: *System, sender: u32, _: void) struct { Error!void, usize
 }
 
 // FIXME: named fields in req, or better: just `req: abi.VmProtocol.Request(.loadElf)`
-fn loadElfHandler(ctx: *System, sender: u32, req: struct { usize, caps.Frame, usize, usize }) struct { Error!void } {
+fn loadElfHandler(ctx: *System, _: u32, req: struct { usize, caps.Frame, usize, usize }) struct { Error!void } {
     const handle = req.@"0";
     const frame = req.@"1";
     const offset = req.@"2";
@@ -110,9 +117,9 @@ fn loadElfHandler(ctx: *System, sender: u32, req: struct { usize, caps.Frame, us
     const addr_spc = &(ctx.address_spaces[handle] orelse {
         return .{abi.sys.Error.InvalidArgument};
     });
-    if (addr_spc.owner != sender) {
-        return .{abi.sys.Error.InvalidArgument};
-    }
+    // if (addr_spc.owner != sender) {
+    //     return .{abi.sys.Error.InvalidArgument};
+    // }
 
     // FIXME: make sure the frame is actually as big as it is told to be
 
@@ -136,8 +143,57 @@ fn loadElfHandler(ctx: *System, sender: u32, req: struct { usize, caps.Frame, us
     return .{void{}};
 }
 
-fn newThreadHandler(ctx: *System, sender: u32, req: struct { usize }) struct { Error!void, caps.Thread } {
+fn mapFrameHandler(ctx: *System, _: u32, req: struct { usize, caps.Frame, abi.sys.Rights, abi.sys.MapFlags }) struct { Error!void, usize, caps.Frame } {
     const handle = req.@"0";
+    const frame = req.@"1";
+
+    if (handle >= 256) {
+        return .{ abi.sys.Error.InvalidArgument, 0, .{} };
+    }
+    const addr_spc = &(ctx.address_spaces[handle] orelse {
+        return .{ abi.sys.Error.InvalidArgument, 0, .{} };
+    });
+
+    const size = frame.sizeOf() catch |err| {
+        return .{ err, 0, .{} };
+    };
+
+    addr_spc.bottom += 0x10000;
+    const vaddr = addr_spc.bottom;
+    addr_spc.bottom += size.sizeBytes();
+    addr_spc.bottom += 0x10000;
+
+    addr_spc.vmem.map(
+        frame,
+        vaddr,
+        .{
+            .writable = true,
+        },
+        .{},
+    ) catch |err| {
+        log.warn("failed to map a frame: {}", .{err});
+        return .{ Error.Internal, 0, frame };
+    };
+
+    return .{ void{}, vaddr, .{} };
+}
+
+fn newSenderHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.Sender } {
+    if (ctx.root_endpoint != sender)
+        return .{ Error.PermissionDenied, .{} };
+
+    const vm_sender = ctx.recv.subscribe() catch |err| {
+        log.err("failed to subscribe: {}", .{err});
+        return .{ err, .{} };
+    };
+
+    return .{ void{}, vm_sender };
+}
+
+fn newThreadHandler(ctx: *System, _: u32, req: struct { usize, usize, usize }) struct { Error!void, caps.Thread } {
+    const handle = req.@"0";
+    const ip_override = req.@"1";
+    const sp_override = req.@"2";
 
     if (handle >= 256) {
         return .{ abi.sys.Error.InvalidArgument, .{} };
@@ -145,11 +201,11 @@ fn newThreadHandler(ctx: *System, sender: u32, req: struct { usize }) struct { E
     const addr_spc = &(ctx.address_spaces[handle] orelse {
         return .{ abi.sys.Error.InvalidArgument, .{} };
     });
-    if (addr_spc.owner != sender) {
-        return .{ abi.sys.Error.InvalidArgument, .{} };
-    }
+    // if (addr_spc.owner != sender) {
+    //     return .{ abi.sys.Error.InvalidArgument, .{} };
+    // }
 
-    const thread = newThread(ctx, addr_spc) catch |err| {
+    const thread = newThread(ctx, addr_spc, ip_override, sp_override) catch |err| {
         log.err("failed to create a new thread: {}", .{err});
         return .{ Error.Internal, .{} };
     };
@@ -245,23 +301,25 @@ fn loadElf(system: *System, elf_bytes: []const u8, as: *AddressSpace) !void {
     }
 }
 
-fn newThread(system: *System, as: *AddressSpace) !caps.Thread {
-    // map a stack
-    // TODO: lazy
-    const stack = try system.memory.allocSized(abi.caps.Frame, .@"256KiB");
-    try as.vmem.map(
-        stack,
-        as.bottom + 0x10000, // 0x10000 guard(s)
-        .{ .writable = true },
-        .{},
-    );
-    as.bottom += 0x20000 + abi.ChunkSize.@"256KiB".sizeBytes();
+fn newThread(system: *System, as: *AddressSpace, ip_override: usize, sp_override: usize) !caps.Thread {
+    if (sp_override == 0) {
+        // map a stack
+        // TODO: lazy
+        const stack = try system.memory.allocSized(abi.caps.Frame, .@"256KiB");
+        try as.vmem.map(
+            stack,
+            as.bottom + 0x10000, // 0x10000 guard(s)
+            .{ .writable = true },
+            .{},
+        );
+        as.bottom += 0x20000 + abi.ChunkSize.@"256KiB".sizeBytes();
+    }
 
     const thread = try system.memory.alloc(caps.Thread);
     try thread.setVmem(as.vmem);
     try thread.writeRegs(&.{
-        .user_instr_ptr = as.entry,
-        .user_stack_ptr = as.bottom - 0x10010,
+        .user_instr_ptr = if (ip_override != 0) ip_override else as.entry,
+        .user_stack_ptr = if (sp_override != 0) sp_override else as.bottom - 0x10010,
     });
 
     return thread;

@@ -79,4 +79,21 @@ pub const Frame = struct {
     pub fn sizeOf(self: caps.Ref(@This())) abi.ChunkSize {
         return @enumFromInt(self.paddr.toParts().offset);
     }
+
+    pub fn call(paddr: addr.Phys, _: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
+        const call_id = std.meta.intToEnum(abi.sys.FrameCallId, trap.arg1) catch {
+            return Error.InvalidArgument;
+        };
+
+        if (conf.LOG_OBJ_CALLS)
+            log.debug("frame call \"{s}\"", .{@tagName(call_id)});
+
+        const self = caps.Ref(Frame){ .paddr = paddr };
+
+        switch (call_id) {
+            .size_of => {
+                trap.arg1 = @intFromEnum(Frame.sizeOf(self));
+            },
+        }
+    }
 };

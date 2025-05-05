@@ -332,21 +332,22 @@ const System = struct {
     pm_bin: []const u8,
     pm_sender: caps.Sender = .{},
     pm_endpoint: u32 = 0,
+    pm_vmem_handle: usize = 0,
 
     rm: caps.Thread = .{},
     rm_bin: []const u8,
     rm_sender: caps.Sender = .{},
     rm_endpoint: u32 = 0,
+    rm_vmem_handle: usize = 0,
 
     vfs: caps.Thread = .{},
     vfs_bin: []const u8,
     vfs_sender: caps.Sender = .{},
     vfs_endpoint: u32 = 0,
+    vfs_vmem_handle: usize = 0,
 
     init: caps.Thread = .{},
     init_bin: []const u8,
-    init_sender: caps.Sender = .{},
-    init_endpoint: u32 = 0,
 };
 
 fn memoryHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.Memory } {
@@ -432,66 +433,83 @@ fn vmReadyHandler(ctx: *System, sender: u32, req: struct { caps.Sender }) struct
 
     log.info("vm ready, exec pm", .{});
     var endpoint: caps.Sender = undefined;
-    endpoint = execWithVm(ctx, ctx.pm_bin) catch |err| {
+    endpoint, ctx.pm_vmem_handle = execWithVm(ctx, ctx.pm_bin) catch |err| {
         log.err("failed to exec pm: {}", .{err});
         return .{void{}};
     };
     ctx.pm_endpoint = endpoint.cap;
-    endpoint = execWithVm(ctx, ctx.rm_bin) catch |err| {
+    endpoint, ctx.rm_vmem_handle = execWithVm(ctx, ctx.rm_bin) catch |err| {
         log.err("failed to exec rm: {}", .{err});
         return .{void{}};
     };
     ctx.rm_endpoint = endpoint.cap;
-    endpoint = execWithVm(ctx, ctx.vfs_bin) catch |err| {
+    endpoint, ctx.vfs_vmem_handle = execWithVm(ctx, ctx.vfs_bin) catch |err| {
         log.err("failed to exec vfs: {}", .{err});
         return .{void{}};
     };
     ctx.vfs_endpoint = endpoint.cap;
-    endpoint = execWithVm(ctx, ctx.init_bin) catch |err| {
+    // TODO: exec initfs:///sbin/init with pm
+    endpoint, _ = execWithVm(ctx, ctx.init_bin) catch |err| {
         log.err("failed to exec init: {}", .{err});
         return .{void{}};
     };
-    ctx.init_endpoint = endpoint.cap;
 
     return .{void{}};
 }
 
-fn pmReadyHandler(ctx: *System, sender: u32, req: struct { caps.Sender }) struct { Error!void } {
+fn pmReadyHandler(ctx: *System, sender: u32, req: struct { caps.Sender }) struct { Error!void, usize } {
     if (ctx.pm_endpoint != sender) {
-        return .{Error.PermissionDenied};
+        return .{ Error.PermissionDenied, 0 };
     }
 
     // FIXME: verify that it is a cap
     ctx.pm_sender = req.@"0";
 
-    return .{void{}};
+    return .{ void{}, ctx.pm_vmem_handle };
 }
 
-fn rmReadyHandler(ctx: *System, sender: u32, req: struct { caps.Sender }) struct { Error!void } {
+fn rmReadyHandler(ctx: *System, sender: u32, req: struct { caps.Sender }) struct { Error!void, usize } {
     if (ctx.rm_endpoint != sender) {
-        return .{Error.PermissionDenied};
+        return .{ Error.PermissionDenied, 0 };
     }
 
     // FIXME: verify that it is a cap
     ctx.rm_sender = req.@"0";
 
-    return .{void{}};
+    return .{ void{}, ctx.rm_vmem_handle };
 }
 
-fn vfsReadyHandler(ctx: *System, sender: u32, req: struct { caps.Sender }) struct { Error!void } {
+fn vfsReadyHandler(ctx: *System, sender: u32, req: struct { caps.Sender }) struct { Error!void, usize } {
     if (ctx.vfs_endpoint != sender) {
-        return .{Error.PermissionDenied};
+        return .{ Error.PermissionDenied, 0 };
     }
 
     // FIXME: verify that it is a cap
     ctx.vfs_sender = req.@"0";
 
-    return .{void{}};
+    return .{ void{}, ctx.vfs_vmem_handle };
 }
 
 fn vmHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.Sender } {
-    _ = .{ ctx, sender };
-    return .{ Error.Unimplemented, .{} };
+    if (ctx.vfs_endpoint != sender and
+        ctx.pm_endpoint != sender and
+        ctx.rm_endpoint != sender)
+    {
+        return .{ Error.PermissionDenied, .{} };
+    }
+
+    const vm_client = abi.VmProtocol.Client().init(ctx.vm_sender);
+
+    const res, const vm_sender = vm_client.call(.newSender, void{}) catch |err| {
+        log.err("failed to communicate with vm: {}", .{err});
+        return .{ err, .{} };
+    };
+    res catch |err| {
+        log.err("failed to clone vm sender: {}", .{err});
+        return .{ err, .{} };
+    };
+
+    return .{ void{}, vm_sender };
 }
 
 fn pmHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.Sender } {
@@ -509,7 +527,7 @@ fn vfsHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.Send
     return .{ Error.Unimplemented, .{} };
 }
 
-fn execWithVm(ctx: *System, bin: []const u8) !caps.Sender {
+fn execWithVm(ctx: *System, bin: []const u8) !struct { caps.Sender, usize } {
     // send the file to vm server using shared memory IPC
 
     const frame = try allocSized(
@@ -548,9 +566,7 @@ fn execWithVm(ctx: *System, bin: []const u8) !caps.Sender {
     });
     _ = try res1.@"0";
 
-    const res2, const thread = try vm_sender.call(.newThread, .{
-        vmem_handle,
-    });
+    const res2, const thread = try vm_sender.call(.newThread, .{ vmem_handle, 0, 0 });
     _ = try res2;
 
     const sender = try ctx.recv.subscribe();
@@ -563,7 +579,7 @@ fn execWithVm(ctx: *System, bin: []const u8) !caps.Sender {
     try thread.writeRegs(&regs);
     try thread.start();
 
-    return sender;
+    return .{ sender, vmem_handle };
 }
 
 fn execElf(elf_bytes: []const u8, sender: abi.caps.Sender) !struct { caps.Thread, caps.Vmem } {

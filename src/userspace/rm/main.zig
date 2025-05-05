@@ -1,6 +1,8 @@
 const std = @import("std");
 const abi = @import("abi");
 
+const hpet = @import("hpet.zig");
+
 const caps = abi.caps;
 
 //
@@ -10,7 +12,11 @@ pub const std_options = abi.std_options;
 pub const panic = abi.panic;
 pub const name = "rm";
 const Error = abi.sys.Error;
-pub const log_level = .debug;
+pub const log_level = .info;
+
+var memory: caps.Memory = .{};
+var ioports: caps.X86IoPortAllocator = .{};
+var irqs: caps.X86IrqAllocator = .{};
 
 //
 
@@ -20,21 +26,24 @@ pub fn main() !void {
     const root = abi.RootProtocol.Client().init(abi.rt.root_ipc);
 
     log.debug("requesting memory", .{});
-    const res0: Error!void, const memory: caps.Memory = try root.call(.memory, void{});
-    try res0;
+    var res: Error!void, memory = try root.call(.memory, void{});
+    try res;
+
+    log.debug("requesting vm sender", .{});
+    res, const vm_sender = try root.call(.vm, void{});
+    try res;
 
     log.debug("requesting ioport allocator", .{});
-    const res1: Error!void, const ioports: caps.X86IoPortAllocator = try root.call(.ioports, void{});
-    try res1;
+    res, ioports = try root.call(.ioports, void{});
+    try res;
 
     log.debug("requesting irq allocator", .{});
-    const res2: Error!void, const irqs: caps.X86IrqAllocator = try root.call(.irqs, void{});
-    try res2;
+    res, irqs = try root.call(.irqs, void{});
+    try res;
 
-    const res3: Error!void, const hpet_frame: caps.Frame = try root.call(.device, .{abi.Device.hpet});
-    try res3;
-
-    _ = hpet_frame;
+    log.debug("requesting HPET", .{});
+    res, var hpet_frame: caps.Frame = try root.call(.device, .{abi.Device.hpet});
+    try res;
 
     // endpoint for rm server <-> unix app communication
     log.debug("allocating rm endpoint", .{});
@@ -43,14 +52,68 @@ pub fn main() !void {
 
     // inform the root that rm is ready
     log.debug("rm ready", .{});
-    const res4: struct { Error!void } = try root.call(.rmReady, .{rm_send});
-    try res4.@"0";
+    res, const vmem_handle: usize = try root.call(.rmReady, .{rm_send});
+    try res;
 
-    var keyboard = try Keyboard.init(memory, ioports, irqs);
-    try keyboard.run();
+    log.debug("creating keyboard thread", .{});
+    const vm_client = abi.VmProtocol.Client().init(vm_sender);
+    res, const kb_thread: caps.Thread = try vm_client.call(.newThread, .{
+        vmem_handle,
+        @intFromPtr(&keyboardThread),
+        0,
+    });
+    try res;
+
+    log.debug("starting keyboard thread", .{});
+    var regs: abi.sys.ThreadRegs = undefined;
+    try kb_thread.readRegs(&regs);
+    regs.arg0 = kb_thread.cap;
+    try kb_thread.writeRegs(&regs);
+    try kb_thread.setPrio(0);
+    try kb_thread.start();
+
+    log.info("mapping HPET", .{});
+    res, const hpet_addr: usize, hpet_frame = try vm_client.call(.mapFrame, .{
+        vmem_handle,
+        hpet_frame,
+        abi.sys.Rights{
+            .writable = true,
+        },
+        abi.sys.MapFlags{
+            .cache_disable = true,
+            .write_through = true,
+        },
+    });
+
+    log.info("HPET mapped at 0x{x}", .{hpet_addr});
+    hpet.init(hpet_addr);
+
+    var prev: usize = 0;
+    while (true) {
+        const millis = @as(usize, @truncate(hpet.timestampNanos() / 0x1_000_000));
+        if (millis != prev) {
+            log.info("millis={}", .{millis});
+            prev = millis;
+        }
+        abi.sys.yield();
+    }
 
     // const server = abi.RmProtocol.Server(.{}).init(rm_recv);
     // try server.run();
+}
+
+pub fn keyboardThread(self: u32) callconv(.SysV) noreturn {
+    const self_thread = caps.Thread{ .cap = self };
+    keyboardThreadMain() catch |err| {
+        log.err("keyboard thread error: {}", .{err});
+    };
+    self_thread.stop() catch {};
+    unreachable;
+}
+
+pub fn keyboardThreadMain() !void {
+    var keyboard = try Keyboard.init();
+    try keyboard.run();
 }
 
 const KeyCode = enum(u8) {
@@ -396,7 +459,7 @@ const Keyboard = struct {
     shift: bool = false,
     caps: bool = false,
 
-    pub fn init(memory: caps.Memory, ioports: caps.X86IoPortAllocator, irqs: caps.X86IrqAllocator) !@This() {
+    pub fn init() !@This() {
         const kb_port_data = try ioports.alloc(0x60);
         const kb_port_status = try ioports.alloc(0x64);
         const kb_irq = try irqs.alloc(1);

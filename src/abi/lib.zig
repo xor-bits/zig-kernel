@@ -15,7 +15,6 @@ pub const util = @import("util.zig");
 /// where the kernel places the root binary
 pub const ROOT_EXE = 0x200_0000;
 
-
 //
 
 pub const std_options: std.Options = .{
@@ -206,13 +205,16 @@ pub const RootProtocol = util.Protocol(struct {
     vmReady: fn (vm_sender: caps.Sender) struct { sys.Error!void },
 
     /// install a new pm sender that all new .pm requests get
-    pmReady: fn (pm_sender: caps.Sender) struct { sys.Error!void },
+    /// returns a vm handle to self
+    pmReady: fn (pm_sender: caps.Sender) struct { sys.Error!void, usize },
 
     /// install a new rm sender that all new .rm requests get
-    rmReady: fn (pm_sender: caps.Sender) struct { sys.Error!void },
+    /// returns a vm handle to self
+    rmReady: fn (pm_sender: caps.Sender) struct { sys.Error!void, usize },
 
     /// install a new vfs sender that all new .vfs requests get
-    vfsReady: fn (vfs_sender: caps.Sender) struct { sys.Error!void },
+    /// returns a vm handle to self
+    vfsReady: fn (vfs_sender: caps.Sender) struct { sys.Error!void, usize },
 
     /// request a sender to the vm server
     /// only pm can use this
@@ -238,9 +240,16 @@ pub const VmProtocol = util.Protocol(struct {
     /// load an ELF into an address space
     loadElf: fn (handle: usize, elf: caps.Frame, offset: usize, length: usize) sys.Error!void,
 
+    /// map a frame into an address space
+    mapFrame: fn (handle: usize, frame: caps.Frame, rights: sys.Rights, length: sys.MapFlags) struct { sys.Error!void, usize, caps.Frame },
+
     /// create a new thread from an address space
     /// ip and sp are already set
-    newThread: fn (handle: usize) struct { sys.Error!void, caps.Thread },
+    newThread: fn (handle: usize, ip_override: usize, sp_override: usize) struct { sys.Error!void, caps.Thread },
+
+    /// create a new sender the vm server
+    /// only root can call this
+    newSender: fn () struct { sys.Error!void, caps.Sender },
 });
 
 // pub const PmProtocol = util.Protocol(struct {});
