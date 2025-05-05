@@ -5,12 +5,12 @@ const addr = @import("../addr.zig");
 const apic = @import("../apic.zig");
 const arch = @import("../arch.zig");
 const caps = @import("../caps.zig");
-const conf = @import("../conf.zig");
 const pmem = @import("../pmem.zig");
 const proc = @import("../proc.zig");
 const spin = @import("../spin.zig");
 const util = @import("../util.zig");
 
+const conf = abi.conf;
 const log = std.log.scoped(.caps);
 const Error = abi.sys.Error;
 

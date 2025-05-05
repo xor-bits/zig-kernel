@@ -4,9 +4,9 @@ const std = @import("std");
 const addr = @import("../addr.zig");
 const arch = @import("../arch.zig");
 const caps = @import("../caps.zig");
-const conf = @import("../conf.zig");
 const pmem = @import("../pmem.zig");
 
+const conf = abi.conf;
 const log = std.log.scoped(.caps);
 const Error = abi.sys.Error;
 

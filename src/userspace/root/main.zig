@@ -256,7 +256,7 @@ fn binBytes(path: []const u8) ![]const u8 {
 
 const Proto = abi.RootProtocol.Server(.{
     .Context = *System,
-    .scope = if (abi.LOG_SERVERS) .root else null,
+    .scope = if (abi.conf.LOG_SERVERS) .root else null,
 }, .{
     .memory = memoryHandler,
     .selfVmem = selfVmemHandler,

@@ -46,7 +46,7 @@ pub fn main() !void {
 
     const server = abi.VmProtocol.Server(.{
         .Context = *System,
-        .scope = if (abi.LOG_SERVERS) .vm else null,
+        .scope = if (abi.conf.LOG_SERVERS) .vm else null,
     }, .{
         .newVmem = newVmemHandler,
         .loadElf = loadElfHandler,

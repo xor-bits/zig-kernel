@@ -9,7 +9,6 @@ const apic = @import("apic.zig");
 const arch = @import("arch.zig");
 const args = @import("args.zig");
 const caps = @import("caps.zig");
-const conf = @import("conf.zig");
 const init = @import("init.zig");
 const logs = @import("logs.zig");
 const pmem = @import("pmem.zig");
@@ -19,6 +18,7 @@ const util = @import("util.zig");
 
 //
 
+const conf = abi.conf;
 pub const std_options = logs.std_options;
 pub const panic = logs.panic;
 

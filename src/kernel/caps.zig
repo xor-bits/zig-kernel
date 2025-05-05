@@ -3,7 +3,6 @@ const abi = @import("abi");
 
 const addr = @import("addr.zig");
 const arch = @import("arch.zig");
-const conf = @import("conf.zig");
 const pmem = @import("pmem.zig");
 const proc = @import("proc.zig");
 const spin = @import("spin.zig");
@@ -14,6 +13,7 @@ const caps_thread = @import("caps/thread.zig");
 const caps_vmem = @import("caps/vmem.zig");
 const caps_x86 = @import("caps/x86.zig");
 
+const conf = abi.conf;
 const log = std.log.scoped(.caps);
 const Error = abi.sys.Error;
 

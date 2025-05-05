@@ -3,19 +3,18 @@ const root = @import("root");
 
 pub const btree = @import("btree.zig");
 pub const caps = @import("caps.zig");
+pub const conf = @import("conf.zig");
+pub const lock = @import("lock.zig");
 pub const ring = @import("ring.zig");
 pub const rt = @import("rt.zig");
 pub const sys = @import("sys.zig");
 pub const util = @import("util.zig");
-pub const lock = @import("lock.zig");
 
 //
 
 /// where the kernel places the root binary
 pub const ROOT_EXE = 0x200_0000;
 
-// TODO: move kernel/conf.zig here
-pub const LOG_SERVERS: bool = true;
 
 //
 
