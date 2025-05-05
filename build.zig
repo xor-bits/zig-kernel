@@ -268,7 +268,7 @@ fn createKernelElf(
         });
 
         testkernel_elf_step.setLinkerScript(b.path("src/kernel/link/x86_64.ld"));
-        testkernel_elf_step.want_lto = false;
+        // testkernel_elf_step.want_lto = false;
         testkernel_elf_step.pie = false;
         testkernel_elf_step.root_module.addImport("kernel", kernel_module);
 
@@ -282,7 +282,7 @@ fn createKernelElf(
         });
 
         kernel_elf_step.setLinkerScript(b.path("src/kernel/link/x86_64.ld"));
-        kernel_elf_step.want_lto = false;
+        // kernel_elf_step.want_lto = false;
         kernel_elf_step.pie = false;
 
         b.installArtifact(kernel_elf_step);
