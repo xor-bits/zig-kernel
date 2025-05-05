@@ -27,6 +27,9 @@ var kernel_table: Vmem = undefined;
 //
 
 pub fn growCapArray() u32 {
+    caps.array_grow_lock.lock();
+    defer caps.array_grow_lock.unlock();
+
     const current_len = caps.capability_array_len.raw;
     const new_page_addr = addr.Virt.fromPtr(&caps.capabilityArrayUnchecked().ptr[current_len]);
 
@@ -38,9 +41,6 @@ pub fn growCapArray() u32 {
     const map_frame = last_byte_of_prev & SIZE_4KIB_MASK != last_byte_of_next & SIZE_4KIB_MASK;
 
     if (map_frame) {
-        caps.array_grow_lock.lock();
-        defer caps.array_grow_lock.unlock();
-
         kernel_table.mapFrame(allocPage(), last_page, .{
             .readable = true,
             .writable = true,
@@ -50,8 +50,13 @@ pub fn growCapArray() u32 {
         }) catch std.debug.panic("invalid kernel page table", .{});
     }
 
+    const cap_id = &caps.capabilityArrayUnchecked()[current_len];
+    cap_id.* = .{};
+
     const next = caps.capability_array_len.fetchAdd(1, .acquire);
     if (next > std.math.maxInt(u32)) std.debug.panic("too many capabilities", .{});
+
+    std.debug.assert(next == current_len);
 
     return @truncate(next);
 }
