@@ -1,4 +1,7 @@
 const std = @import("std");
+const builtin = @import("builtin");
+
+const log = std.log.scoped(.spin);
 
 //
 
@@ -46,8 +49,15 @@ pub const Mutex = struct {
     }
 
     pub fn lock(self: *Self) void {
+        var counter = if (IS_DEBUG) @as(usize, 0) else void{};
         while (null != self.lock_state.cmpxchgWeak(0, 1, .acquire, .monotonic)) {
             while (self.isLocked()) {
+                if (IS_DEBUG) {
+                    counter += 1;
+                    if (counter % 10_000 == 0) {
+                        log.warn("possible deadlock", .{});
+                    }
+                }
                 std.atomic.spinLoopHint();
             }
         }
@@ -65,3 +75,5 @@ pub const Mutex = struct {
         self.lock_state.store(0, .release);
     }
 };
+
+const IS_DEBUG = builtin.mode == .Debug or builtin.mode == .ReleaseSafe;
