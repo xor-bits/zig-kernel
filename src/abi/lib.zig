@@ -7,6 +7,7 @@ pub const ring = @import("ring.zig");
 pub const rt = @import("rt.zig");
 pub const sys = @import("sys.zig");
 pub const util = @import("util.zig");
+pub const lock = @import("lock.zig");
 
 //
 
@@ -176,6 +177,10 @@ pub const SysLog = struct {
 
 //
 
+pub const Device = enum(u8) {
+    hpet,
+};
+
 pub const RootProtocol = util.Protocol(struct {
     /// request a physical memory allocator capability
     /// only system processes are allowed request this
@@ -192,6 +197,10 @@ pub const RootProtocol = util.Protocol(struct {
     /// request a x86 irq allocator capability
     /// only rm can use this
     irqs: fn () struct { sys.Error!void, caps.X86IrqAllocator },
+
+    /// request a device physical frame
+    /// only rm can use this
+    device: fn (kind: Device) struct { sys.Error!void, caps.Frame },
 
     /// provide a sender to the vm server
     /// only vm can use this
