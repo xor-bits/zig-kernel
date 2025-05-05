@@ -56,6 +56,7 @@ pub const Mutex = struct {
                     counter += 1;
                     if (counter % 10_000 == 0) {
                         log.warn("possible deadlock", .{});
+                        @import("logs.zig").addr2line(@returnAddress());
                     }
                 }
                 std.atomic.spinLoopHint();
