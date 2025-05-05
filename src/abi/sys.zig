@@ -334,6 +334,8 @@ pub fn frameSizeOf(frame_cap: u32) !abi.ChunkSize {
 
 pub const ReceiverCallId = enum(u8) {
     subscribe,
+    save_caller,
+    load_caller,
 };
 
 pub fn receiverSubscribe(recv_cap: u32) Error!u32 {
@@ -343,6 +345,8 @@ pub fn receiverSubscribe(recv_cap: u32) Error!u32 {
     try call(recv_cap, &msg);
     return @truncate(msg.cap);
 }
+
+// REPLY CAPABILITY CALLS
 
 // SENDER CAPABILITY CALLS
 

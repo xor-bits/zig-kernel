@@ -46,6 +46,31 @@ pub const Receiver = struct {
                 const sender = caps.Ref(Sender){ .paddr = paddr };
                 trap.arg0 = caps.pushCapability(sender.object(thread));
             },
+            .save_caller => {
+                const caller = thread.reply orelse {
+                    return Error.NotMapped;
+                };
+                thread.reply = null;
+
+                const reply_obj = caps.Ref(Reply){ .paddr = addr.Virt.fromPtr(caller).hhdmToPhys() };
+                trap.arg0 = caps.pushCapability(reply_obj.object(thread));
+            },
+            .load_caller => {
+                if (thread.reply != null) {
+                    return Error.AlreadyMapped;
+                }
+
+                const reply_cap_id: u32 = @truncate(trap.arg2);
+                const reply_cap = try caps.getCapability(thread, reply_cap_id);
+                defer reply_cap.lock.unlock();
+
+                const reply_obj = try reply_cap.as(Reply);
+                const caller = caps.Ref(caps.Thread){ .paddr = reply_obj.paddr };
+
+                thread.reply = caller.ptr();
+                // reply_cap.owner.store(null, .release);
+                // arch.cpuLocal().delete_queue.pushBack(reply_cap_id);
+            },
         }
     }
 
@@ -206,7 +231,32 @@ pub const Sender = struct {
     }
 };
 
-// pub const Reply = struct {};
+pub const Reply = struct {
+    pub fn init(self: caps.Ref(@This())) void {
+        self.ptr().* = .{};
+    }
+
+    pub fn alloc(_: ?abi.ChunkSize) Error!addr.Phys {
+        return pmem.alloc(@sizeOf(@This())) orelse return Error.OutOfMemory;
+    }
+
+    pub fn reply(paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
+        if (conf.LOG_OBJ_CALLS)
+            log.debug("reply reply", .{});
+
+        // const self = (caps.Ref(@This()){ .paddr = paddr }).ptr();
+
+        thread.reply = (caps.Ref(caps.Thread){ .paddr = paddr }).ptr();
+        const sender = try Receiver.replyGetSender(thread, trap);
+
+        // delete this reply object
+        // caps.getCapabilityLocked(@truncate(trap.arg1)).owner.store(null, .release);
+        // arch.cpuLocal().delete_queue.pushBack(@truncate(trap.arg0));
+
+        // set the original caller thread as ready to run again, but return to the current thread
+        proc.ready(sender);
+    }
+};
 
 pub const Notify = struct {
     notified: std.atomic.Value(u32) = .init(0),

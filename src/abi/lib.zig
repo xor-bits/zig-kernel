@@ -76,6 +76,9 @@ pub const ObjectType = enum(u8) {
     /// capability to **a** notify object
     /// there can be multiple of them
     notify,
+    /// capability to **a** reply object
+    /// it can be saved/loaded from receiver or replied with
+    reply,
 
     /// x86 specific capability that allows allocating `x86_ioport` capabilities
     x86_ioport_allocator,

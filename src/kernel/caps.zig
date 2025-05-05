@@ -25,6 +25,7 @@ pub const Thread = caps_thread.Thread;
 pub const Vmem = caps_vmem.Vmem;
 pub const Receiver = caps_ipc.Receiver;
 pub const Sender = caps_ipc.Sender;
+pub const Reply = caps_ipc.Reply;
 pub const Notify = caps_ipc.Notify;
 pub const X86IoPortAllocator = caps_x86.X86IoPortAllocator;
 pub const X86IoPort = caps_x86.X86IoPort;
@@ -195,6 +196,10 @@ pub fn deallocate(cap: u32) void {
     free_list = cap;
 }
 
+pub fn flushDeleteQueue() void {
+    arch.cpuLocal().delete_queue;
+}
+
 //
 
 /// pointer to the first capability in the global capability array (its a null capability)
@@ -265,6 +270,7 @@ pub const Object = struct {
             Frame => .frame,
             Receiver => .receiver,
             Sender => .sender,
+            Reply => .reply,
             Notify => .notify,
             X86IoPortAllocator => .x86_ioport_allocator,
             X86IoPort => .x86_ioport,
@@ -292,6 +298,7 @@ pub const Object = struct {
             .frame => (try Ref(Frame).alloc(dyn_size)).object(owner),
             .receiver => (try Ref(Receiver).alloc(dyn_size)).object(owner),
             .sender => (try Ref(Sender).alloc(dyn_size)).object(owner),
+            .reply => (try Ref(Reply).alloc(dyn_size)).object(owner),
             .notify => (try Ref(Notify).alloc(dyn_size)).object(owner),
             .x86_ioport_allocator => (try Ref(X86IoPortAllocator).alloc(dyn_size)).object(owner),
             .x86_ioport => (try Ref(X86IoPort).alloc(dyn_size)).object(owner),
@@ -310,6 +317,7 @@ pub const Object = struct {
             .frame => Frame.call(self.paddr, thread, trap),
             .receiver => Receiver.call(self.paddr, thread, trap),
             .sender => Sender.call(self.paddr, thread, trap),
+            .reply => Error.InvalidArgument,
             .notify => Notify.call(self.paddr, thread, trap),
             .x86_ioport_allocator => X86IoPortAllocator.call(self.paddr, thread, trap),
             .x86_ioport => X86IoPort.call(self.paddr, thread, trap),
@@ -327,6 +335,7 @@ pub const Object = struct {
             .frame => Error.InvalidArgument,
             .receiver => Receiver.recv(self.paddr, thread, trap),
             .sender => Error.InvalidArgument,
+            .reply => Error.InvalidArgument,
             .notify => Error.InvalidArgument,
             .x86_ioport_allocator => Error.InvalidArgument,
             .x86_ioport => Error.InvalidArgument,
@@ -344,6 +353,7 @@ pub const Object = struct {
             .frame => Error.InvalidArgument,
             .receiver => Receiver.reply(self.paddr, thread, trap),
             .sender => Error.InvalidArgument,
+            .reply => Reply.reply(self.paddr, thread, trap),
             .notify => Error.InvalidArgument,
             .x86_ioport_allocator => Error.InvalidArgument,
             .x86_ioport => Error.InvalidArgument,
@@ -361,6 +371,7 @@ pub const Object = struct {
             .frame => Error.InvalidArgument,
             .receiver => Receiver.replyRecv(self.paddr, thread, trap),
             .sender => Error.InvalidArgument,
+            .reply => Error.InvalidArgument,
             .notify => Error.InvalidArgument,
             .x86_ioport_allocator => Error.InvalidArgument,
             .x86_ioport => Error.InvalidArgument,

@@ -179,6 +179,7 @@ fn writeByte(byte: u8) void {
 }
 
 fn flush() void {
+    // var nth: usize = 0;
     for (0..terminal_size.h) |_y| {
         for (0..terminal_size.w) |_x| {
             const x: u32 = @truncate(_x);
@@ -196,6 +197,14 @@ fn flush() void {
                 return;
             };
             to.fillGlyph(letter, 0xFFFFFF, 0x880000);
+            // const nth_f = @as(f32, @floatFromInt(nth)) * 0.014232 * std.math.pi;
+            // to.fillGlyph(letter, @bitCast([4]u8{
+            //     @intFromFloat((std.math.sin(2.0 * nth_f + 0.0 * std.math.pi / 3.0) * 0.5 + 0.5) * 255),
+            //     @intFromFloat((std.math.sin(2.0 * nth_f + 2.0 * std.math.pi / 3.0) * 0.5 + 0.5) * 255),
+            //     @intFromFloat((std.math.sin(2.0 * nth_f + 4.0 * std.math.pi / 3.0) * 0.5 + 0.5) * 255),
+            //     0,
+            // }), 0x880000);
+            // nth += 1;
         }
     }
 }

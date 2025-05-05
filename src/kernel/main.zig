@@ -44,6 +44,8 @@ pub const CpuLocalStorage = struct {
     // FIXME: remove notify caps from here
     interrupt_handlers: [apic.IRQ_AVAIL_COUNT]apic.Handler =
         .{apic.Handler.init(null)} ** apic.IRQ_AVAIL_COUNT,
+
+    // delete_queue: ?u32,
 };
 
 //
