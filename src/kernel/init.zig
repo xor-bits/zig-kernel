@@ -17,7 +17,7 @@ const volat = util.volat;
 
 //
 
-export var fb_request: limine.FramebufferRequest = .{};
+pub export var fb_request: limine.FramebufferRequest = .{};
 // pub export var memory: limine.MemoryMapRequest = .{};
 
 /// load and exec the root process

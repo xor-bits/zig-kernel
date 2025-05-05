@@ -2,6 +2,7 @@ const std = @import("std");
 
 const apic = @import("apic.zig");
 const arch = @import("arch.zig");
+const init = @import("init.zig");
 const main = @import("main.zig");
 const pmem = @import("pmem.zig");
 const spin = @import("spin.zig");
@@ -79,6 +80,17 @@ pub fn panic(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace, ret_
     }
 
     log.err("CPU panicked: {s}", .{msg});
+
+    if (init.fb_request.response) |fbs| {
+        for (fbs.framebuffers()) |fb| {
+            for (0..fb.height) |y| {
+                for (0..fb.width) |x| {
+                    const pix: *volatile u32 = &@as([*]volatile u32, @alignCast(@ptrCast(fb.address)))[x + y * fb.pitch / 4];
+                    pix.* = 0xAA0000;
+                }
+            }
+        }
+    }
 
     arch.hcf();
 }
