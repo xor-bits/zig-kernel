@@ -331,6 +331,8 @@ const MessageUsage = struct {
                 real_ty = u32;
                 enc = .cap;
             },
+            abi.sys.Rights,
+            abi.sys.MapFlags,
             f64,
             f32,
             f16,
