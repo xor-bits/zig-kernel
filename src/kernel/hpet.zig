@@ -22,7 +22,7 @@ pub fn init(hpet: *const Hpet) !void {
 
     log.info("found HPET addr: 0x{x}", .{hpet.address});
 
-    const hpet_phys: caps.Ref(caps.Frame) = .{ .paddr = addr.Phys.fromInt(hpet.address) };
+    const hpet_phys: caps.Ref(caps.Frame) = .{ .paddr = caps.Frame.new(addr.Phys.fromInt(hpet.address), .@"4KiB") };
     hpet_frame = hpet_phys;
     const regs: *volatile HpetRegs = @ptrCast(hpet_phys.ptr());
 
