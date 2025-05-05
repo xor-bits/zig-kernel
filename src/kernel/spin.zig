@@ -2,6 +2,36 @@ const std = @import("std");
 
 //
 
+pub const Once = struct {
+    entry_mutex: Mutex = .new(),
+    wait_mutex: Mutex = .newLocked(),
+
+    const Self = @This();
+
+    pub fn new() Self {
+        return .{};
+    }
+
+    /// try init whatever resource
+    /// false => some other CPU did it, call `wait`
+    /// true  => this CPU is doing it, call `complete` once done
+    pub fn tryRun(self: *Self) bool {
+        return self.entry_mutex.tryLock();
+    }
+
+    pub fn wait(self: *Self) void {
+        // some other cpu is already working on this,
+        // wait for it to be complete and then return
+        self.wait_mutex.lock();
+        self.wait_mutex.unlock();
+    }
+
+    pub fn complete(self: *Self) void {
+        // unlock wait_spin to signal others
+        self.wait_mutex.unlock();
+    }
+};
+
 pub const Mutex = struct {
     lock_state: std.atomic.Value(u8) = std.atomic.Value(u8).init(0),
 

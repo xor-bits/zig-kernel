@@ -18,6 +18,7 @@ pub fn init() !void {
     const cr3 = arch.Cr3.read();
     const level4 = addr.Phys.fromInt(cr3.pml4_phys_base << 12)
         .toHhdm().toPtr(*Vmem);
+    // TODO: make a deep copy instead and make every higher half mapping global
     std.mem.copyForwards(Entry, kernel_table.entries[256..], level4.entries[256..]);
 }
 

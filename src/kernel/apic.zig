@@ -569,20 +569,14 @@ const ProcessorLx2apic = extern struct {
 
 //
 
-var entry_spin: spin.Mutex = .new();
-var wait_spin: spin.Mutex = .newLocked();
+var pic_once: spin.Once = .{};
 
 fn disablePic() void {
-    if (!entry_spin.tryLock()) {
-        // some other cpu is already working on this,
-        // wait for it to be complete and then return
-        wait_spin.lock();
-        defer wait_spin.unlock();
+    if (!pic_once.tryRun()) {
+        pic_once.wait();
         return;
     }
-
-    // leave entry_spin as locked but unlock wait_spin to signal others
-    defer wait_spin.unlock();
+    defer pic_once.complete();
 
     log.info("obliterating PIC because PIC sucks", .{});
     const outb = arch.x86_64.outb;
