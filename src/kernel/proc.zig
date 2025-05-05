@@ -42,6 +42,7 @@ pub fn enter() noreturn {
 /// add the current thread back to the ready queue (if ready) and maybe switch to another thread
 pub fn yield(trap: *arch.SyscallRegs) void {
     const local = arch.cpuLocal();
+    const prev = local.current_thread;
     if (local.current_thread) |prev_thread| {
         local.current_thread = null;
         prev_thread.trap = trap.*;
@@ -55,22 +56,25 @@ pub fn yield(trap: *arch.SyscallRegs) void {
         }
     }
 
-    switchNow(trap);
+    switchNow(trap, prev);
 }
 
 /// switch to another thread without adding the thread back to the ready queue
-pub fn switchNow(trap: *arch.SyscallRegs) void {
-    switchTo(trap, next());
+pub fn switchNow(trap: *arch.SyscallRegs, prev: ?*caps.Thread) void {
+    switchTo(trap, next(), prev);
 }
 
 /// switch to another thread, skipping the scheduler entirely
 /// does **NOT** save the previous context or set its status
-pub fn switchTo(trap: *arch.SyscallRegs, thread: *caps.Thread) void {
+pub fn switchTo(trap: *arch.SyscallRegs, thread: *caps.Thread, prev: ?*caps.Thread) void {
     const local = arch.cpuLocal();
     local.current_thread = thread;
-    caps.Vmem.switchTo(thread.vmem.?);
     trap.* = thread.trap;
     thread.status = .running;
+
+    if (thread == prev)
+        return;
+    caps.Vmem.switchTo(thread.vmem.?);
 
     if (conf.LOG_CTX_SWITCHES)
         log.debug("switch to {*}", .{thread});

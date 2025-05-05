@@ -69,6 +69,10 @@ pub const Receiver = struct {
         self.queue_lock.lock();
         if (self.queue.popFront()) |immediate| {
             self.queue_lock.unlock();
+
+            if (conf.LOG_WAITING)
+                log.debug("IPC wake {*}", .{immediate});
+
             // copy over the message
             const msg = immediate.trap.readMessage();
             trap.writeMessage(msg);
@@ -135,8 +139,16 @@ pub const Receiver = struct {
         const self = (caps.Ref(@This()){ .paddr = paddr }).ptr();
         self.recvNoFail(thread, trap);
 
+        // push the receiver thread into the ready queue
+        // if there was a sender queued
+        if (thread.status == .running) {
+            thread.status = .waiting;
+            thread.trap = trap.*;
+            proc.ready(thread);
+        }
+
         // switch to the original caller thread
-        proc.switchTo(trap, sender);
+        proc.switchTo(trap, sender, thread);
     }
 };
 
@@ -164,25 +176,18 @@ pub const Sender = struct {
         try thread.prelockExtras(@truncate(msg.extra)); // keep them locked even if a listener isn't ready
 
         // acquire a listener or switch threads
-        const listener = self.receiver.swap(null, .seq_cst) orelse b: {
+        const listener = self.receiver.swap(null, .seq_cst) orelse {
             @branchHint(.cold);
 
             // first push the thread into the sleep queue
+            if (conf.LOG_WAITING)
+                log.debug("IPC sleep {*}", .{thread});
             self.queue_lock.lock();
             self.queue.pushBack(thread);
             self.queue_lock.unlock();
 
-            // then check again
-            if (self.receiver.swap(null, .seq_cst)) |second_try| {
-                // receiver just got ready
-                @branchHint(.cold);
-                std.debug.assert(self.queue.popBack() == thread);
-                break :b second_try;
-            } else {
-                // this sender thread is in the sleep queue now without a receiver ready, switch threads
-                thread.status = .waiting;
-                return;
-            }
+            thread.status = .waiting;
+            return;
         };
         std.debug.assert(listener.status == .waiting);
 
@@ -197,7 +202,7 @@ pub const Sender = struct {
         // switch to the listener
         thread.status = .waiting;
         thread.trap = trap.*;
-        proc.switchTo(trap, listener);
+        proc.switchTo(trap, listener, thread);
     }
 };
 
