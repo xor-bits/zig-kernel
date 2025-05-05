@@ -19,7 +19,7 @@ pub fn init() !void {
     const level4 = addr.Phys.fromInt(cr3.pml4_phys_base << 12)
         .toHhdm().toPtr(*Vmem);
     // TODO: make a deep copy instead and make every higher half mapping global
-    std.mem.copyForwards(Entry, kernel_table.entries[256..], level4.entries[256..]);
+    abi.util.copyForwardsVolatile(Entry, kernel_table.entries[256..], level4.entries[256..]);
 }
 
 var kernel_table: Vmem = undefined;
