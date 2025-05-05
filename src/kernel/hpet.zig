@@ -34,6 +34,8 @@ pub fn init(hpet: *const Hpet) !void {
     log.info("HPET speed: 1ms = {d} ticks", .{1_000_000_000_000 / @as(u64, @as(*volatile u32, &regs.caps_and_id.counter_period_femtoseconds).*)});
 }
 
+// TODO: something useful could be done while waiting
+// + only one CPU has to measure the APIC timer speed afaik
 pub fn hpetSpinWait(micros: u32, just_before: anytype) void {
     const regs: *volatile HpetRegs = @ptrCast(hpet_frame.?.ptr());
 
@@ -46,7 +48,11 @@ pub fn hpetSpinWait(micros: u32, just_before: anytype) void {
     }
 }
 
-pub var hpet_frame: ?caps.Ref(caps.Frame) = null;
+pub fn hpetFrame() caps.Ref(caps.Frame) {
+    return hpet_frame.?;
+}
+
+var hpet_frame: ?caps.Ref(caps.Frame) = null;
 
 // pub fn now() u64 {
 //     const regs = hpet_regs.?;

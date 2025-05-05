@@ -318,3 +318,13 @@ pub fn Queue(
         }
     };
 }
+
+pub fn AsVolatile(comptime T: type) type {
+    var ptr = @typeInfo(T);
+    ptr.pointer.is_volatile = true;
+    return @Type(ptr);
+}
+
+pub fn volat(ptr: anytype) AsVolatile(@TypeOf(ptr)) {
+    return ptr;
+}

@@ -141,6 +141,7 @@ pub const BootInfo = extern struct {
     framebuffer_height: usize = 0,
     framebuffer_pitch: usize = 0,
     framebuffer_bpp: u16 = 0,
+    hpet: caps.Frame = .{},
 
     pub fn rootData(self: @This()) []u8 {
         return self.root_data[0..self.root_data_len];

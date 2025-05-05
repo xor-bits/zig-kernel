@@ -3,14 +3,17 @@ const abi = @import("abi");
 const limine = @import("limine");
 
 const addr = @import("addr.zig");
-const args = @import("args.zig");
 const arch = @import("arch.zig");
+const args = @import("args.zig");
 const caps = @import("caps.zig");
+const hpet = @import("hpet.zig");
 const pmem = @import("pmem.zig");
 const proc = @import("proc.zig");
+const util = @import("util.zig");
 
 const log = std.log.scoped(.init);
 const Error = abi.sys.Error;
+const volat = util.volat;
 
 //
 
@@ -95,14 +98,17 @@ fn mapRoot(thread: *caps.Thread, vmem: *caps.Vmem, boot_info: *caps.Frame, a: ar
                 const framebuffer: caps.Ref(caps.Frame) = .{ .paddr = caps.Frame.new(fb_paddr, fb_size) };
 
                 const id = caps.pushCapability(framebuffer.object(thread));
-                boot_info_ptr.framebuffer = .{ .cap = id };
-                boot_info_ptr.framebuffer_width = fb.width;
-                boot_info_ptr.framebuffer_height = fb.height;
-                boot_info_ptr.framebuffer_pitch = fb.pitch;
-                boot_info_ptr.framebuffer_bpp = fb.bpp;
+                volat(&boot_info_ptr.framebuffer).* = .{ .cap = id };
+                volat(&boot_info_ptr.framebuffer_width).* = fb.width;
+                volat(&boot_info_ptr.framebuffer_height).* = fb.height;
+                volat(&boot_info_ptr.framebuffer_pitch).* = fb.pitch;
+                volat(&boot_info_ptr.framebuffer_bpp).* = fb.bpp;
             }
         }
     }
+
+    const hpet_cap_id = caps.pushCapability(hpet.hpetFrame().object(thread));
+    volat(&boot_info_ptr.hpet).* = .{ .cap = hpet_cap_id };
 
     log.info("root virtual memory size: 0x{x}", .{data_len});
     log.info("mapping root   [ 0x{x:0>16}..0x{x:0>16} ]", .{
