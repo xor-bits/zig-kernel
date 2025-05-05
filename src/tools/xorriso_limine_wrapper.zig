@@ -9,7 +9,7 @@ pub var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 pub fn main() !void {
     const args = try std.process.argsAlloc(gpa.allocator());
     if (args.len != 4)
-        return error.@"usage: xorriso_limine_wrapper <limine-exec> <iso-root> <iso-file>";
+        return error.@"usage: xorriso_limine_wrapper <limine-dir> <iso-root> <iso-file>";
 
     std.debug.print("running xorriso and limine\n", .{});
 
@@ -42,8 +42,26 @@ pub fn main() !void {
         else => return error.@"xorriso failed",
     }
 
-    var limine = std.process.Child.init(&.{
+    const limine_exec = try std.fs.path.join(
+        gpa.allocator(),
+        &.{ args[1], "limine" },
+    );
+
+    var limine_make = std.process.Child.init(&.{
+        "make",  "-C",
         args[1],
+    }, gpa.allocator());
+
+    switch (try limine_make.spawnAndWait()) {
+        .Exited => |code| {
+            if (code != 0)
+                return error.@"make failed";
+        },
+        else => return error.@"make failed",
+    }
+
+    var limine = std.process.Child.init(&.{
+        limine_exec,
         "bios-install",
         args[3],
     }, gpa.allocator());

@@ -146,12 +146,12 @@ fn createIso(
 
     // clone & configure limine (WARNING: this runs a Makefile from a dependency at compile time)
     const limine_bootloader_pkg = b.dependency("limine_bootloader", .{});
-    const limine_step = b.addSystemCommand(&.{
-        "make", "-C",
-    });
-    limine_step.addDirectoryArg(limine_bootloader_pkg.path("."));
-    // limine_step.addPrefixedFileArg("_IGNORED=", limine_bootloader_pkg.path(".").path(b, "limine.c"));
-    limine_step.has_side_effects = false;
+    // const limine_step = b.addSystemCommand(&.{
+    //     "make", "-C",
+    // });
+    // limine_step.addDirectoryArg(limine_bootloader_pkg.path("."));
+    // // limine_step.addPrefixedFileArg("_IGNORED=", limine_bootloader_pkg.path(".").path(b, "limine.c"));
+    // limine_step.has_side_effects = false;
 
     // tool that generates the ISO file with everything
     const wrapper = b.addExecutable(.{
@@ -174,10 +174,10 @@ fn createIso(
 
     // create the ISO file (WARNING: this runs a binary from a dependency (limine_bootloader) at compile time)
     const wrapper_run = b.addRunArtifact(wrapper);
-    wrapper_run.addFileArg(limine_bootloader_pkg.path("limine"));
+    wrapper_run.addDirectoryArg(limine_bootloader_pkg.path("."));
     wrapper_run.addDirectoryArg(wf.getDirectory());
     const os_iso = wrapper_run.addOutputFileArg("os.iso");
-    wrapper_run.step.dependOn(&limine_step.step);
+    // wrapper_run.step.dependOn(&limine_step.step);
 
     const install_iso = b.addInstallFile(os_iso, "os.iso");
     b.getInstallStep().dependOn(&install_iso.step);
