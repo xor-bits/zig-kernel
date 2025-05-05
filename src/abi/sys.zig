@@ -346,6 +346,22 @@ pub fn receiverSubscribe(recv_cap: u32) Error!u32 {
     return @truncate(msg.cap);
 }
 
+pub fn receiverSaveCaller(recv_cap: u32) Error!u32 {
+    var msg: Message = .{
+        .arg0 = @intFromEnum(ReceiverCallId.save_caller),
+    };
+    try call(recv_cap, &msg);
+    return @truncate(msg.cap);
+}
+
+pub fn receiverLoadCaller(recv_cap: u32, reply_cap: u32) Error!void {
+    var msg: Message = .{
+        .arg0 = @intFromEnum(ReceiverCallId.load_caller),
+        .arg1 = reply_cap,
+    };
+    try call(recv_cap, &msg);
+}
+
 // REPLY CAPABILITY CALLS
 
 // SENDER CAPABILITY CALLS

@@ -111,6 +111,14 @@ pub const Receiver = extern struct {
         return sys.replyRecv(self.cap, msg);
     }
 
+    pub fn saveCaller(self: @This()) sys.Error!Reply {
+        return .{ .cap = try sys.receiverSaveCaller(self.cap) };
+    }
+
+    pub fn loadCaller(self: @This(), reply_cap: Reply) sys.Error!void {
+        return sys.receiverLoadCaller(self.cap, reply_cap.cap);
+    }
+
     pub fn subscribe(self: @This()) sys.Error!Sender {
         const cap = try sys.receiverSubscribe(self.cap);
         return .{ .cap = cap };
@@ -126,6 +134,18 @@ pub const Sender = extern struct {
 
     pub fn call(self: @This(), msg: *sys.Message) sys.Error!void {
         return sys.call(self.cap, msg);
+    }
+};
+
+/// capability to **a** reply object
+/// it can be saved/loaded from receiver or replied with
+pub const Reply = extern struct {
+    cap: u32 = 0,
+
+    pub const Type: abi.ObjectType = .reply;
+
+    pub fn reply(self: @This(), msg: *sys.Message) sys.Error!void {
+        return sys.reply(self.cap, msg);
     }
 };
 
