@@ -94,8 +94,18 @@ zig build run --prominent-compile-errors --summary none -freference-trace \
 - [x] initfs:///sbin/pm server process
   - [ ] handles individual processes and their threads
 
-- [x] initfs:///sbin/mm server process
+- [x] initfs:///sbin/rm server process
   - [ ] launches a PS/2 keyboard driver if it detects a PS/2 keyboard
+
+- [ ] initfs:///sbin/timer server process
+  - [ ] launches a HPET driver
+
+- [x] initfs:///sbin/vfs server process
+  - [ ] create fs://
+  - [ ] exec required root filesystem drivers
+  - [ ] read /etc/fstab before mounting root (root= kernel cli arg)
+  - [ ] mount everything according to /etc/fstab
+  - [ ] exec other filesystem drivers lazily
 
 - [x] initfs:///sbin/init process
   - [ ] launch initfs:///sbin/rngd
@@ -104,13 +114,6 @@ zig build run --prominent-compile-errors --summary none -freference-trace \
 <!---
   - [ ] launch /bin/wm
 -->
-
-- [ ] initfs:///sbin/vfsd process
-  - [ ] create fs://
-  - [ ] exec required root filesystem drivers
-  - [ ] read /etc/fstab before mounting root (root= kernel cli arg)
-  - [ ] mount everything according to /etc/fstab
-  - [ ] exec other filesystem drivers lazily
 
 - [ ] initfs:///sbin/fsd.fat32
 
