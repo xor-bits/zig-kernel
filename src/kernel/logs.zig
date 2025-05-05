@@ -1,10 +1,11 @@
 const std = @import("std");
 
+const apic = @import("apic.zig");
 const arch = @import("arch.zig");
 const main = @import("main.zig");
-const uart = @import("uart.zig");
-const spin = @import("spin.zig");
 const pmem = @import("pmem.zig");
+const spin = @import("spin.zig");
+const uart = @import("uart.zig");
 
 //
 
@@ -51,6 +52,11 @@ pub fn panic(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace, ret_
     @branchHint(.cold);
     _ = error_return_trace;
     const log = std.log.scoped(.panic);
+
+    // kill other CPUs too
+    for (0..255) |i| {
+        apic.interProcessorInterrupt(@truncate(i), apic.IRQ_IPI_PANIC);
+    }
 
     // TODO: maybe `std.debug.Dwarf.ElfModule` contains everything?
 

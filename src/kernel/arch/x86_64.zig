@@ -840,6 +840,16 @@ pub const Idt = extern struct {
                 apic.eoi();
             }
         }).asInt();
+        entries[apic.IRQ_IPI_PANIC] = Entry.generate(struct {
+            fn handler(interrupt_stack_frame: *const InterruptStackFrame) void {
+                const is_user = interrupt_stack_frame.code_segment == @as(u16, GdtDescriptor.user_code_selector);
+                if (is_user) swapgs();
+                defer if (is_user) swapgs();
+
+                log.err("CPU-{} done", .{cpuLocal().id});
+                hcf();
+            }
+        }).asInt();
 
         inline for (0..apic.IRQ_AVAIL_COUNT) |i| {
             entries[i + apic.IRQ_AVAIL_LOW] = Entry.generate(struct {

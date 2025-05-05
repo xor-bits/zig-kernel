@@ -16,9 +16,10 @@ const log = std.log.scoped(.apic);
 
 pub const IRQ_TIMER: u8 = 43;
 pub const IRQ_IPI: u8 = 44;
+pub const IRQ_IPI_PANIC: u8 = 45;
 pub const IRQ_SPURIOUS: u8 = 255;
 
-pub const IRQ_AVAIL_LOW: u8 = 45;
+pub const IRQ_AVAIL_LOW: u8 = 46;
 pub const IRQ_AVAIL_HIGH: u8 = 254;
 pub const IRQ_AVAIL_COUNT = IRQ_AVAIL_HIGH - IRQ_AVAIL_LOW + 1;
 
@@ -205,7 +206,7 @@ pub fn eoi() void {
     @as(*volatile u32, &apic_base.get().?.*.eoi.val).* = 0;
 }
 
-pub fn interProcessorInterrupt(target_lapic_id: u8) void {
+pub fn interProcessorInterrupt(target_lapic_id: u8, vector: u8) void {
     const lapic_regs: *volatile LocalApicRegs = apic_base.get().?.*;
 
     // log.info("ICR_HIGH: {*}", .{&lapic_regs.interrupt_command[1].val});
@@ -215,7 +216,7 @@ pub fn interProcessorInterrupt(target_lapic_id: u8) void {
         .destination = target_lapic_id,
     };
     const icr_low = IcrLow{
-        .vector = IRQ_IPI,
+        .vector = vector,
         .delivery_mode = .fixed,
         .destination_mode = .physical,
         .level = .assert,

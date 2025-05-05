@@ -115,7 +115,7 @@ pub fn ready(thread: *caps.Thread) void {
     for (&waiters) |*w| {
         const waiter: *const main.CpuLocalStorage = w.swap(null, .acquire) orelse continue;
         // log.info("giving thread to {} ({})", .{ waiter.id, waiter.lapic_id });
-        apic.interProcessorInterrupt(waiter.lapic_id);
+        apic.interProcessorInterrupt(waiter.lapic_id, apic.IRQ_IPI);
         break;
     }
 
