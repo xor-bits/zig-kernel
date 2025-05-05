@@ -177,6 +177,7 @@ pub fn allocate() u32 {
             const head = free_list;
             const new_head = capabilityArrayUnchecked()[free_list];
             free_list = new_head.next;
+            // the capability might be locked still
             return head;
         }
     }
@@ -190,14 +191,11 @@ pub fn deallocate(cap: u32) void {
 
     if (free_list != 0) {
         const new_head = &capabilityArrayUnchecked()[cap];
-        new_head.* = .{ .next = free_list };
+        new_head.next = free_list;
+        // the capability might be locked still
     }
 
     free_list = cap;
-}
-
-pub fn flushDeleteQueue() void {
-    arch.cpuLocal().delete_queue;
 }
 
 //

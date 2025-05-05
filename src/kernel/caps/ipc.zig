@@ -68,8 +68,8 @@ pub const Receiver = struct {
                 const caller = caps.Ref(caps.Thread){ .paddr = reply_obj.paddr };
 
                 thread.reply = caller.ptr();
-                // reply_cap.owner.store(null, .release);
-                // arch.cpuLocal().delete_queue.pushBack(reply_cap_id);
+                reply_cap.owner.store(null, .release);
+                caps.deallocate(reply_cap_id);
             },
         }
     }
@@ -250,8 +250,9 @@ pub const Reply = struct {
         const sender = try Receiver.replyGetSender(thread, trap);
 
         // delete this reply object
-        // caps.getCapabilityLocked(@truncate(trap.arg1)).owner.store(null, .release);
-        // arch.cpuLocal().delete_queue.pushBack(@truncate(trap.arg0));
+        const reply_cap_id: u32 = @truncate(trap.arg1);
+        caps.getCapabilityLocked(reply_cap_id).owner.store(null, .release);
+        caps.deallocate(reply_cap_id);
 
         // set the original caller thread as ready to run again, but return to the current thread
         proc.ready(sender);
