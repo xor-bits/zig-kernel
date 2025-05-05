@@ -1,4 +1,5 @@
 const std = @import("std");
+const abi = @import("abi");
 
 const Glyph = @import("font").Glyph;
 
@@ -177,19 +178,18 @@ pub fn Image(storage: type) type {
             };
         }
 
-        pub fn fill(self: *const Self, r: u8, g: u8, b: u8) void {
-            const pixel = [4]u8{ r, g, b, 0 }; // 4 becomes a u32
+        pub fn fill(self: *const Self, col: u32) void {
             const pixel_size = self.bits_per_pixel / 8;
 
             for (0..self.height) |y| {
                 for (0..self.width) |x| {
-                    const dst: *[4]u8 = @ptrCast(&self.pixel_array[x * pixel_size + y * self.pitch]);
-                    dst.* = pixel;
+                    const dst: *volatile [4]u8 = @ptrCast(&self.pixel_array[x * pixel_size + y * self.pitch]);
+                    dst.* = @as([4]u8, @bitCast(col));
                 }
             }
         }
 
-        pub fn fillGlyph(self: *const Self, glyph: *const Glyph) void {
+        pub fn fillGlyph(self: *const Self, glyph: *const Glyph, fg: u32, bg: u32) void {
             // if (self.width != 16) {
             //     return
             // }
@@ -199,9 +199,8 @@ pub fn Image(storage: type) type {
             for (0..self.height) |y| {
                 for (0..self.width) |x| {
                     const bit: u8 = @truncate((glyph.img[y] >> @intCast(x)) & 1);
-                    const is_white: u8 = bit * 255;
                     const dst: *volatile [4]u8 = @ptrCast(&self.pixel_array[x * pixel_size + y * self.pitch]);
-                    dst.* = [4]u8{ is_white, is_white, is_white, 0 };
+                    dst.* = @as([4]u8, @bitCast(if (bit == 0) bg else fg));
                 }
             }
         }
@@ -223,7 +222,7 @@ pub fn Image(storage: type) type {
                 const to_row = y * to.pitch;
                 const from_row_slice = from.pixel_array[from_row .. from_row + from_row_width];
                 const to_row_slice = to.pixel_array[to_row .. to_row + to_row_width];
-                std.mem.copyForwards(u8, to_row_slice, from_row_slice);
+                abi.util.copyForwardsVolatile(u8, to_row_slice, from_row_slice);
             }
         }
 
@@ -242,10 +241,10 @@ pub fn Image(storage: type) type {
             for (0..to.height) |y| {
                 for (0..to.width) |x| {
                     const from_idx = x * from_pixel_size + y * from.pitch;
-                    const from_pixel: *const Pixel = @ptrCast(&from.pixel_array[from_idx]);
+                    const from_pixel: *const volatile Pixel = @ptrCast(&from.pixel_array[from_idx]);
 
                     const to_idx = x * to_pixel_size + y * to.pitch;
-                    const to_pixel: *Pixel = @ptrCast(&to.pixel_array[to_idx]);
+                    const to_pixel: *volatile Pixel = @ptrCast(&to.pixel_array[to_idx]);
 
                     // print("loc: {d},{d}", .{ x, y });
                     // print("from: {*} to: {*}", .{ from_pixel, to_pixel });

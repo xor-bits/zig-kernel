@@ -10,15 +10,13 @@ const hpet = @import("hpet.zig");
 const pmem = @import("pmem.zig");
 const proc = @import("proc.zig");
 const util = @import("util.zig");
+const fb = @import("fb.zig");
 
 const log = std.log.scoped(.init);
 const Error = abi.sys.Error;
 const volat = util.volat;
 
 //
-
-pub export var fb_request: limine.FramebufferRequest = .{};
-// pub export var memory: limine.MemoryMapRequest = .{};
 
 /// load and exec the root process
 pub fn exec(a: args.Args) !void {
@@ -89,23 +87,7 @@ fn mapRoot(thread: *caps.Thread, vmem: *caps.Vmem, boot_info: *caps.Frame, a: ar
         .initfs_path_len = a.initfs_path.len,
     };
 
-    if (fb_request.response) |resp| {
-        if (resp.framebuffer_count != 0) {
-            const fb = resp.framebuffers()[0];
-            const fb_paddr = addr.Virt.fromPtr(fb.address).hhdmToPhys();
-            const bytes: usize = fb.height * fb.pitch * (std.math.divCeil(usize, fb.bpp, 8) catch unreachable);
-            if (abi.ChunkSize.of(bytes)) |fb_size| {
-                const framebuffer: caps.Ref(caps.Frame) = .{ .paddr = caps.Frame.new(fb_paddr, fb_size) };
-
-                const id = caps.pushCapability(framebuffer.object(thread));
-                volat(&boot_info_ptr.framebuffer).* = .{ .cap = id };
-                volat(&boot_info_ptr.framebuffer_width).* = fb.width;
-                volat(&boot_info_ptr.framebuffer_height).* = fb.height;
-                volat(&boot_info_ptr.framebuffer_pitch).* = fb.pitch;
-                volat(&boot_info_ptr.framebuffer_bpp).* = fb.bpp;
-            }
-        }
-    }
+    fb.bootInfoInstallFramebuffer(boot_info_ptr, thread);
 
     const hpet_cap_id = caps.pushCapability(hpet.hpetFrame().object(thread));
     volat(&boot_info_ptr.hpet).* = .{ .cap = hpet_cap_id };

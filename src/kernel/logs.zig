@@ -7,6 +7,7 @@ const main = @import("main.zig");
 const pmem = @import("pmem.zig");
 const spin = @import("spin.zig");
 const uart = @import("uart.zig");
+const fb = @import("fb.zig");
 
 //
 
@@ -33,20 +34,30 @@ fn logFn(comptime message_level: std.log.Level, comptime scope: @TypeOf(.enum_li
 
         uart.print(fmt, .{id});
         uart.print(format ++ "\n", args);
+
+        if (scope == .panic) {
+            fb.print(fmt, .{id});
+            fb.print(format ++ "\n", args);
+        }
     } else {
         const fmt = "\x1B[90m[ " ++ level_col ++ level_txt ++ "\x1B[90m" ++ scope_txt ++ " #? ]: \x1B[0m" ++ format;
 
         uart.print(fmt ++ "\n", args);
+        if (scope == .panic) {
+            fb.print(format, args);
+        }
     }
 }
 
 var log_lock: spin.Mutex = .{};
 
-fn print(comptime fmt: []const u8, args: anytype) void {
+fn print(comptime is_panic: bool, comptime fmt: []const u8, args: anytype) void {
     log_lock.lock();
     defer log_lock.unlock();
 
     uart.print(fmt ++ "\n", args);
+    if (is_panic)
+        fb.print(fmt ++ "\n", args);
 }
 
 pub fn panic(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace, ret_addr: ?usize) noreturn {
@@ -59,6 +70,9 @@ pub fn panic(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace, ret_
         apic.interProcessorInterrupt(@truncate(i), apic.IRQ_IPI_PANIC);
     }
 
+    // fill with red
+    fb.clear();
+
     // TODO: maybe `std.debug.Dwarf.ElfModule` contains everything?
 
     log.err("KERNEL PANIC STACK TRACE:", .{});
@@ -69,28 +83,17 @@ pub fn panic(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace, ret_
         defer dwarf.deinit(pmem.page_allocator);
 
         while (iter.next()) |r_addr| {
-            printSourceAtAddress(&dwarf, r_addr);
+            printSourceAtAddress(true, &dwarf, r_addr);
         }
     } else |err| {
         log.err("failed to open DWARF info: {}", .{err});
 
         while (iter.next()) |r_addr| {
-            print("  \x1B[90m0x{x:0>16}\x1B[0m", .{r_addr});
+            print(true, "  \x1B[90m0x{x:0>16}\x1B[0m", .{r_addr});
         }
     }
 
     log.err("CPU panicked: {s}", .{msg});
-
-    if (init.fb_request.response) |fbs| {
-        for (fbs.framebuffers()) |fb| {
-            for (0..fb.height) |y| {
-                for (0..fb.width) |x| {
-                    const pix: *volatile u32 = &@as([*]volatile u32, @alignCast(@ptrCast(fb.address)))[x + y * fb.pitch / 4];
-                    pix.* = 0xAA0000;
-                }
-            }
-        }
-    }
 
     arch.hcf();
 }
@@ -99,29 +102,29 @@ pub fn addr2line(address: usize) void {
     if (getSelfDwarf()) |_dwarf| {
         var dwarf = _dwarf;
         defer dwarf.deinit(pmem.page_allocator);
-        printSourceAtAddress(&dwarf, address);
+        printSourceAtAddress(false, &dwarf, address);
     } else |err| {
         std.log.err("failed to open DWARF info: {}", .{err});
     }
 }
 
-fn printSourceAtAddress(debug_info: *std.debug.Dwarf, address: usize) void {
+fn printSourceAtAddress(comptime is_panic: bool, debug_info: *std.debug.Dwarf, address: usize) void {
     const sym = debug_info.getSymbolName(address) orelse {
-        print("  \x1B[90m?? @ 0x{x:0>16}\x1B[0m", .{address});
+        print(is_panic, "  \x1B[90m?? @ 0x{x:0>16}\x1B[0m", .{address});
         return;
     };
 
     const cu = debug_info.findCompileUnit(address) catch {
-        print("  \x1B[90m{s}\x1B[0m", .{sym});
+        print(is_panic, "  \x1B[90m{s}\x1B[0m", .{sym});
         return;
     };
 
     const source = debug_info.getLineNumberInfo(pmem.page_allocator, cu, address) catch {
-        print("  \x1B[90m{s}\x1B[0m", .{sym});
+        print(is_panic, "  \x1B[90m{s}\x1B[0m", .{sym});
         return;
     };
 
-    print("  \x1B[90m{s}: {s}:{}:{}\x1B[0m", .{ sym, source.file_name, source.line, source.column });
+    print(is_panic, "  \x1B[90m{s}: {s}:{}:{}\x1B[0m", .{ sym, source.file_name, source.line, source.column });
 }
 
 fn getSelfDwarf() !std.debug.Dwarf {
