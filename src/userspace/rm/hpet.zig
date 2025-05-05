@@ -1,3 +1,4 @@
+const abi = @import("abi");
 const std = @import("std");
 
 const log = std.log.scoped(.hpet);
@@ -28,6 +29,17 @@ pub fn elapsedNanos(from_then: u64) u128 {
 pub fn timestampNanos() u128 {
     const regs = hpet_regs.?;
     return @as(u128, @as(*volatile u64, &regs.main_counter_value).*) * @as(u128, @as(*volatile u32, &regs.caps_and_id.counter_period_femtoseconds).*) / 1_000_000;
+}
+
+pub fn hpetSpinWait(micros: u32) void {
+    const regs: *volatile HpetRegs = hpet_regs.?;
+
+    const ticks = (@as(u64, micros) * 1_000_000_000) / @as(*volatile u32, &regs.caps_and_id.counter_period_femtoseconds).*;
+
+    const deadline = @as(*volatile u64, &regs.main_counter_value).* + ticks;
+    while (@as(*volatile u64, &regs.main_counter_value).* <= deadline) {
+        abi.sys.yield();
+    }
 }
 
 // pub fn sleepDeadline(timestamp_nanos: u128) void {

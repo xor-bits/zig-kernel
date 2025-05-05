@@ -88,14 +88,9 @@ pub fn main() !void {
     log.info("HPET mapped at 0x{x}", .{hpet_addr});
     hpet.init(hpet_addr);
 
-    var prev: usize = 0;
     while (true) {
-        const millis = @as(usize, @truncate(hpet.timestampNanos() / 0x1_000_000));
-        if (millis != prev) {
-            log.info("millis={}", .{millis});
-            prev = millis;
-        }
-        abi.sys.yield();
+        hpet.hpetSpinWait(1_000_000);
+        log.info("SEC", .{});
     }
 
     // const server = abi.RmProtocol.Server(.{}).init(rm_recv);
