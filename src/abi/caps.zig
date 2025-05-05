@@ -86,6 +86,10 @@ pub const Frame = extern struct {
     cap: u32 = 0,
 
     pub const Type: abi.ObjectType = .frame;
+
+    pub fn sizeOf(self: @This()) !abi.ChunkSize {
+        return sys.frameSizeOf(self.cap);
+    }
 };
 
 /// capability to **the** receiver end of an endpoint,

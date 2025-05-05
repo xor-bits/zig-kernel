@@ -302,7 +302,17 @@ pub fn vmemUnmap(vmem_cap: u32, frame_cap: u32, vaddr: usize) !void {
 
 // FRAME CAPABILITY CALLS
 
-pub const FrameCallId = enum(u8) {};
+pub const FrameCallId = enum(u8) {
+    size_of,
+};
+
+pub fn frameSizeOf(frame_cap: u32) !abi.ChunkSize {
+    var msg: Message = .{
+        .arg0 = @intFromEnum(FrameCallId.size_of),
+    };
+    try call(frame_cap, &msg);
+    return std.meta.intToEnum(abi.ChunkSize, msg.arg0) catch unreachable;
+}
 
 // RECEIVER CAPABILITY CALLS
 
