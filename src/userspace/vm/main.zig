@@ -319,7 +319,7 @@ fn newThread(system: *System, as: *AddressSpace, ip_override: usize, sp_override
     try thread.setVmem(as.vmem);
     try thread.writeRegs(&.{
         .user_instr_ptr = if (ip_override != 0) ip_override else as.entry,
-        .user_stack_ptr = if (sp_override != 0) sp_override else as.bottom - 0x10010,
+        .user_stack_ptr = if (sp_override != 0) sp_override else as.bottom - 0x10100,
     });
 
     return thread;

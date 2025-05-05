@@ -153,7 +153,7 @@ fn startSpinner() !void {
     defer self_vmem_lock.unlock();
     try spinner_thread.setVmem(caps.ROOT_SELF_VMEM);
     try spinner_thread.writeRegs(&.{
-        .user_stack_ptr = SPINNER_STACK_TOP - 0x10,
+        .user_stack_ptr = SPINNER_STACK_TOP - 0x100,
         .user_instr_ptr = @intFromPtr(&spinnerMain),
     });
     try spinner_thread.start();
@@ -706,7 +706,7 @@ fn execElf(elf_bytes: []const u8, sender: abi.caps.Sender) !struct { caps.Thread
     try new_thread.writeRegs(&.{
         .arg0 = sender.cap, // set RDI to
         .user_instr_ptr = header.entry,
-        .user_stack_ptr = 0x7FFF_FFF4_0000 - 0x10,
+        .user_stack_ptr = 0x7FFF_FFF4_0000 - 0x100,
     });
     try new_thread.transferCap(sender.cap);
 

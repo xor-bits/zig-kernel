@@ -89,7 +89,7 @@ pub fn init() !void {
     defer main.self_vmem_lock.unlock();
     try thread.setVmem(caps.ROOT_SELF_VMEM);
     try thread.writeRegs(&.{
-        .user_stack_ptr = main.INITFS_STACK_TOP - 0x10, // fixing a bug in Zig where @returnAddress() in noreturn underflows the stack
+        .user_stack_ptr = main.INITFS_STACK_TOP - 0x100, // fixing a bug in Zig where @returnAddress() in noreturn underflows the stack
         .user_instr_ptr = @intFromPtr(&run),
     });
     try thread.start();
