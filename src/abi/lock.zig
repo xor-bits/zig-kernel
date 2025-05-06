@@ -9,7 +9,7 @@ const log = std.log.scoped(.lock);
 //
 
 pub const CapMutex = struct {
-    inner: SpinMutex,
+    inner: SpinMutex = .{},
     notify: caps.Notify,
     sleepers: std.atomic.Value(bool) = .init(false),
 
@@ -60,7 +60,7 @@ pub const CapMutex = struct {
 };
 
 pub const YieldMutex = struct {
-    inner: SpinMutex,
+    inner: SpinMutex = .{},
 
     const Self = @This();
 

@@ -153,6 +153,11 @@ const port_bitmap_len = 0x300 / 8;
 var port_bitmap: [port_bitmap_len]std.atomic.Value(u8) = b: {
     var bitmap: [port_bitmap_len]std.atomic.Value(u8) = .{std.atomic.Value(u8).init(0xFF)} ** port_bitmap_len;
 
+    // https://wiki.osdev.org/I/O_Ports
+
+    // the PIT
+    for (0x0040..0x0048) |port|
+        freePort(&bitmap, @truncate(port)) catch unreachable;
     // PS/2 controller
     for (0x0060..0x0065) |port|
         freePort(&bitmap, @truncate(port)) catch unreachable;

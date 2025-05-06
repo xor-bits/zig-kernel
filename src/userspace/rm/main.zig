@@ -19,6 +19,9 @@ pub var memory: caps.Memory = .{};
 pub var ioports: caps.X86IoPortAllocator = .{};
 pub var irqs: caps.X86IrqAllocator = .{};
 
+pub var vm_client: abi.VmProtocol.Client() = undefined;
+pub var vmem_handle: usize = 0;
+
 //
 
 pub fn main() !void {
@@ -53,25 +56,13 @@ pub fn main() !void {
 
     // inform the root that rm is ready
     log.debug("rm ready", .{});
-    res, const vmem_handle: usize = try root.call(.rmReady, .{rm_send});
+    res, vmem_handle = try root.call(.rmReady, .{rm_send});
     try res;
 
-    log.debug("creating keyboard thread", .{});
-    const vm_client = abi.VmProtocol.Client().init(vm_sender);
-    res, const kb_thread: caps.Thread = try vm_client.call(.newThread, .{
-        vmem_handle,
-        @intFromPtr(&ps2.keyboardThread),
-        0,
-    });
-    try res;
+    vm_client = abi.VmProtocol.Client().init(vm_sender);
 
-    log.debug("starting keyboard thread", .{});
-    var regs: abi.sys.ThreadRegs = undefined;
-    try kb_thread.readRegs(&regs);
-    regs.arg0 = kb_thread.cap;
-    try kb_thread.writeRegs(&regs);
-    try kb_thread.setPrio(0);
-    try kb_thread.start();
+    log.debug("spawning keyboard thread", .{});
+    try spawn(&ps2.keyboardThread);
 
     log.info("mapping HPET", .{});
     res, const hpet_addr: usize, hpet_frame = try vm_client.call(.mapFrame, .{
@@ -87,7 +78,10 @@ pub fn main() !void {
     });
 
     log.info("HPET mapped at 0x{x}", .{hpet_addr});
-    hpet.init(hpet_addr);
+    try hpet.init(hpet_addr);
+
+    log.debug("spawning HPET thread", .{});
+    try spawn(&hpet.hpetThread);
 
     while (true) {
         hpet.hpetSpinWait(1_000_000);
@@ -96,6 +90,22 @@ pub fn main() !void {
 
     // const server = abi.RmProtocol.Server(.{}).init(rm_recv);
     // try server.run();
+}
+
+fn spawn(f: *const fn (self: caps.Thread) callconv(.SysV) noreturn) !void {
+    const res, const kb_thread: caps.Thread = try vm_client.call(.newThread, .{
+        vmem_handle,
+        @intFromPtr(f),
+        0,
+    });
+    try res;
+
+    var regs: abi.sys.ThreadRegs = undefined;
+    try kb_thread.readRegs(&regs);
+    regs.arg0 = kb_thread.cap;
+    try kb_thread.writeRegs(&regs);
+    try kb_thread.setPrio(0);
+    try kb_thread.start();
 }
 
 comptime {

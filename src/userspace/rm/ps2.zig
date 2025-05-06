@@ -8,12 +8,11 @@ const log = std.log.scoped(.ps2);
 
 //
 
-pub fn keyboardThread(self: u32) callconv(.SysV) noreturn {
-    const self_thread = caps.Thread{ .cap = self };
+pub fn keyboardThread(self: caps.Thread) callconv(.SysV) noreturn {
     keyboardThreadMain() catch |err| {
         log.err("keyboard thread error: {}", .{err});
     };
-    self_thread.stop() catch {};
+    self.stop() catch {};
     unreachable;
 }
 
