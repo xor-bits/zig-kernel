@@ -22,7 +22,7 @@ pub fn init(hpet: *const Hpet) !void {
 
     log.info("found HPET addr: 0x{x}", .{hpet.address});
 
-    const hpet_phys: caps.Ref(caps.Frame) = .{ .paddr = caps.Frame.new(addr.Phys.fromInt(hpet.address), .@"4KiB") };
+    const hpet_phys: caps.Ref(caps.DeviceFrame) = .{ .paddr = caps.DeviceFrame.new(addr.Phys.fromInt(hpet.address), .@"4KiB") };
     hpet_frame = hpet_phys;
     const regs: *volatile HpetRegs = @ptrCast(hpet_phys.ptr());
 
@@ -48,11 +48,11 @@ pub fn hpetSpinWait(micros: u32, just_before: anytype) void {
     }
 }
 
-pub fn hpetFrame() caps.Ref(caps.Frame) {
+pub fn hpetFrame() caps.Ref(caps.DeviceFrame) {
     return hpet_frame.?;
 }
 
-var hpet_frame: ?caps.Ref(caps.Frame) = null;
+var hpet_frame: ?caps.Ref(caps.DeviceFrame) = null;
 
 // pub fn now() u64 {
 //     const regs = hpet_regs.?;

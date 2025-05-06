@@ -54,6 +54,7 @@ pub fn main() !void {
         .newVmem = newVmemHandler,
         .loadElf = loadElfHandler,
         .mapFrame = mapFrameHandler,
+        .mapDeviceFrame = mapDeviceFrameHandler,
         .newThread = newThreadHandler,
         .newSender = newSenderHandler,
     }).init(&system, vm_recv);
@@ -143,7 +144,11 @@ fn loadElfHandler(ctx: *System, _: u32, req: struct { usize, caps.Frame, usize, 
     return .{void{}};
 }
 
-fn mapFrameHandler(ctx: *System, _: u32, req: struct { usize, caps.Frame, abi.sys.Rights, abi.sys.MapFlags }) struct { Error!void, usize, caps.Frame } {
+fn mapFrameHandler(
+    ctx: *System,
+    _: u32,
+    req: struct { usize, caps.Frame, abi.sys.Rights, abi.sys.MapFlags },
+) struct { Error!void, usize, caps.Frame } {
     const handle = req.@"0";
     const frame = req.@"1";
 
@@ -153,7 +158,6 @@ fn mapFrameHandler(ctx: *System, _: u32, req: struct { usize, caps.Frame, abi.sy
     const addr_spc = &(ctx.address_spaces[handle] orelse {
         return .{ abi.sys.Error.InvalidArgument, 0, .{} };
     });
-
     const size = frame.sizeOf() catch |err| {
         return .{ err, 0, .{} };
     };
@@ -172,6 +176,44 @@ fn mapFrameHandler(ctx: *System, _: u32, req: struct { usize, caps.Frame, abi.sy
         .{},
     ) catch |err| {
         log.warn("failed to map a frame: {}", .{err});
+        return .{ Error.Internal, 0, frame };
+    };
+
+    return .{ void{}, vaddr, .{} };
+}
+
+fn mapDeviceFrameHandler(
+    ctx: *System,
+    _: u32,
+    req: struct { usize, caps.DeviceFrame, abi.sys.Rights, abi.sys.MapFlags },
+) struct { Error!void, usize, caps.DeviceFrame } {
+    const handle = req.@"0";
+    const frame = req.@"1";
+
+    if (handle >= 256) {
+        return .{ abi.sys.Error.InvalidArgument, 0, .{} };
+    }
+    const addr_spc = &(ctx.address_spaces[handle] orelse {
+        return .{ abi.sys.Error.InvalidArgument, 0, .{} };
+    });
+    const size = frame.sizeOf() catch |err| {
+        return .{ err, 0, .{} };
+    };
+
+    addr_spc.bottom += 0x10000;
+    const vaddr = addr_spc.bottom;
+    addr_spc.bottom += size.sizeBytes();
+    addr_spc.bottom += 0x10000;
+
+    addr_spc.vmem.mapDevice(
+        frame,
+        vaddr,
+        .{
+            .writable = true,
+        },
+        .{},
+    ) catch |err| {
+        log.warn("failed to map a device frame: {}", .{err});
         return .{ Error.Internal, 0, frame };
     };
 

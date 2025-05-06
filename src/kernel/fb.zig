@@ -28,7 +28,7 @@ pub fn bootInfoInstallFramebuffer(boot_info: *volatile abi.BootInfo, thread: *ca
     const bytes: usize = first_fb.height * first_fb.pitch * (std.math.divCeil(usize, first_fb.bpp, 8) catch unreachable);
     const fb_size = abi.ChunkSize.of(bytes) orelse return;
 
-    const fb_obj: caps.Ref(caps.Frame) = .{ .paddr = caps.Frame.new(fb_paddr, fb_size) };
+    const fb_obj: caps.Ref(caps.DeviceFrame) = .{ .paddr = caps.DeviceFrame.new(fb_paddr, fb_size) };
 
     const id = caps.pushCapability(fb_obj.object(thread));
     volat(&boot_info.framebuffer).* = .{ .cap = id };

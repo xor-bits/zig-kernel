@@ -55,7 +55,7 @@ pub fn main() !noreturn {
 
     const recv = try alloc(abi.caps.Receiver);
 
-    var devices = std.EnumArray(abi.Device, caps.Frame).initFill(.{});
+    var devices = std.EnumArray(abi.Device, caps.DeviceFrame).initFill(.{});
     devices.set(abi.Device.hpet, boot_info.hpet);
 
     try initfsd.wait();
@@ -124,6 +124,18 @@ pub fn unmap(frame: caps.Frame, vaddr: usize) Error!void {
     return caps.ROOT_SELF_VMEM.unmap(frame, vaddr);
 }
 
+pub fn mapDevice(frame: caps.DeviceFrame, vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
+    self_vmem_lock.lock();
+    defer self_vmem_lock.unlock();
+    return caps.ROOT_SELF_VMEM.mapDevice(frame, vaddr, rights, flags);
+}
+
+pub fn unmapDevice(frame: caps.DeviceFrame, vaddr: usize) Error!void {
+    self_vmem_lock.lock();
+    defer self_vmem_lock.unlock();
+    return caps.ROOT_SELF_VMEM.unmapDevice(frame, vaddr);
+}
+
 pub fn alloc(comptime T: type) Error!T {
     self_memory_lock.lock();
     defer self_memory_lock.unlock();
@@ -179,7 +191,7 @@ fn framebufferSplash(_boot_info: *const volatile abi.BootInfo) !void {
         return;
     }
 
-    try map(boot_info.framebuffer, FRAMEBUFFER, .{ .writable = true }, .{
+    try mapDevice(boot_info.framebuffer, FRAMEBUFFER, .{ .writable = true }, .{
         .cache = .write_combining,
     });
 
@@ -318,7 +330,7 @@ const System = struct {
     recv: caps.Receiver,
     dont_reply: bool = false,
 
-    devices: std.EnumArray(abi.Device, caps.Frame),
+    devices: std.EnumArray(abi.Device, caps.DeviceFrame),
 
     vm: caps.Thread = .{},
     vm_vmem: ?caps.Vmem = null,
@@ -401,7 +413,7 @@ fn irqsHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.X86
     return .{ void{}, irqs };
 }
 
-fn deviceHandler(ctx: *System, sender: u32, req: struct { abi.Device }) struct { Error!void, caps.Frame } {
+fn deviceHandler(ctx: *System, sender: u32, req: struct { abi.Device }) struct { Error!void, caps.DeviceFrame } {
     if (ctx.rm_endpoint != sender) {
         return .{ Error.PermissionDenied, .{} };
     }

@@ -140,12 +140,12 @@ pub const BootInfo = extern struct {
     initfs_data_len: usize,
     initfs_path: [*]u8,
     initfs_path_len: usize,
-    framebuffer: caps.Frame = .{},
+    framebuffer: caps.DeviceFrame = .{},
     framebuffer_width: usize = 0,
     framebuffer_height: usize = 0,
     framebuffer_pitch: usize = 0,
     framebuffer_bpp: u16 = 0,
-    hpet: caps.Frame = .{},
+    hpet: caps.DeviceFrame = .{},
 
     pub fn rootData(self: @This()) []u8 {
         return self.root_data[0..self.root_data_len];
@@ -203,7 +203,7 @@ pub const RootProtocol = util.Protocol(struct {
 
     /// request a device physical frame
     /// only rm can use this
-    device: fn (kind: Device) struct { sys.Error!void, caps.Frame },
+    device: fn (kind: Device) struct { sys.Error!void, caps.DeviceFrame },
 
     /// provide a sender to the vm server
     /// only vm can use this
@@ -247,6 +247,9 @@ pub const VmProtocol = util.Protocol(struct {
 
     /// map a frame into an address space
     mapFrame: fn (handle: usize, frame: caps.Frame, rights: sys.Rights, length: sys.MapFlags) struct { sys.Error!void, usize, caps.Frame },
+
+    /// map a frame into an address space
+    mapDeviceFrame: fn (handle: usize, frame: caps.DeviceFrame, rights: sys.Rights, length: sys.MapFlags) struct { sys.Error!void, usize, caps.DeviceFrame },
 
     /// create a new thread from an address space
     /// ip and sp are already set

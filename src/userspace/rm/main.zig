@@ -46,7 +46,7 @@ pub fn main() !void {
     try res;
 
     log.debug("requesting HPET", .{});
-    res, var hpet_frame: caps.Frame = try root.call(.device, .{abi.Device.hpet});
+    res, var hpet_frame: caps.DeviceFrame = try root.call(.device, .{abi.Device.hpet});
     try res;
 
     // endpoint for rm server <-> unix app communication
@@ -65,7 +65,7 @@ pub fn main() !void {
     try spawn(&ps2.keyboardThread);
 
     log.info("mapping HPET", .{});
-    res, const hpet_addr: usize, hpet_frame = try vm_client.call(.mapFrame, .{
+    res, const hpet_addr: usize, hpet_frame = try vm_client.call(.mapDeviceFrame, .{
         vmem_handle,
         hpet_frame,
         abi.sys.Rights{
@@ -75,6 +75,7 @@ pub fn main() !void {
             .cache = .uncacheable,
         },
     });
+    try res;
 
     log.info("HPET mapped at 0x{x}", .{hpet_addr});
     try hpet.init(hpet_addr);

@@ -71,12 +71,18 @@ pub const Vmem = extern struct {
     pub const Type: abi.ObjectType = .vmem;
 
     pub fn map(self: @This(), frame: Frame, vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) sys.Error!void {
-        // @import("std").log.info("mapping 0x{x}", .{vaddr});
         return sys.vmemMap(self.cap, frame.cap, vaddr, rights, flags);
     }
 
     pub fn unmap(self: @This(), frame: Frame, vaddr: usize) sys.Error!void {
-        // @import("std").log.info("unmapping 0x{x}", .{vaddr});
+        return sys.vmemUnmap(self.cap, frame.cap, vaddr);
+    }
+
+    pub fn mapDevice(self: @This(), frame: DeviceFrame, vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) sys.Error!void {
+        return sys.vmemMap(self.cap, frame.cap, vaddr, rights, flags);
+    }
+
+    pub fn unmapDevice(self: @This(), frame: DeviceFrame, vaddr: usize) sys.Error!void {
         return sys.vmemUnmap(self.cap, frame.cap, vaddr);
     }
 };
@@ -89,6 +95,25 @@ pub const Frame = extern struct {
 
     pub fn sizeOf(self: @This()) !abi.ChunkSize {
         return sys.frameSizeOf(self.cap);
+    }
+};
+
+/// capability to a MMIO physical memory region
+pub const DeviceFrame = extern struct {
+    cap: u32 = 0,
+
+    pub const Type: abi.ObjectType = .device_frame;
+
+    pub fn addrOf(self: @This()) !usize {
+        return sys.deviceFrameAddrOf(self.cap);
+    }
+
+    pub fn sizeOf(self: @This()) !abi.ChunkSize {
+        return sys.deviceFrameSizeOf(self.cap);
+    }
+
+    pub fn subframe(self: @This(), paddr: usize, size: abi.ChunkSize) !DeviceFrame {
+        return .{ .cap = try sys.deviceFrameSubframe(self.cap, paddr, size) };
     }
 };
 
