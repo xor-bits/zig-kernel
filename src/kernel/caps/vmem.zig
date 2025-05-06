@@ -84,15 +84,19 @@ fn deallocLevel(current: *volatile [512]Entry, i: u9) void {
 
 fn nextLevelFromEntry(comptime create: bool, entry: *volatile Entry) Error!addr.Phys {
     if (entry.present == 0 and create) {
-        entry.* = .{
-            .present = 1,
-            .writable = 1,
-            .user_accessible = 1,
-            .page_index = allocTable().toParts().page,
-        };
+        entry.* = Entry.fromParts(
+            false,
+            false,
+            .{
+                .writable = true,
+                .executable = true,
+            },
+            allocTable(),
+            .{},
+        );
     } else if (entry.present == 0) {
         return error.EntryNotPresent;
-    } else if (entry.huge_page == 1) {
+    } else if (entry.huge_page_or_pat == 1) {
         return error.EntryIsHuge;
     }
     return addr.Phys.fromParts(.{ .page = entry.page_index });
@@ -398,12 +402,10 @@ pub const Vmem = struct {
 pub const PageTableLevel3 = struct {
     entries: [512]Entry align(0x1000) = std.mem.zeroes([512]Entry),
 
-    pub fn map(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) void {
-        self.entries[vaddr.toParts().level3] = Entry.fromParts(rights, paddr, flags);
-    }
-
     pub fn mapGiantFrame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
-        self.map(paddr, vaddr, rights, flags);
+        if (true) @panic("");
+        const entry = Entry.fromParts(true, false, rights, paddr, flags);
+        self.entries[vaddr.toParts().level3] = entry;
     }
 
     pub fn mapHugeFrame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
@@ -473,14 +475,9 @@ pub const PageTableLevel3 = struct {
 pub const PageTableLevel2 = struct {
     entries: [512]Entry align(0x1000) = std.mem.zeroes([512]Entry),
 
-    pub fn map(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) void {
-        var entry = Entry.fromParts(rights, paddr, flags);
-        entry.huge_page = 1;
-        self.entries[vaddr.toParts().level2] = entry;
-    }
-
     pub fn mapHugeFrame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
-        self.map(paddr, vaddr, rights, flags);
+        const entry = Entry.fromParts(true, false, rights, paddr, flags);
+        self.entries[vaddr.toParts().level2] = entry;
     }
 
     pub fn mapFrame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
@@ -527,14 +524,9 @@ pub const PageTableLevel2 = struct {
 pub const PageTableLevel1 = struct {
     entries: [512]Entry align(0x1000) = std.mem.zeroes([512]Entry),
 
-    pub fn map(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) void {
-        var entry = Entry.fromParts(rights, paddr, flags);
-        entry.huge_page = 1;
-        self.entries[vaddr.toParts().level1] = entry;
-    }
-
     pub fn mapFrame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) void {
-        self.map(paddr, vaddr, rights, flags);
+        const entry = Entry.fromParts(false, true, rights, paddr, flags);
+        self.entries[vaddr.toParts().level1] = entry;
     }
 
     pub fn canMapFrame(self: *volatile @This(), vaddr: addr.Virt) Error!void {
@@ -563,8 +555,7 @@ pub const Entry = packed struct {
     cache_disable: u1 = 0,
     accessed: u1 = 0,
     dirty: u1 = 0,
-    // page_attribute_table: u1 = 0,
-    huge_page: u1 = 0,
+    huge_page_or_pat: u1 = 0,
     global: u1 = 0,
 
     // more custom bits
@@ -581,19 +572,44 @@ pub const Entry = packed struct {
 
     // pub fn setPresentCount()
 
-    pub fn fromParts(rights: abi.sys.Rights, frame: addr.Phys, flags: abi.sys.MapFlags) Entry {
+    pub fn fromParts(
+        comptime is_huge: bool,
+        comptime is_last_level: bool,
+        rights: abi.sys.Rights,
+        frame: addr.Phys,
+        flags: abi.sys.MapFlags,
+    ) Entry {
         std.debug.assert(frame.toParts().reserved0 == 0);
         std.debug.assert(frame.toParts().reserved1 == 0);
+
+        var page_index = frame.toParts().page;
+        var pwt: u1 = 0;
+        var pcd: u1 = 0;
+        var huge_page_or_pat: u1 = @intFromBool(is_huge);
+        const pat_index = @as(u3, @truncate(@intFromEnum(flags.cache)));
+        if (is_last_level) {
+            if (pat_index & 0b001 != 0) pwt = 1;
+            if (pat_index & 0b010 != 0) pcd = 1;
+            if (pat_index & 0b100 != 0) huge_page_or_pat = 1;
+        } else if (is_huge) {
+            if (pat_index & 0b001 != 0) pwt = 1;
+            if (pat_index & 0b010 != 0) pcd = 1;
+            if (pat_index & 0b100 != 0) page_index |= 1;
+            huge_page_or_pat = 1;
+        } else {
+            // huge on last level is illegal
+            // and intermediary tables dont have cache modes (prob)
+        }
 
         return Entry{
             .present = 1,
             .writable = @intFromBool(rights.writable),
             .user_accessible = @intFromBool(rights.user_accessible),
-            .write_through = @intFromBool(flags.write_through),
-            .cache_disable = @intFromBool(flags.cache_disable),
-            .huge_page = @intFromBool(flags.huge_page),
+            .write_through = pwt,
+            .cache_disable = pcd,
+            .huge_page_or_pat = huge_page_or_pat,
             .global = @intFromBool(flags.global),
-            .page_index = frame.toParts().page,
+            .page_index = page_index,
             .protection_key = @truncate(flags.protection_key),
             .no_execute = @intFromBool(!rights.executable),
         };

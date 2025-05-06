@@ -72,8 +72,7 @@ pub fn main() !void {
             .writable = true,
         },
         abi.sys.MapFlags{
-            .cache_disable = true,
-            .write_through = true,
+            .cache = .uncacheable,
         },
     });
 

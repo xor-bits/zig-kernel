@@ -12,8 +12,9 @@ const log = std.log.scoped(.arch);
 
 //
 
-pub const IA32_TCS_AUX = 0xC0000103;
 pub const IA32_APIC_BASE = 0x1B;
+pub const IA32_PAT_MSR = 0x277;
+pub const IA32_TCS_AUX = 0xC0000103;
 pub const EFER = 0xC0000080;
 pub const STAR = 0xC0000081;
 pub const LSTAR = 0xC0000082;
@@ -62,6 +63,8 @@ pub fn initCpu(id: u32, smpinfo: ?*limine.SmpInfo) !void {
 
     wrmsr(GS_BASE, @intFromPtr(tls));
     wrmsr(KERNELGS_BASE, 0);
+    // the PAT MSR value is set so that the old modes stay the same
+    wrmsr(IA32_PAT_MSR, abi.sys.CacheType.patMsr());
 }
 
 // launch 2 next processors (snowball)

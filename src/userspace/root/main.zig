@@ -180,9 +180,7 @@ fn framebufferSplash(_boot_info: *const volatile abi.BootInfo) !void {
     }
 
     try map(boot_info.framebuffer, FRAMEBUFFER, .{ .writable = true }, .{
-        // TODO: PAT
-        .write_through = true,
-        .cache_disable = true,
+        .cache = .write_combining,
     });
 
     const width = boot_info.framebuffer_width;

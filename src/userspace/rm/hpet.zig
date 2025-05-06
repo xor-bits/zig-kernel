@@ -54,7 +54,13 @@ pub fn init(hpet_addr: usize) !void {
         @as(*volatile TimerNConfigAndCaps, &timer.config_and_caps).* = conf;
     }
 
-    sleepDeadline(.{}, timestampNanos() + 2_000_000_000);
+    sleepDeadline(.{}, timestampNanos() + 5_000_000_000);
+    sleepDeadline(.{}, timestampNanos() + 5_250_000_000);
+    sleepDeadline(.{}, timestampNanos() + 5_500_000_000);
+    sleepDeadline(.{}, timestampNanos() + 5_750_000_000);
+    sleepDeadline(.{}, timestampNanos() + 6_000_000_000);
+    sleepDeadline(.{}, timestampNanos() + 6_250_000_000);
+    sleepDeadline(.{}, timestampNanos() + 6_500_000_000);
 }
 
 pub fn hpetThread(self: caps.Thread) callconv(.SysV) noreturn {
@@ -82,7 +88,9 @@ fn hpetThreadMain() !void {
             // wake up the current waiter
             if (current.deadline <= main_counter) {
                 var msg: abi.sys.Message = .{};
-                try current.reply.reply(&msg);
+                current.reply.reply(&msg) catch |err| {
+                    log.err("invalid reply cap: {}", .{err});
+                };
             } else {
                 continue;
             }
@@ -92,7 +100,9 @@ fn hpetThreadMain() !void {
                 if (next.deadline <= main_counter) {
                     // wake it up if its ready
                     var msg: abi.sys.Message = .{};
-                    try next.reply.reply(&msg);
+                    next.reply.reply(&msg) catch |err| {
+                        log.err("invalid reply cap: {}", .{err});
+                    };
                 } else {
                     // or set it as the timers current target and stop
                     timer.current = next;
