@@ -21,6 +21,7 @@ const Error = abi.sys.Error;
 
 pub const Memory = caps_pmem.Memory;
 pub const Frame = caps_pmem.Frame;
+pub const DeviceFrame = caps_pmem.DeviceFrame;
 pub const Thread = caps_thread.Thread;
 pub const Vmem = caps_vmem.Vmem;
 pub const Receiver = caps_ipc.Receiver;
@@ -266,6 +267,7 @@ pub const Object = struct {
             Thread => .thread,
             Vmem => .vmem,
             Frame => .frame,
+            DeviceFrame => .device_frame,
             Receiver => .receiver,
             Sender => .sender,
             Reply => .reply,
@@ -287,6 +289,13 @@ pub const Object = struct {
         }
     }
 
+    // pub fn asUnion(self: Self) Error!union(enum) {} {
+    //     return switch (self.type) {
+    //         .null => Error.InvalidCapability,
+    //         .memory => ,
+    //     };
+    // }
+
     pub fn alloc(ty: abi.ObjectType, owner: *Thread, dyn_size: abi.ChunkSize) Error!Self {
         return switch (ty) {
             .null => Error.InvalidCapability,
@@ -294,6 +303,7 @@ pub const Object = struct {
             .thread => (try Ref(Thread).alloc(dyn_size)).object(owner),
             .vmem => (try Ref(Vmem).alloc(dyn_size)).object(owner),
             .frame => (try Ref(Frame).alloc(dyn_size)).object(owner),
+            .device_frame => (try Ref(DeviceFrame).alloc(dyn_size)).object(owner),
             .receiver => (try Ref(Receiver).alloc(dyn_size)).object(owner),
             .sender => (try Ref(Sender).alloc(dyn_size)).object(owner),
             .reply => (try Ref(Reply).alloc(dyn_size)).object(owner),
@@ -313,6 +323,7 @@ pub const Object = struct {
             .thread => Thread.call(self.paddr, thread, trap),
             .vmem => Vmem.call(self.paddr, thread, trap),
             .frame => Frame.call(self.paddr, thread, trap),
+            .device_frame => DeviceFrame.call(self.paddr, thread, trap),
             .receiver => Receiver.call(self.paddr, thread, trap),
             .sender => Sender.call(self.paddr, thread, trap),
             .reply => Error.InvalidArgument,
@@ -331,6 +342,7 @@ pub const Object = struct {
             .thread => Error.InvalidArgument,
             .vmem => Error.InvalidArgument,
             .frame => Error.InvalidArgument,
+            .device_frame => Error.InvalidArgument,
             .receiver => Receiver.recv(self.paddr, thread, trap),
             .sender => Error.InvalidArgument,
             .reply => Error.InvalidArgument,
@@ -349,6 +361,7 @@ pub const Object = struct {
             .thread => Error.InvalidArgument,
             .vmem => Error.InvalidArgument,
             .frame => Error.InvalidArgument,
+            .device_frame => Error.InvalidArgument,
             .receiver => Receiver.reply(self.paddr, thread, trap),
             .sender => Error.InvalidArgument,
             .reply => Reply.reply(self.paddr, thread, trap),
@@ -367,6 +380,7 @@ pub const Object = struct {
             .thread => Error.InvalidArgument,
             .vmem => Error.InvalidArgument,
             .frame => Error.InvalidArgument,
+            .device_frame => Error.InvalidArgument,
             .receiver => Receiver.replyRecv(self.paddr, thread, trap),
             .sender => Error.InvalidArgument,
             .reply => Error.InvalidArgument,

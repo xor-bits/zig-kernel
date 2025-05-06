@@ -147,19 +147,37 @@ pub const Vmem = struct {
                 errdefer frame_obj.next = 0;
                 defer frame_obj.lock.unlock();
 
-                const frame = try frame_obj.as(caps.Frame);
-                const paddr = frame.paddr;
+                const paddr: addr.Phys, const size: usize = b: {
+                    if (frame_obj.as(caps.Frame)) |frame| {
+                        break :b .{
+                            addr.Phys.fromInt(caps.Frame.addrOf(frame)),
+                            caps.Frame.sizeOf(frame).sizeBytes(),
+                        };
+                    } else |_| {
+                        @branchHint(.unlikely); // normal frames are more likely than MMIO frames
+                    }
+
+                    if (frame_obj.as(caps.DeviceFrame)) |frame| {
+                        break :b .{
+                            addr.Phys.fromInt(caps.DeviceFrame.addrOf(frame)),
+                            caps.DeviceFrame.sizeOf(frame).sizeBytes(),
+                        };
+                    } else |_| {
+                        @branchHint(.unlikely);
+                    }
+
+                    return Error.InvalidCapability;
+                };
 
                 const vaddr = try addr.Virt.fromUser(trap.arg3);
                 const rights: abi.sys.Rights = .fromInt(@truncate(trap.arg4));
                 const flags: abi.sys.MapFlags = .fromInt(@truncate(trap.arg5));
 
-                const size = caps.Frame.sizeOf(frame).sizeBytes();
                 const size_1gib = comptime abi.ChunkSize.@"1GiB".sizeBytes();
                 const size_2mib = comptime abi.ChunkSize.@"2MiB".sizeBytes();
                 const size_4kib = comptime abi.ChunkSize.@"4KiB".sizeBytes();
 
-                // log.info("mapping {} from 0x{x} to 0x{x}", .{ size, paddr.raw, vaddr.raw });
+                // log.info("mapping 0x{x} from 0x{x} to 0x{x}", .{ size, paddr.raw, vaddr.raw });
 
                 if (size >= size_1gib) {
                     try self.mapAnyFrame(
@@ -207,12 +225,30 @@ pub const Vmem = struct {
                 errdefer frame_obj.next = @truncate(trap.arg0);
                 defer frame_obj.lock.unlock();
 
-                const frame = try frame_obj.as(caps.Frame);
-                const paddr = frame.paddr;
+                const paddr: addr.Phys, const size: usize = b: {
+                    if (frame_obj.as(caps.Frame)) |frame| {
+                        break :b .{
+                            addr.Phys.fromInt(caps.Frame.addrOf(frame)),
+                            caps.Frame.sizeOf(frame).sizeBytes(),
+                        };
+                    } else |_| {
+                        @branchHint(.unlikely); // normal frames are more likely than MMIO frames
+                    }
+
+                    if (frame_obj.as(caps.DeviceFrame)) |frame| {
+                        break :b .{
+                            addr.Phys.fromInt(caps.DeviceFrame.addrOf(frame)),
+                            caps.DeviceFrame.sizeOf(frame).sizeBytes(),
+                        };
+                    } else |_| {
+                        @branchHint(.unlikely);
+                    }
+
+                    return Error.InvalidCapability;
+                };
 
                 const vaddr = try addr.Virt.fromUser(trap.arg3);
 
-                const size = caps.Frame.sizeOf(frame).sizeBytes();
                 const size_1gib = comptime abi.ChunkSize.@"1GiB".sizeBytes();
                 const size_2mib = comptime abi.ChunkSize.@"2MiB".sizeBytes();
                 const size_4kib = comptime abi.ChunkSize.@"4KiB".sizeBytes();

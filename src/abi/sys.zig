@@ -123,6 +123,7 @@ pub const Error = error{
     NotifyAlreadySubscribed,
     IrqAlreadySubscribed,
     TooManyIrqs,
+    OutOfBounds,
 
     UnknownError,
 };
@@ -167,6 +168,7 @@ fn encodeError(err: Error) usize {
         error.NotifyAlreadySubscribed => 21,
         error.IrqAlreadySubscribed => 22,
         error.TooManyIrqs => 23,
+        error.OutOfBounds => 24,
 
         error.UnknownError => std.debug.panic("unknown error shouldn't be encoded", .{}),
     }));
@@ -201,6 +203,7 @@ pub fn decode(v: usize) Error!usize {
         21 => error.NotifyAlreadySubscribed,
         22 => error.IrqAlreadySubscribed,
         23 => error.TooManyIrqs,
+        24 => error.OutOfBounds,
 
         else => return error.UnknownError,
     };
@@ -363,6 +366,40 @@ pub fn frameSizeOf(frame_cap: u32) !abi.ChunkSize {
     };
     try call(frame_cap, &msg);
     return std.meta.intToEnum(abi.ChunkSize, msg.arg0) catch unreachable;
+}
+
+// DEVICE FRAME CAPABILITY CALLS
+
+pub const DeviceFrameCallId = enum(u8) {
+    addr_of,
+    size_of,
+    subframe,
+};
+
+pub fn deviceFrameAddrOf(frame_cap: u32) !usize {
+    var msg: Message = .{
+        .arg0 = @intFromEnum(DeviceFrameCallId.addr_of),
+    };
+    try call(frame_cap, &msg);
+    return msg.arg0;
+}
+
+pub fn deviceFrameSizeOf(frame_cap: u32) !abi.ChunkSize {
+    var msg: Message = .{
+        .arg0 = @intFromEnum(DeviceFrameCallId.size_of),
+    };
+    try call(frame_cap, &msg);
+    return std.meta.intToEnum(abi.ChunkSize, msg.arg0) catch unreachable;
+}
+
+pub fn deviceFrameSubframe(frame_cap: u32, paddr: usize, size: abi.ChunkSize) !u32 {
+    var msg: Message = .{
+        .arg0 = @intFromEnum(DeviceFrameCallId.subframe),
+        .arg1 = paddr,
+        .arg2 = @intFromEnum(size),
+    };
+    try call(frame_cap, &msg);
+    return @truncate(msg.arg0);
 }
 
 // RECEIVER CAPABILITY CALLS

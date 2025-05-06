@@ -67,6 +67,8 @@ pub const ObjectType = enum(u8) {
     vmem,
     /// capability to a physical memory region (sized `ChunkSize`)
     frame,
+    /// capability to a MMIO physical memory region
+    device_frame,
     /// capability to **the** receiver end of an endpoint,
     /// there can only be a single receiver
     receiver,
