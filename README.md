@@ -79,8 +79,11 @@ zig build run --prominent-compile-errors --summary none -freference-trace \
       - [x] Thread
       - [x] Vmem
       - [x] Frame
+        - [ ] multiple Frame caps to the same physical memory (for shared memory)
+      - [x] DeviceFrame
       - [x] Receiver
       - [x] Sender
+      - [x] Reply
       - [x] Notify
   - [x] syscalls
 
