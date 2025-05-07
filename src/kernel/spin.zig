@@ -1,6 +1,8 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+const logs = @import("logs.zig");
+
 const log = std.log.scoped(.spin);
 
 //
@@ -55,8 +57,7 @@ pub const Mutex = struct {
                 if (IS_DEBUG) {
                     counter += 1;
                     if (counter % 10_000 == 0) {
-                        log.warn("possible deadlock", .{});
-                        @import("logs.zig").addr2line(@returnAddress());
+                        log.warn("possible deadlock {}", .{logs.Addr2Line{ .addr = @returnAddress() }});
                     }
                 }
                 std.atomic.spinLoopHint();

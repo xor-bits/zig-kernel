@@ -2,8 +2,9 @@ const std = @import("std");
 const abi = @import("abi");
 const limine = @import("limine");
 
-const apic = @import("../apic.zig");
 const addr = @import("../addr.zig");
+const apic = @import("../apic.zig");
+const logs = @import("../logs.zig");
 const main = @import("../main.zig");
 const pmem = @import("../pmem.zig");
 const proc = @import("../proc.zig");
@@ -710,8 +711,8 @@ pub const Idt = extern struct {
                 if (pfec.user_mode) swapgs();
                 defer if (pfec.user_mode) swapgs();
 
-                log.err(
-                    \\page fault 0x{x}
+                log.warn(
+                    \\fault 0x{x}
                     \\ - user: {any}
                     \\ - caused by write: {any}
                     \\ - instruction fetch: {any}
@@ -728,11 +729,26 @@ pub const Idt = extern struct {
 
                 if (pfec.user_mode) {
                     cpuLocal().current_thread.?.status = .stopped;
-                    cpuLocal().current_thread = null;
                     proc.enter();
                 } else {
-                    @import("../logs.zig").addr2line(interrupt_stack_frame.ip);
-                    std.debug.panic("unhandled CPU exception", .{});
+                    std.debug.panic(
+                        \\unhandled page fault 0x{x}
+                        \\ - user: {any}
+                        \\ - caused by write: {any}
+                        \\ - instruction fetch: {any}
+                        \\ - ip: 0x{x}
+                        \\ - sp: 0x{x}
+                        \\ - line:
+                        \\{}
+                    , .{
+                        target_addr,
+                        pfec.user_mode,
+                        pfec.caused_by_write,
+                        pfec.instruction_fetch,
+                        interrupt_stack_frame.ip,
+                        interrupt_stack_frame.sp,
+                        logs.Addr2Line{ .addr = interrupt_stack_frame.ip },
+                    });
                 }
             }
         }).withStack(1).asInt();

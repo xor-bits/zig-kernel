@@ -51,14 +51,22 @@ fn logFn(comptime message_level: std.log.Level, comptime scope: @TypeOf(.enum_li
 
 var log_lock: spin.Mutex = .{};
 
-fn print(comptime is_panic: bool, comptime fmt: []const u8, args: anytype) void {
-    log_lock.lock();
-    defer log_lock.unlock();
+const panic_printer = struct {
+    pub const Error = error{};
 
-    uart.print(fmt ++ "\n", args);
-    if (is_panic)
-        fb.print(fmt ++ "\n", args);
-}
+    pub fn writeAll(_: *const @This(), lit: []const u8) Error!void {
+        log_lock.lock();
+        defer log_lock.unlock();
+        uart.print("{s}", .{lit});
+        fb.print("{s}", .{lit});
+    }
+
+    pub fn writeBytesNTimes(self: *const @This(), bytes: []const u8, n: usize) Error!void {
+        for (0..n) |_| {
+            try self.writeAll(bytes);
+        }
+    }
+}{};
 
 pub fn panic(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace, ret_addr: ?usize) noreturn {
     @branchHint(.cold);
@@ -83,48 +91,54 @@ pub fn panic(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace, ret_
         defer dwarf.deinit(pmem.page_allocator);
 
         while (iter.next()) |r_addr| {
-            printSourceAtAddress(true, &dwarf, r_addr);
+            printSourceAtAddress(panic_printer, &dwarf, r_addr) catch {};
         }
     } else |err| {
         log.err("failed to open DWARF info: {}", .{err});
 
         while (iter.next()) |r_addr| {
-            print(true, "  \x1B[90m0x{x:0>16}\x1B[0m", .{r_addr});
+            std.fmt.format(panic_printer, "  \x1B[90m0x{x:0>16}\x1B[0m\n", .{r_addr}) catch {};
         }
     }
+
+    std.fmt.format(panic_printer, "\n", .{}) catch {};
 
     log.err("CPU panicked: {s}", .{msg});
 
     arch.hcf();
 }
 
-pub fn addr2line(address: usize) void {
-    if (getSelfDwarf()) |_dwarf| {
-        var dwarf = _dwarf;
-        defer dwarf.deinit(pmem.page_allocator);
-        printSourceAtAddress(false, &dwarf, address);
-    } else |err| {
-        std.log.err("failed to open DWARF info: {}", .{err});
-    }
-}
+pub const Addr2Line = struct {
+    addr: usize,
 
-fn printSourceAtAddress(comptime is_panic: bool, debug_info: *std.debug.Dwarf, address: usize) void {
+    pub fn format(self: Addr2Line, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        if (getSelfDwarf()) |_dwarf| {
+            var dwarf = _dwarf;
+            defer dwarf.deinit(pmem.page_allocator);
+            try printSourceAtAddress(writer, &dwarf, self.addr);
+        } else |err| {
+            try std.fmt.format(writer, "failed to open DWARF info: {}\n", .{err});
+        }
+    }
+};
+
+fn printSourceAtAddress(writer: anytype, debug_info: *std.debug.Dwarf, address: usize) !void {
     const sym = debug_info.getSymbolName(address) orelse {
-        print(is_panic, "  \x1B[90m?? @ 0x{x:0>16}\x1B[0m", .{address});
+        try std.fmt.format(writer, "  \x1B[90m?? @ 0x{x:0>16}\x1B[0m\n", .{address});
         return;
     };
 
     const cu = debug_info.findCompileUnit(address) catch {
-        print(is_panic, "  \x1B[90m{s}\x1B[0m", .{sym});
+        try std.fmt.format(writer, "  \x1B[90m{s}\x1B[0m\n", .{sym});
         return;
     };
 
     const source = debug_info.getLineNumberInfo(pmem.page_allocator, cu, address) catch {
-        print(is_panic, "  \x1B[90m{s}\x1B[0m", .{sym});
+        try std.fmt.format(writer, "  \x1B[90m{s}\x1B[0m\n", .{sym});
         return;
     };
 
-    print(is_panic, "  \x1B[90m{s}: {s}:{}:{}\x1B[0m", .{ sym, source.file_name, source.line, source.column });
+    try std.fmt.format(writer, "  \x1B[90m{s}: {s}:{}:{}\x1B[0m\n", .{ sym, source.file_name, source.line, source.column });
 }
 
 fn getSelfDwarf() !std.debug.Dwarf {
