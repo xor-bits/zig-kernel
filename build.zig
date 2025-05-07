@@ -162,7 +162,7 @@ fn createIso(
 
     // create virtual iso root
     const wf = b.addNamedWriteFiles("create virtual iso root");
-    _ = wf.addCopyFile(kernel_elf, "boot/kernel.elf");
+    _ = wf.addCopyFile(kernel_elf, "boot/kernel");
     _ = wf.addCopyFile(initfs_tar_gz, "boot/initfs.tar.gz");
     _ = wf.addCopyFile(root_bin, "boot/root.bin");
     _ = wf.addCopyFile(b.path("cfg/limine.conf"), "boot/limine/limine.conf");
@@ -262,7 +262,7 @@ fn createKernelElf(
 
     if (opts.testing) {
         const testkernel_elf_step = b.addTest(.{
-            .name = "kernel.elf",
+            .name = "kernel",
             // .target = target,
             // .optimize = optimize,
             // .test_runner = .{ .path = b.path("src/kernel/main.zig"), .mode = .simple },
@@ -281,7 +281,7 @@ fn createKernelElf(
         return testkernel_elf_step.getEmittedBin();
     } else {
         const kernel_elf_step = b.addExecutable(.{
-            .name = "kernel.elf",
+            .name = "kernel",
             .root_module = kernel_module,
         });
 
