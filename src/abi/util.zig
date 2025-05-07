@@ -360,6 +360,9 @@ const MessageUsage = struct {
                 if (info == .@"enum") {
                     real_ty = info.@"enum".tag_type;
                     enc = .tagged_enum;
+                } else if (info == .array) {
+                    real_ty = ty;
+                    enc = .raw;
                 } else {
                     @compileError(std.fmt.comptimePrint("unknown type {}", .{ty}));
                 }
