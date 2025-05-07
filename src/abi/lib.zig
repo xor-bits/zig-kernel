@@ -260,4 +260,8 @@ pub const VmProtocol = util.Protocol(struct {
     newSender: fn () struct { sys.Error!void, caps.Sender },
 });
 
-// pub const PmProtocol = util.Protocol(struct {});
+pub const PmProtocol = util.Protocol(struct {
+    /// create a new sender the pm server
+    /// only root can call this
+    newSender: fn () struct { sys.Error!void, caps.Sender },
+});

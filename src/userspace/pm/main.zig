@@ -29,13 +29,50 @@ pub fn main() !void {
 
     // inform the root that pm is ready
     log.debug("pm ready", .{});
-    res, const vm_sender = try root.call(.pmReady, .{pm_send});
+    res, const vmem_handle = try root.call(.pmReady, .{pm_send});
     try res;
 
-    _ = vm_sender;
+    log.debug("requesting vm sender", .{});
+    res, const vm_sender = try root.call(.vm, void{});
+    try res;
 
-    // const server = abi.PmProtocol.Server(.{}).init(pm_recv);
-    // try server.run();
+    var system: System = .{
+        .recv = pm_recv,
+        .memory = memory,
+        .root_endpoint = pm_send.cap,
+
+        .vm_client = abi.VmProtocol.Client().init(vm_sender),
+        .self_vmem_handle = vmem_handle,
+    };
+
+    const server = abi.PmProtocol.Server(.{
+        .Context = *System,
+        .scope = if (abi.conf.LOG_SERVERS) .vm else null,
+    }, .{
+        .newSender = newSenderHandler,
+    }).init(&system, pm_recv);
+    try server.run();
+}
+
+const System = struct {
+    recv: caps.Receiver,
+    memory: caps.Memory,
+    root_endpoint: u32,
+
+    vm_client: abi.VmProtocol.Client(),
+    self_vmem_handle: usize,
+};
+
+fn newSenderHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.Sender } {
+    if (ctx.root_endpoint != sender)
+        return .{ Error.PermissionDenied, .{} };
+
+    const pm_sender = ctx.recv.subscribe() catch |err| {
+        log.err("failed to subscribe: {}", .{err});
+        return .{ err, .{} };
+    };
+
+    return .{ void{}, pm_sender };
 }
 
 comptime {
