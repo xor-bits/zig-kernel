@@ -6,4 +6,6 @@ pub const LOG_CTX_SWITCHES: bool = LOG_EVERYTHING or false;
 pub const LOG_WAITING: bool = LOG_EVERYTHING or false;
 pub const LOG_SERVERS: bool = LOG_EVERYTHING or false;
 
+pub const STACK_TRACE: bool = true;
+pub const KERNEL_PANIC_RSOD: bool = true;
 pub const KERNEL_PANIC_ON_USER_FAULT: bool = false;

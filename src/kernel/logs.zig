@@ -1,3 +1,4 @@
+const abi = @import("abi");
 const std = @import("std");
 
 const apic = @import("apic.zig");
@@ -8,6 +9,8 @@ const pmem = @import("pmem.zig");
 const spin = @import("spin.zig");
 const uart = @import("uart.zig");
 const fb = @import("fb.zig");
+
+const conf = abi.conf;
 
 //
 
@@ -35,7 +38,7 @@ fn logFn(comptime message_level: std.log.Level, comptime scope: @TypeOf(.enum_li
         uart.print(fmt, .{id});
         uart.print(format ++ "\n", args);
 
-        if (scope == .panic) {
+        if (conf.KERNEL_PANIC_RSOD and scope == .panic) {
             fb.print(fmt, .{id});
             fb.print(format ++ "\n", args);
         }
@@ -43,7 +46,7 @@ fn logFn(comptime message_level: std.log.Level, comptime scope: @TypeOf(.enum_li
         const fmt = "\x1B[90m[ " ++ level_col ++ level_txt ++ "\x1B[90m" ++ scope_txt ++ " #? ]: \x1B[0m" ++ format;
 
         uart.print(fmt ++ "\n", args);
-        if (scope == .panic) {
+        if (conf.KERNEL_PANIC_RSOD and scope == .panic) {
             fb.print(format, args);
         }
     }
@@ -58,7 +61,8 @@ const panic_printer = struct {
         log_lock.lock();
         defer log_lock.unlock();
         uart.print("{s}", .{lit});
-        fb.print("{s}", .{lit});
+        if (conf.KERNEL_PANIC_RSOD)
+            fb.print("{s}", .{lit});
     }
 
     pub fn writeBytesNTimes(self: *const @This(), bytes: []const u8, n: usize) Error!void {
@@ -79,7 +83,8 @@ pub fn panic(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace, ret_
     }
 
     // fill with red
-    fb.clear();
+    if (conf.KERNEL_PANIC_RSOD)
+        fb.clear();
 
     // TODO: maybe `std.debug.Dwarf.ElfModule` contains everything?
 
@@ -142,6 +147,7 @@ fn printSourceAtAddress(writer: anytype, debug_info: *std.debug.Dwarf, address: 
 }
 
 fn getSelfDwarf() !std.debug.Dwarf {
+    if (!conf.STACK_TRACE) return error.StackTracesDisabled;
 
     // std.debug.captureStackTrace(first_address: ?usize, stack_trace: *std.builtin.StackTrace)
 
@@ -195,21 +201,6 @@ fn getSelfDwarf() !std.debug.Dwarf {
         }
     }
 
-    // sections[@intFromEnum(std.debug.Dwarf.Section.Id.debug_info)] =
-    //     sectionFromSym(&__debug_info_start, &__debug_info_end);
-    // sections[@intFromEnum(std.debug.Dwarf.Section.Id.debug_abbrev)] =
-    //     sectionFromSym(&__debug_abbrev_start, &__debug_abbrev_end);
-    // sections[@intFromEnum(std.debug.Dwarf.Section.Id.debug_str)] =
-    //     sectionFromSym(&__debug_str_start, &__debug_str_end);
-    // sections[@intFromEnum(std.debug.Dwarf.Section.Id.debug_line)] =
-    //     sectionFromSym(&__debug_line_start, &__debug_line_end);
-    // sections[@intFromEnum(std.debug.Dwarf.Section.Id.debug_ranges)] =
-    //     sectionFromSym(&__debug_ranges_start, &__debug_ranges_end);
-    // sections[@intFromEnum(std.debug.Dwarf.Section.Id.eh_frame)] =
-    //     sectionFromSym(&__eh_frame_start, &__eh_frame_end);
-    // sections[@intFromEnum(std.debug.Dwarf.Section.Id.eh_frame_hdr)] =
-    //     sectionFromSym(&__eh_frame_hdr_start, &__eh_frame_hdr_end);
-
     var dwarf: std.debug.Dwarf = .{
         .endian = .little,
         .sections = sections,
@@ -247,18 +238,3 @@ fn sectionFromSym(start: *const u8, end: *const u8) std.debug.Dwarf.Section {
         .owned = false,
     };
 }
-
-// extern var __debug_info_start: u8;
-// extern var __debug_info_end: u8;
-// extern var __debug_abbrev_start: u8;
-// extern var __debug_abbrev_end: u8;
-// extern var __debug_str_start: u8;
-// extern var __debug_str_end: u8;
-// extern var __debug_line_start: u8;
-// extern var __debug_line_end: u8;
-// extern var __debug_ranges_start: u8;
-// extern var __debug_ranges_end: u8;
-// extern var __eh_frame_start: u8;
-// extern var __eh_frame_end: u8;
-// extern var __eh_frame_hdr_start: u8;
-// extern var __eh_frame_hdr_end: u8;
