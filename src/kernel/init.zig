@@ -59,7 +59,7 @@ pub fn exec(a: args.Args) !void {
 
     try mapRoot(init_thread.ptr(), vmem.ptr(), boot_info.ptr(), a);
 
-    try proc.start(init_thread);
+    proc.start(init_thread.ptr());
     proc.init();
 }
 

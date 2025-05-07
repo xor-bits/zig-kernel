@@ -81,24 +81,22 @@ pub fn switchTo(trap: *arch.SyscallRegs, thread: *caps.Thread, prev: ?*caps.Thre
 }
 
 /// stop the thread and (TODO) interrupt a processor that might be running it
-pub fn stop(thread: caps.Ref(caps.Thread)) Error!void {
-    const thread_ptr = thread.ptr();
-    if (thread_ptr.status == .stopped) return Error.IsStopped;
+pub fn stop(thread: *caps.Thread) void {
+    std.debug.assert(thread.status != .stopped);
 
-    thread_ptr.status = .stopped;
+    thread.status = .stopped;
     _ = active_threads.fetchSub(1, .release);
     // FIXME: IPI
     // TODO: stop the processor and take the thread
 }
 
 /// start the thread, if its not running
-pub fn start(thread: caps.Ref(caps.Thread)) Error!void {
-    const thread_ptr = thread.ptr();
-    if (thread_ptr.status != .stopped) return Error.NotStopped;
-    if (thread_ptr.vmem == null) return Error.NoVmem;
+pub fn start(thread: *caps.Thread) void {
+    std.debug.assert(thread.status == .stopped);
+    std.debug.assert(thread.vmem != null);
 
     _ = active_threads.fetchAdd(1, .acquire);
-    ready(thread_ptr);
+    ready(thread);
 }
 
 pub fn ready(thread: *caps.Thread) void {

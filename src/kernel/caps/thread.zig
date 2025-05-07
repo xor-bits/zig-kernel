@@ -153,10 +153,13 @@ pub const Thread = struct {
 
         switch (call_id) {
             .start => {
-                try proc.start(target_thread);
+                if (target_thread.ptr().status != .stopped) return Error.NotStopped;
+                if (target_thread.ptr().vmem == null) return Error.NoVmem;
+                 proc.start(target_thread.ptr());
             },
             .stop => {
-                try proc.stop(target_thread);
+                if (target_thread.ptr().status == .stopped) return Error.IsStopped;
+                proc.stop(target_thread.ptr());
             },
             .read_regs => {
                 if (!std.mem.isAligned(trap.arg2, @alignOf(abi.sys.ThreadRegs))) {
