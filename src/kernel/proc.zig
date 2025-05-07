@@ -105,9 +105,8 @@ pub fn ready(thread: *caps.Thread) void {
     thread.status = .ready;
 
     queue_locks[prio].lock();
-    defer queue_locks[prio].unlock();
-
     queues[prio].pushBack(thread);
+    queue_locks[prio].unlock();
 
     // notify a single sleeping processor
     for (&waiters) |*w| {
@@ -148,9 +147,10 @@ pub fn next() *caps.Thread {
 pub fn tryNext() ?*caps.Thread {
     for (&queue_locks, &queues) |*lock, *queue| {
         lock.lock();
-        defer lock.unlock();
+        const _next_thread = queue.popFront();
+        lock.unlock();
 
-        if (queue.popFront()) |next_thread| {
+        if (_next_thread) |next_thread| {
             if (next_thread.status == .stopped) {
                 continue;
             } else {
