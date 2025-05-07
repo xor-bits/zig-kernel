@@ -50,30 +50,30 @@ pub const Rights = extern struct {
 
 /// https://wiki.osdev.org/Paging#PAT
 pub const CacheType = enum(u8) {
-    /// Reads allocate cache lines on a cache miss,
-    /// and can allocate to either the shared, exclusive, or modified state.
-    /// Writes allocate to the modified state on a cache miss.
-    write_back = 0,
-    /// Reads allocate cache lines on a cache miss.
-    /// Cache lines are not allocated on a write miss.
-    /// Write hits update the cache and main memory.
-    write_through = 1,
-    /// Same as uncacheable,
-    /// except that this can be overriden by Write-Combining MTRRs.
-    uncached = 2,
     /// All accesses are uncacheable.
     /// Write combining is not allowed.
     /// Speculative accesses are not allowed.
-    uncacheable = 3,
+    uncacheable = 0,
     /// All accesses are uncacheable.
     /// Write combining is allowed.
     /// Speculative reads are allowed.
-    write_combining = 4,
+    write_combining = 1,
+    /// Reads allocate cache lines on a cache miss.
+    /// Cache lines are not allocated on a write miss.
+    /// Write hits update the cache and main memory.
+    write_through = 4,
     /// Reads allocate cache lines on a cache miss.
     /// All writes update main memory.
     /// Cache lines are not allocated on a write miss.
     /// Write hits invalidate the cache line and update main memory.
     write_protect = 5,
+    /// Reads allocate cache lines on a cache miss,
+    /// and can allocate to either the shared, exclusive, or modified state.
+    /// Writes allocate to the modified state on a cache miss.
+    write_back = 6,
+    /// Same as uncacheable,
+    /// except that this can be overriden by Write-Combining MTRRs.
+    uncached = 7,
 
     pub fn patMsr() u64 {
         return @as(u64, @intFromEnum(@This().write_back)) |
