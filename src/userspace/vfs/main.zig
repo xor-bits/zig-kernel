@@ -29,7 +29,7 @@ pub fn main() !void {
 
     // inform the root that vfs is ready
     log.debug("vfs ready", .{});
-    res, const vm_sender = try root.call(.vfsReady, .{vfs_send});
+    res, const vm_sender = try root.call(.serverReady, .{ abi.ServerKind.vfs, vfs_send });
     try res;
 
     _ = vm_sender;

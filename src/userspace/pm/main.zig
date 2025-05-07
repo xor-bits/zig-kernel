@@ -29,11 +29,11 @@ pub fn main() !void {
 
     // inform the root that pm is ready
     log.debug("pm ready", .{});
-    res, const vmem_handle = try root.call(.pmReady, .{pm_send});
+    res, const vmem_handle = try root.call(.serverReady, .{ abi.ServerKind.pm, pm_send });
     try res;
 
     log.debug("requesting vm sender", .{});
-    res, const vm_sender = try root.call(.vm, void{});
+    res, const vm_sender = try root.call(.serverSender, .{abi.ServerKind.vm});
     try res;
 
     var system: System = .{

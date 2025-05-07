@@ -23,7 +23,7 @@ pub fn main() !void {
     try res;
 
     log.debug("requesting vm sender", .{});
-    res, const vm_sender = try root.call(.vm, void{});
+    res, const vm_sender = try root.call(.serverSender, .{abi.ServerKind.vm});
     try res;
 
     log.debug("requesting ioport allocator", .{});
@@ -45,7 +45,7 @@ pub fn main() !void {
 
     // inform the root that rm is ready
     log.debug("rm ready", .{});
-    res, const self_vmem_handle = try root.call(.rmReady, .{rm_send});
+    res, const self_vmem_handle = try root.call(.serverReady, .{ abi.ServerKind.rm, rm_send });
     try res;
 
     const vm_client = abi.VmProtocol.Client().init(vm_sender);

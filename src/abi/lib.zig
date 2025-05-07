@@ -184,6 +184,15 @@ pub const Device = enum(u8) {
     hpet,
 };
 
+pub const ServerKind = enum(u8) {
+    vm,
+    pm,
+    rm,
+    vfs,
+    timer,
+    input,
+};
+
 pub const RootProtocol = util.Protocol(struct {
     /// request a physical memory allocator capability
     /// only system processes are allowed request this
@@ -205,50 +214,16 @@ pub const RootProtocol = util.Protocol(struct {
     /// only rm can use this
     device: fn (kind: Device) struct { sys.Error!void, caps.DeviceFrame },
 
-    /// provide a sender to the vm server
-    /// only vm can use this
-    vmReady: fn (vm_sender: caps.Sender) struct { sys.Error!void },
+    /// inform root that the server is ready and provide a sender to the server
+    /// only servers can use this, and `kind` has to match the server
+    /// returns a vmem handle, if it isn't the vm server
+    serverReady: fn (kind: ServerKind, sender: caps.Sender) struct { sys.Error!void, usize },
 
-    /// install a new pm server
-    /// returns a vm handle to self
-    pmReady: fn (pm_sender: caps.Sender) struct { sys.Error!void, usize },
-
-    /// install a new rm server
-    /// returns a vm handle to self
-    rmReady: fn (pm_sender: caps.Sender) struct { sys.Error!void, usize },
-
-    /// install a new vfs server
-    /// returns a vm handle to self
-    vfsReady: fn (vfs_sender: caps.Sender) struct { sys.Error!void, usize },
-
-    /// install a new timer server
-    /// returns a vm handle to self
-    timerReady: fn (timer_sender: caps.Sender) struct { sys.Error!void, usize },
-
-    /// install a new input server
-    /// returns a vm handle to self
-    inputReady: fn (input_sender: caps.Sender) struct { sys.Error!void, usize },
+    /// request a sender to the server
+    serverSender: fn (kind: ServerKind) struct { sys.Error!void, caps.Sender },
 
     /// request a sender to the initfs server
     initfs: fn () struct { sys.Error!void, caps.Sender },
-
-    /// request a sender to the vm server
-    vm: fn () struct { sys.Error!void, caps.Sender },
-
-    /// request a sender to the pm server
-    pm: fn () struct { sys.Error!void, caps.Sender },
-
-    /// request a sender to the rm server
-    rm: fn () struct { sys.Error!void, caps.Sender },
-
-    /// request a sender to the vfs server
-    vfs: fn () struct { sys.Error!void, caps.Sender },
-
-    /// request a sender to the timer server
-    timer: fn () struct { sys.Error!void, caps.Sender },
-
-    /// request a sender to the input server
-    input: fn () struct { sys.Error!void, caps.Sender },
 });
 
 pub const InitfsProtocol = util.Protocol(struct {

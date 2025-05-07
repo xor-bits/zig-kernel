@@ -29,11 +29,11 @@ pub fn main() !void {
 
     // inform the root that timer is ready
     log.debug("timer ready", .{});
-    res, const vmem_handle = try root.call(.timerReady, .{timer_send});
+    res, const vmem_handle = try root.call(.serverReady, .{ abi.ServerKind.timer, timer_send });
     try res;
 
     log.debug("requesting vm sender", .{});
-    res, const vm_sender = try root.call(.vm, void{});
+    res, const vm_sender = try root.call(.serverSender, .{abi.ServerKind.vm});
     try res;
     const vm_client = abi.VmProtocol.Client().init(vm_sender);
 
@@ -43,11 +43,11 @@ pub fn main() !void {
     // const rm_client = abi.RmProtocol.Client().init(rm_sender);
 
     log.debug("requesting vm sender for HPET", .{});
-    res, const vm_hpet_sender = try root.call(.vm, void{});
+    res, const vm_hpet_sender = try root.call(.serverSender, .{abi.ServerKind.vm});
     try res;
 
     log.debug("requesting rm sender for HPET", .{});
-    res, const rm_hpet_sender = try root.call(.rm, void{});
+    res, const rm_hpet_sender = try root.call(.serverSender, .{abi.ServerKind.rm});
     try res;
 
     log.debug("requesting initfs sender", .{});
