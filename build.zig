@@ -315,8 +315,7 @@ fn createRootBin(
     });
     root_bin_step.step.dependOn(&root_elf_step.step);
 
-    const root_elf_install = b.addInstallFile(root_elf_step.getEmittedBin(), "root.elf");
-    b.getInstallStep().dependOn(&root_elf_install.step);
+    b.installArtifact(root_elf_step);
 
     const install_root_bin = b.addInstallFile(root_bin_step.getOutput(), "root.bin");
     b.getInstallStep().dependOn(&install_root_bin.step);
