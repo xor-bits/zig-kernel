@@ -115,8 +115,7 @@ fn run() callconv(.SysV) noreturn {
     };
 
     log.info("initfs terminated", .{});
-    thread.stop() catch {};
-    unreachable;
+    abi.sys.stop();
 }
 
 fn runMain() !void {

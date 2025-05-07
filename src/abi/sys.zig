@@ -20,6 +20,8 @@ pub const Id = enum(usize) {
     set_extra,
     /// give up the CPU for other tasks
     yield,
+    /// stop the active thread
+    stop,
 
     // TODO: maybe move all object call id's here to be syscall id's
 };
@@ -656,6 +658,12 @@ pub fn setExtra(idx: u7, val: usize, is_cap: bool) void {
 
 pub fn yield() void {
     _ = syscall(.yield, .{}) catch unreachable;
+}
+
+pub fn stop() noreturn {
+    _ = syscall(.stop, .{}) catch {};
+    asm volatile ("mov 0, %rax"); // read from nullptr to kill the process for sure
+    unreachable;
 }
 
 fn rwcall(id: Id, msg: *Message) !usize {

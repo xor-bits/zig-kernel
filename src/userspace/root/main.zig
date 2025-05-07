@@ -169,7 +169,7 @@ fn startSpinner() !void {
         .{},
     );
 
-    spinner_thread = try alloc(caps.Thread);
+    const spinner_thread = try alloc(caps.Thread);
     try spinner_thread.setPrio(0);
     self_vmem_lock.lock();
     defer self_vmem_lock.unlock();
@@ -181,14 +181,11 @@ fn startSpinner() !void {
     try spinner_thread.start();
 }
 
-var spinner_thread: caps.Thread = .{};
-
 fn spinnerMain() callconv(.SysV) noreturn {
     framebufferSplash(@ptrFromInt(BOOT_INFO)) catch |err| {
         log.warn("spinner failed: {}", .{err});
     };
-    spinner_thread.stop() catch {};
-    unreachable;
+    abi.sys.stop();
 }
 
 fn framebufferSplash(_boot_info: *const volatile abi.BootInfo) !void {
@@ -224,7 +221,7 @@ fn framebufferSplash(_boot_info: *const volatile abi.BootInfo) !void {
     while (true) {
         drawFrame(&fb_info, mid_x, mid_y, millis);
         millis += 4.0;
-        abi.sys.yield();
+        // abi.sys.yield();
     }
 
     try unmap(boot_info.framebuffer, FRAMEBUFFER);
@@ -752,7 +749,8 @@ export fn zigMain() noreturn {
         :
         : [sp] "{rsp}" (STACK_TOP),
     );
-    unreachable;
+
+    abi.sys.stop();
 }
 
 fn mapStack() !void {

@@ -248,6 +248,9 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
         .yield => {
             proc.yield(trap);
         },
+        .stop => {
+            proc.stop(thread);
+        },
         .get_extra => {
             const idx: u7 = @truncate(trap.arg0);
             trap.arg0 = thread.getExtra(idx);

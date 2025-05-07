@@ -145,7 +145,7 @@ fn sleepDeadlineHandler(_: void, _: u32, req: struct { u128, caps.Reply }) struc
     return .{{}};
 }
 
-fn spawn(f: *const fn (self: caps.Thread) callconv(.SysV) noreturn) !void {
+fn spawn(f: *const fn () callconv(.SysV) noreturn) !void {
     const res, const kb_thread: caps.Thread = try vm_client.call(.newThread, .{
         self_vmem_handle,
         @intFromPtr(f),
@@ -153,20 +153,15 @@ fn spawn(f: *const fn (self: caps.Thread) callconv(.SysV) noreturn) !void {
     });
     try res;
 
-    var regs: abi.sys.ThreadRegs = undefined;
-    try kb_thread.readRegs(&regs);
-    regs.arg0 = kb_thread.cap;
-    try kb_thread.writeRegs(&regs);
     try kb_thread.setPrio(0);
     try kb_thread.start();
 }
 
-pub fn hpetThread(self: caps.Thread) callconv(.SysV) noreturn {
+pub fn hpetThread() callconv(.SysV) noreturn {
     hpetThreadMain() catch |err| {
         log.err("HPET interrupt thread error: {}", .{err});
     };
-    self.stop() catch {};
-    unreachable;
+    abi.sys.stop();
 }
 
 fn hpetThreadMain() !void {

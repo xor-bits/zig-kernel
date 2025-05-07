@@ -22,7 +22,5 @@ fn _start(rdi: u64) callconv(.SysV) noreturn {
         std.debug.panic("{}", .{err});
     };
 
-    while (true) {
-        sys.yield();
-    }
+    sys.stop();
 }
