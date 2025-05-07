@@ -5,6 +5,7 @@ const main = @import("main.zig");
 
 const log = std.log.scoped(.initfsd);
 const caps = abi.caps;
+const Error = abi.sys.Error;
 
 //
 
@@ -99,28 +100,83 @@ pub fn wait() !void {
     _ = try initfs_ready.wait();
 }
 
+pub fn getSender() !caps.Sender {
+    return try initfs_recv.subscribe();
+}
+
 var thread: caps.Thread = undefined;
 var initfs_tar_gz: std.io.FixedBufferStream([]const u8) = undefined;
 var initfs_ready: caps.Notify = .{};
+var initfs_recv: caps.Receiver = .{};
 
 fn run() callconv(.SysV) noreturn {
-    log.info("decompressing", .{});
-    std.compress.flate.inflate.decompress(.gzip, initfs_tar_gz.reader(), initfs_tar.writer()) catch |err| {
-        log.err("failed to decompress initfs: {}", .{err});
-        thread.stop() catch {};
-        unreachable;
+    runMain() catch |err| {
+        log.err("initfs failed: {}", .{err});
     };
+
+    log.info("initfs terminated", .{});
+    thread.stop() catch {};
+    unreachable;
+}
+
+fn runMain() !void {
+    log.info("decompressing", .{});
+    try std.compress.flate.inflate.decompress(.gzip, initfs_tar_gz.reader(), initfs_tar.writer());
     std.debug.assert(std.mem.eql(u8, initfs_tar.items[257..][0..8], "ustar\x20\x20\x00"));
     log.info("decompressed initfs size: 0x{x}", .{initfs_tar.items.len});
 
-    _ = initfs_ready.notify() catch |err| {
-        log.err("failed to notify that initfs is ready: {}", .{err});
-        thread.stop() catch {};
-        unreachable;
-    };
+    initfs_recv = try main.alloc(caps.Receiver);
 
-    thread.stop() catch {};
-    unreachable;
+    _ = try initfs_ready.notify();
+
+    var server = abi.InitfsProtocol.Server(.{
+        .scope = if (abi.conf.LOG_SERVERS) .initfs else null,
+    }, .{
+        .openFile = openFileHandler,
+        .fileSize = fileSizeHandler,
+    }).init({}, initfs_recv);
+
+    try server.run();
+}
+
+fn openFileHandler(_: void, _: u32, req: struct { [32:0]u8, caps.Frame }) struct { Error!void, caps.Frame } {
+    const frame: caps.Frame = req.@"1";
+    const path: []const u8 = std.mem.sliceTo(&req.@"0", 0);
+
+    const frame_size: abi.ChunkSize = frame.sizeOf() catch |err| return .{ err, frame };
+
+    const file_id: usize = openFile(path) orelse return .{ Error.NotFound, frame };
+    const file: []const u8 = readFile(file_id);
+    const size: usize = @min(file.len, frame_size.sizeBytes());
+
+    main.map(
+        frame,
+        main.INITFS_TMP,
+        .{ .writable = true },
+        .{},
+    ) catch |err| return .{ err, frame };
+
+    abi.util.copyForwardsVolatile(
+        u8,
+        @as([*]volatile u8, @ptrFromInt(main.INITFS_TMP))[0..size],
+        file[0..size],
+    );
+
+    main.unmap(
+        frame,
+        main.INITFS_TMP,
+    ) catch |err| return .{ err, frame };
+
+    return .{ {}, frame };
+}
+
+fn fileSizeHandler(_: void, _: u32, req: struct { [32:0]u8 }) struct { Error!void, usize } {
+    const path: []const u8 = std.mem.sliceTo(&req.@"0", 0);
+
+    const file_id: usize = openFile(path) orelse return .{ Error.NotFound, 0 };
+    const file: []const u8 = readFile(file_id);
+
+    return .{ {}, file.len };
 }
 
 pub fn openFile(path: []const u8) ?usize {

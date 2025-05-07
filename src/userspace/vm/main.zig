@@ -52,9 +52,11 @@ pub fn main() !void {
         .scope = if (abi.conf.LOG_SERVERS) .vm else null,
     }, .{
         .newVmem = newVmemHandler,
+        .moveOwner = moveOwnerHandler,
         .loadElf = loadElfHandler,
         .mapFrame = mapFrameHandler,
         .mapDeviceFrame = mapDeviceFrameHandler,
+        .mapAnon = mapAnonHandler,
         .newThread = newThreadHandler,
         .newSender = newSenderHandler,
     }).init(&system, vm_recv);
@@ -102,8 +104,27 @@ fn newVmemHandler(ctx: *System, sender: u32, _: void) struct { Error!void, usize
     return .{ Error.Internal, 0 };
 }
 
+fn moveOwnerHandler(ctx: *System, sender: u32, req: struct { usize, u32 }) struct { Error!void, void } {
+    const handle = req.@"0";
+    const new_owner = req.@"1";
+
+    if (handle >= 256) {
+        return .{ Error.InvalidArgument, {} };
+    }
+    const addr_spc = &(ctx.address_spaces[handle] orelse {
+        return .{ Error.InvalidArgument, {} };
+    });
+    if (addr_spc.owner != sender) {
+        return .{ Error.PermissionDenied, {} };
+    }
+
+    addr_spc.owner = new_owner;
+
+    return .{ {}, {} };
+}
+
 // FIXME: named fields in req, or better: just `req: abi.VmProtocol.Request(.loadElf)`
-fn loadElfHandler(ctx: *System, _: u32, req: struct { usize, caps.Frame, usize, usize }) struct { Error!void } {
+fn loadElfHandler(ctx: *System, sender: u32, req: struct { usize, caps.Frame, usize, usize }) struct { Error!void, usize } {
     const handle = req.@"0";
     const frame = req.@"1";
     const offset = req.@"2";
@@ -113,27 +134,33 @@ fn loadElfHandler(ctx: *System, _: u32, req: struct { usize, caps.Frame, usize, 
     // defer frame.free();
 
     if (handle >= 256) {
-        return .{abi.sys.Error.InvalidArgument};
+        return .{ Error.InvalidArgument, 0 };
     }
     const addr_spc = &(ctx.address_spaces[handle] orelse {
-        return .{abi.sys.Error.InvalidArgument};
+        return .{ Error.InvalidArgument, 0 };
     });
-    // if (addr_spc.owner != sender) {
-    //     return .{abi.sys.Error.InvalidArgument};
-    // }
+    if (addr_spc.owner != sender) {
+        return .{ Error.InvalidArgument, 0 };
+    }
 
-    // FIXME: make sure the frame is actually as big as it is told to be
+    const frame_size = frame.sizeOf() catch |err| {
+        return .{ err, 0 };
+    };
+
+    if (frame_size.sizeBytes() < offset + length) {
+        return .{ Error.InvalidAddress, 0 };
+    }
 
     ctx.self_vmem.map(frame, ELF_TMP, .{ .writable = true }, .{}) catch
         unreachable;
 
-    loadElf(
+    const entry = loadElf(
         ctx,
         @as([*]const u8, @ptrFromInt(ELF_TMP))[offset..][0..length],
         addr_spc,
     ) catch |err| {
         log.warn("failed to load ELF: {}", .{err});
-        return .{Error.Internal};
+        return .{ Error.Internal, 0 };
     };
 
     ctx.self_vmem.unmap(frame, ELF_TMP) catch
@@ -141,23 +168,28 @@ fn loadElfHandler(ctx: *System, _: u32, req: struct { usize, caps.Frame, usize, 
 
     log.debug("got ELF to load {}", .{.{ frame, offset, length }});
 
-    return .{void{}};
+    return .{ void{}, entry };
 }
 
 fn mapFrameHandler(
     ctx: *System,
-    _: u32,
+    sender: u32,
     req: struct { usize, caps.Frame, abi.sys.Rights, abi.sys.MapFlags },
 ) struct { Error!void, usize, caps.Frame } {
     const handle = req.@"0";
     const frame = req.@"1";
+    const rights = req.@"2";
+    const flags = req.@"3";
 
     if (handle >= 256) {
-        return .{ abi.sys.Error.InvalidArgument, 0, .{} };
+        return .{ Error.InvalidArgument, 0, .{} };
     }
     const addr_spc = &(ctx.address_spaces[handle] orelse {
-        return .{ abi.sys.Error.InvalidArgument, 0, .{} };
+        return .{ Error.InvalidArgument, 0, .{} };
     });
+    if (addr_spc.owner != sender) {
+        return .{ Error.InvalidArgument, 0, .{} };
+    }
     const size = frame.sizeOf() catch |err| {
         return .{ err, 0, .{} };
     };
@@ -170,10 +202,8 @@ fn mapFrameHandler(
     addr_spc.vmem.map(
         frame,
         vaddr,
-        .{
-            .writable = true,
-        },
-        .{},
+        rights,
+        flags,
     ) catch |err| {
         log.warn("failed to map a frame: {}", .{err});
         return .{ Error.Internal, 0, frame };
@@ -184,11 +214,13 @@ fn mapFrameHandler(
 
 fn mapDeviceFrameHandler(
     ctx: *System,
-    _: u32,
+    sender: u32,
     req: struct { usize, caps.DeviceFrame, abi.sys.Rights, abi.sys.MapFlags },
 ) struct { Error!void, usize, caps.DeviceFrame } {
     const handle = req.@"0";
     const frame = req.@"1";
+    const rights = req.@"2";
+    const flags = req.@"3";
 
     if (handle >= 256) {
         return .{ abi.sys.Error.InvalidArgument, 0, .{} };
@@ -196,6 +228,9 @@ fn mapDeviceFrameHandler(
     const addr_spc = &(ctx.address_spaces[handle] orelse {
         return .{ abi.sys.Error.InvalidArgument, 0, .{} };
     });
+    if (addr_spc.owner != sender) {
+        return .{ Error.InvalidArgument, 0, .{} };
+    }
     const size = frame.sizeOf() catch |err| {
         return .{ err, 0, .{} };
     };
@@ -208,16 +243,59 @@ fn mapDeviceFrameHandler(
     addr_spc.vmem.mapDevice(
         frame,
         vaddr,
-        .{
-            .writable = true,
-        },
-        .{},
+        rights,
+        flags,
     ) catch |err| {
         log.warn("failed to map a device frame: {}", .{err});
         return .{ Error.Internal, 0, frame };
     };
 
     return .{ void{}, vaddr, .{} };
+}
+
+fn mapAnonHandler(
+    ctx: *System,
+    sender: u32,
+    req: struct { usize, usize, abi.sys.Rights, abi.sys.MapFlags },
+) struct { Error!void, usize } {
+    const handle = req.@"0";
+    const rights = req.@"2";
+    const flags = req.@"3";
+    const size = abi.ChunkSize.of(req.@"1") orelse {
+        return .{ Error.InvalidArgument, 0 };
+    };
+
+    if (handle >= 256) {
+        return .{ Error.InvalidArgument, 0 };
+    }
+    const addr_spc = &(ctx.address_spaces[handle] orelse {
+        return .{ Error.InvalidArgument, 0 };
+    });
+    if (addr_spc.owner != sender) {
+        return .{ Error.InvalidArgument, 0 };
+    }
+
+    const frame = ctx.memory.allocSized(caps.Frame, size) catch |err| {
+        log.warn("failed to alloc a frame: {}", .{err});
+        return .{ Error.Internal, 0 };
+    };
+
+    addr_spc.bottom += 0x10000;
+    const vaddr = addr_spc.bottom;
+    addr_spc.bottom += size.sizeBytes();
+    addr_spc.bottom += 0x10000;
+
+    addr_spc.vmem.map(
+        frame,
+        vaddr,
+        rights,
+        flags,
+    ) catch |err| {
+        log.warn("failed to map a frame: {}", .{err});
+        return .{ Error.Internal, 0 };
+    };
+
+    return .{ void{}, vaddr };
 }
 
 fn newSenderHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.Sender } {
@@ -232,20 +310,20 @@ fn newSenderHandler(ctx: *System, sender: u32, _: void) struct { Error!void, cap
     return .{ void{}, vm_sender };
 }
 
-fn newThreadHandler(ctx: *System, _: u32, req: struct { usize, usize, usize }) struct { Error!void, caps.Thread } {
+fn newThreadHandler(ctx: *System, sender: u32, req: struct { usize, usize, usize }) struct { Error!void, caps.Thread } {
     const handle = req.@"0";
     const ip_override = req.@"1";
     const sp_override = req.@"2";
 
     if (handle >= 256) {
-        return .{ abi.sys.Error.InvalidArgument, .{} };
+        return .{ Error.InvalidArgument, .{} };
     }
     const addr_spc = &(ctx.address_spaces[handle] orelse {
-        return .{ abi.sys.Error.InvalidArgument, .{} };
+        return .{ Error.InvalidArgument, .{} };
     });
-    // if (addr_spc.owner != sender) {
-    //     return .{ abi.sys.Error.InvalidArgument, .{} };
-    // }
+    if (addr_spc.owner != sender) {
+        return .{ Error.InvalidArgument, .{} };
+    }
 
     const thread = newThread(ctx, addr_spc, ip_override, sp_override) catch |err| {
         log.err("failed to create a new thread: {}", .{err});
@@ -259,7 +337,7 @@ fn newThreadHandler(ctx: *System, _: u32, req: struct { usize, usize, usize }) s
 // the bootstrap ELF loader was just a mini loader for vm
 //
 // this should support relocation, dynamic linking, lazy loading,
-fn loadElf(system: *System, elf_bytes: []const u8, as: *AddressSpace) !void {
+fn loadElf(system: *System, elf_bytes: []const u8, as: *AddressSpace) !usize {
     var elf = std.io.fixedBufferStream(elf_bytes);
 
     const header = try std.elf.Header.read(&elf);
@@ -317,13 +395,18 @@ fn loadElf(system: *System, elf_bytes: []const u8, as: *AddressSpace) !void {
             .{},
         );
 
-        // log.info("copying to [ 0x{x}..0x{x} ]", .{
+        // log.debug("copying to [ 0x{x}..0x{x} ] [ 0x{x}..0x{x} ]", .{
         //     segment_vaddr_bottom + segment_data_bottom_offset,
         //     segment_vaddr_bottom + segment_data_bottom_offset + program_header.p_filesz,
+        //     LOADER_TMP + segment_data_bottom_offset,
+        //     LOADER_TMP + segment_data_bottom_offset + program_header.p_filesz,
         // });
         abi.util.copyForwardsVolatile(
             u8,
-            @as([*]volatile u8, @ptrFromInt(LOADER_TMP + segment_data_bottom_offset))[0..program_header.p_filesz],
+            @as(
+                [*]volatile u8,
+                @ptrFromInt(LOADER_TMP + segment_data_bottom_offset),
+            )[0..program_header.p_filesz],
             bytes,
         );
 
@@ -341,6 +424,8 @@ fn loadElf(system: *System, elf_bytes: []const u8, as: *AddressSpace) !void {
             .{},
         );
     }
+
+    return header.entry;
 }
 
 fn newThread(system: *System, as: *AddressSpace, ip_override: usize, sp_override: usize) !caps.Thread {

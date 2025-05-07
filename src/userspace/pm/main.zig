@@ -49,6 +49,9 @@ pub fn main() !void {
         .Context = *System,
         .scope = if (abi.conf.LOG_SERVERS) .vm else null,
     }, .{
+        // .growHeap = growHeapHandler,
+        // .mapFrame = mapFrameHandler,
+        // .mapDeviceFrame = mapDeviceFrameHandler,
         .newSender = newSenderHandler,
     }).init(&system, pm_recv);
     try server.run();
@@ -61,7 +64,92 @@ const System = struct {
 
     vm_client: abi.VmProtocol.Client(),
     self_vmem_handle: usize,
+
+    processes: [256]?Process = .{null} ** 256,
 };
+
+const Process = struct {
+    pm_endpoint: u32,
+    vmem_handle: usize,
+};
+
+fn growHeapHandler(ctx: *System, sender: u32, by: usize) struct { Error!void, usize } {
+    // TODO: give each sender some id that the sender itself cannot change
+    for (&ctx.processes) |proc| {
+        const process = proc orelse continue;
+        if (process.pm_endpoint != sender) continue;
+
+        const res, const addr = ctx.vm_client.call(.mapAnon, .{
+            process.vmem_handle,
+            by,
+            abi.sys.Rights{ .writable = true },
+            abi.sys.MapFlags{},
+        }) catch |err| {
+            log.err("failed to grow heap: {}", .{err});
+            return .{ Error.Internal, 0 };
+        };
+        res catch |err| {
+            log.err("failed to grow heap: {}", .{err});
+            return .{ Error.Internal, 0 };
+        };
+
+        return .{ {}, addr };
+    }
+
+    return .{ Error.PermissionDenied, 0 };
+}
+
+fn mapFrameHandler(ctx: *System, sender: u32, frame: caps.Frame, rights: abi.sys.Rights, flags: abi.sys.MapFlags) struct { Error!void, caps.Frame } {
+    // TODO: give each sender some id that the sender itself cannot change
+    for (&ctx.processes) |proc| {
+        const process = proc orelse continue;
+        if (process.pm_endpoint != sender) continue;
+
+        const res, const addr = ctx.vm_client.call(.mapFrame, .{
+            process.vmem_handle,
+            frame,
+            rights,
+            flags,
+        }) catch |err| {
+            log.err("failed to grow heap: {}", .{err});
+            return .{ Error.Internal, 0 };
+        };
+        res catch |err| {
+            log.err("failed to grow heap: {}", .{err});
+            return .{ Error.Internal, 0 };
+        };
+
+        return .{ {}, addr };
+    }
+
+    return .{ Error.PermissionDenied, 0 };
+}
+
+fn mapDeviceFrameHandler(ctx: *System, sender: u32, frame: caps.DeviceFrame, rights: abi.sys.Rights, flags: abi.sys.MapFlags) struct { Error!void, caps.DeviceFrame } {
+    // TODO: give each sender some id that the sender itself cannot change
+    for (&ctx.processes) |proc| {
+        const process = proc orelse continue;
+        if (process.pm_endpoint != sender) continue;
+
+        const res, const addr = ctx.vm_client.call(.mapDeviceFrame, .{
+            process.vmem_handle,
+            frame,
+            rights,
+            flags,
+        }) catch |err| {
+            log.err("failed to grow heap: {}", .{err});
+            return .{ Error.Internal, 0 };
+        };
+        res catch |err| {
+            log.err("failed to grow heap: {}", .{err});
+            return .{ Error.Internal, 0 };
+        };
+
+        return .{ {}, addr };
+    }
+
+    return .{ Error.PermissionDenied, 0 };
+}
 
 fn newSenderHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.Sender } {
     if (ctx.root_endpoint != sender)

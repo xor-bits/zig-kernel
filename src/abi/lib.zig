@@ -209,20 +209,26 @@ pub const RootProtocol = util.Protocol(struct {
     /// only vm can use this
     vmReady: fn (vm_sender: caps.Sender) struct { sys.Error!void },
 
-    /// install a new pm sender that all new .pm requests get
+    /// install a new pm server
     /// returns a vm handle to self
     pmReady: fn (pm_sender: caps.Sender) struct { sys.Error!void, usize },
 
-    /// install a new rm sender that all new .rm requests get
+    /// install a new rm server
     /// returns a vm handle to self
     rmReady: fn (pm_sender: caps.Sender) struct { sys.Error!void, usize },
 
-    /// install a new vfs sender that all new .vfs requests get
+    /// install a new vfs server
     /// returns a vm handle to self
     vfsReady: fn (vfs_sender: caps.Sender) struct { sys.Error!void, usize },
 
+    /// install a new timer server
+    /// returns a vm handle to self
+    timerReady: fn (vfs_sender: caps.Sender) struct { sys.Error!void, usize },
+
+    /// request a sender to the initfs server
+    initfs: fn () struct { sys.Error!void, caps.Sender },
+
     /// request a sender to the vm server
-    /// only pm can use this
     vm: fn () struct { sys.Error!void, caps.Sender },
 
     /// request a sender to the pm server
@@ -233,12 +239,18 @@ pub const RootProtocol = util.Protocol(struct {
 
     /// request a sender to the vfs server
     vfs: fn () struct { sys.Error!void, caps.Sender },
+
+    /// request a sender to the timer server
+    timer: fn () struct { sys.Error!void, caps.Sender },
 });
 
 pub const InitfsProtocol = util.Protocol(struct {
     /// open a file from initfs, copy all of its content into
-    /// a new frame and return the frame
-    openFile: fn (path: [32:0]u8) struct { sys.Error!void, caps.Frame },
+    /// the provided frame (and returns the same frame)
+    openFile: fn (path: [32:0]u8, frame: caps.Frame) struct { sys.Error!void, caps.Frame },
+
+    /// open a file from initfs and return its length
+    fileSize: fn (path: [32:0]u8) struct { sys.Error!void, usize },
 });
 
 pub const VmProtocol = util.Protocol(struct {
@@ -246,16 +258,22 @@ pub const VmProtocol = util.Protocol(struct {
     /// returns a handle that can be used to create threads
     newVmem: fn () struct { sys.Error!void, usize },
 
+    /// change the vmem handle's owner
+    moveOwner: fn (handle: usize, sender_cap_id: u32) struct { sys.Error!void, void },
+
     // TODO: make sure there is only one copy of
     // this frame so that the vm can read it in peace
-    /// load an ELF into an address space
-    loadElf: fn (handle: usize, elf: caps.Frame, offset: usize, length: usize) sys.Error!void,
+    /// load an ELF into an address space, returns the entrypoint addr
+    loadElf: fn (handle: usize, elf: caps.Frame, offset: usize, length: usize) struct { sys.Error!void, usize },
 
     /// map a frame into an address space
-    mapFrame: fn (handle: usize, frame: caps.Frame, rights: sys.Rights, length: sys.MapFlags) struct { sys.Error!void, usize, caps.Frame },
+    mapFrame: fn (handle: usize, frame: caps.Frame, rights: sys.Rights, flags: sys.MapFlags) struct { sys.Error!void, usize, caps.Frame },
 
     /// map a frame into an address space
-    mapDeviceFrame: fn (handle: usize, frame: caps.DeviceFrame, rights: sys.Rights, length: sys.MapFlags) struct { sys.Error!void, usize, caps.DeviceFrame },
+    mapDeviceFrame: fn (handle: usize, frame: caps.DeviceFrame, rights: sys.Rights, flags: sys.MapFlags) struct { sys.Error!void, usize, caps.DeviceFrame },
+
+    /// map an anonymous frame into an address space
+    mapAnon: fn (handle: usize, len: usize, rights: sys.Rights, flags: sys.MapFlags) struct { sys.Error!void, usize },
 
     /// create a new thread from an address space
     /// ip and sp are already set
@@ -267,6 +285,18 @@ pub const VmProtocol = util.Protocol(struct {
 });
 
 pub const PmProtocol = util.Protocol(struct {
+    // /// exec an elf file
+    // execElf: fn (path: [32:0]u8) struct { sys.Error!void, usize },
+
+    // /// grow the caller process' heap
+    // growHeap: fn (by: usize) struct { sys.Error!void, usize },
+
+    // /// map a frame into the caller process' heap
+    // mapFrame: fn (frame: caps.Frame, rights: sys.Rights, flags: sys.MapFlags) struct { sys.Error!void, caps.Frame },
+
+    // /// map a device frame into the caller process' heap
+    // mapDeviceFrame: fn (frame: caps.DeviceFrame, rights: sys.Rights, flags: sys.MapFlags) struct { sys.Error!void, caps.DeviceFrame },
+
     /// create a new sender the pm server
     /// only root can call this
     newSender: fn () struct { sys.Error!void, caps.Sender },
@@ -276,18 +306,19 @@ pub const RmProtocol = util.Protocol(struct {
     /// request PS/2 keyboard ports
     requestPs2: fn () struct { sys.Error!void, caps.X86IoPort, caps.X86IoPort },
 
-    /// request HPET device memory for a driver
-    requestHpet: fn () struct { sys.Error!void, caps.DeviceFrame },
+    /// request HPET device memory for a driver (and the PIT port)
+    requestHpet: fn () struct { sys.Error!void, caps.DeviceFrame, caps.X86IoPort },
 
     /// request an interrupt handler for a driver
-    requestInterruptHandler: fn (irq: u8) struct { sys.Error!void, caps.Notify },
+    requestInterruptHandler: fn (irq: u8, notify: caps.Notify) struct { sys.Error!void, caps.Notify },
 
     /// create a new sender the rm server
     /// only root can call this
     newSender: fn () struct { sys.Error!void, caps.Sender },
 });
 
-pub const HpetProtocol = util.Protocol(struct {
+/// root,unix app <-> timer communication
+pub const TimerProtocol = util.Protocol(struct {
     /// get the current timestamp
     timestamp: fn () u128,
 
@@ -297,6 +328,19 @@ pub const HpetProtocol = util.Protocol(struct {
     /// stop the thread until this timestamp is reached
     sleepDeadline: fn (nanos: u128) void,
 
-    // /// create a new sender the hpet server
-    // newSender: fn () struct { sys.Error!void, caps.Sender },
+    /// create a new sender the hpet server
+    /// only root can call this
+    newSender: fn () struct { sys.Error!void, caps.Sender },
+});
+
+/// timer <-> hpet communication
+pub const HpetProtocol = util.Protocol(struct {
+    /// get the current timestamp
+    timestamp: fn () u128,
+
+    /// stop the `reply` thread until the current timestamp + `nanos` is reached
+    sleep: fn (nanos: u128, reply: caps.Reply) void,
+
+    /// stop the `reply` thread until this timestamp is reached
+    sleepDeadline: fn (nanos: u128, reply: caps.Reply) void,
 });

@@ -10,7 +10,6 @@ pub const std_options = abi.std_options;
 pub const panic = abi.panic;
 pub const name = "rm";
 const Error = abi.sys.Error;
-pub const log_level = .info;
 
 //
 
@@ -115,30 +114,35 @@ const System = struct {
 
     ps2: bool = false,
     hpet: ?caps.DeviceFrame = null,
+
+    active_irqs: [256]?caps.X86Irq = .{null} ** 256,
 };
 
 fn requestPs2Handler(ctx: *System, _: u32, _: void) struct { Error!void, caps.X86IoPort, caps.X86IoPort } {
     if (!ctx.ps2) return .{ Error.PermissionDenied, .{}, .{} };
-    ctx.ps2 = false;
 
     const data = ctx.ioports.alloc(0x60) catch |err| return .{ err, .{}, .{} };
     const cmds = ctx.ioports.alloc(0x64) catch |err| return .{ err, .{}, .{} };
 
+    ctx.ps2 = false;
+
     return .{ {}, data, cmds };
 }
 
-fn requestHpetHandler(ctx: *System, _: u32, _: void) struct { Error!void, caps.DeviceFrame } {
-    const hpet = ctx.hpet orelse return .{ Error.PermissionDenied, .{} };
+fn requestHpetHandler(ctx: *System, _: u32, _: void) struct { Error!void, caps.DeviceFrame, caps.X86IoPort } {
+    const hpet = ctx.hpet orelse return .{ Error.PermissionDenied, .{}, .{} };
+    const pit = ctx.ioports.alloc(0x43) catch |err| return .{ err, .{}, .{} };
+
     ctx.hpet = null;
-    return .{ {}, hpet };
+    return .{ {}, hpet, pit };
 }
 
-fn requestInterruptHandlerHandler(ctx: *System, _: u32, req: struct { u8 }) struct { Error!void, caps.Notify } {
+fn requestInterruptHandlerHandler(ctx: *System, _: u32, req: struct { u8, caps.Notify }) struct { Error!void, caps.Notify } {
     const irq = req.@"0";
+    const notify = req.@"1";
     // TODO: share the notify cap if one is already there
-    const irq_cap = ctx.irqs.alloc(irq) catch |err| return .{ err, .{} };
-    const notify = ctx.memory.alloc(caps.Notify) catch |err| return .{ err, .{} };
-    irq_cap.subscribe(notify) catch |err| return .{ err, .{} };
+    const irq_cap = ctx.irqs.alloc(irq) catch |err| return .{ err, notify };
+    irq_cap.subscribe(notify) catch |err| return .{ err, notify };
 
     return .{ {}, notify };
 }
@@ -154,22 +158,6 @@ fn newSenderHandler(ctx: *System, sender: u32, _: void) struct { Error!void, cap
 
     return .{ void{}, rm_sender };
 }
-
-// fn spawn(f: *const fn (self: caps.Thread) callconv(.SysV) noreturn) !void {
-//     const res, const kb_thread: caps.Thread = try ctx.vm_client.call(.newThread, .{
-//         vmem_handle,
-//         @intFromPtr(f),
-//         0,
-//     });
-//     try res;
-
-//     var regs: abi.sys.ThreadRegs = undefined;
-//     try kb_thread.readRegs(&regs);
-//     regs.arg0 = kb_thread.cap;
-//     try kb_thread.writeRegs(&regs);
-//     try kb_thread.setPrio(0);
-//     try kb_thread.start();
-// }
 
 comptime {
     abi.rt.installRuntime();

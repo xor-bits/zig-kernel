@@ -124,6 +124,7 @@ pub const Error = error{
     IrqAlreadySubscribed,
     TooManyIrqs,
     OutOfBounds,
+    NotFound,
 
     UnknownError,
 };
@@ -169,6 +170,7 @@ fn encodeError(err: Error) usize {
         error.IrqAlreadySubscribed => 22,
         error.TooManyIrqs => 23,
         error.OutOfBounds => 24,
+        error.NotFound => 25,
 
         error.UnknownError => std.debug.panic("unknown error shouldn't be encoded", .{}),
     }));
@@ -204,6 +206,7 @@ pub fn decode(v: usize) Error!usize {
         22 => error.IrqAlreadySubscribed,
         23 => error.TooManyIrqs,
         24 => error.OutOfBounds,
+        25 => error.NotFound,
 
         else => return error.UnknownError,
     };

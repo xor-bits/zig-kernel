@@ -137,7 +137,7 @@ pub const Receiver = struct {
         var msg = trap.readMessage();
         msg.cap = 0; // call doesnt get to know the Receiver capability id
         if (conf.LOG_OBJ_CALLS)
-            log.debug("replying {}", .{msg});
+            log.debug("replying {} to {*}", .{ msg, thread });
         try thread.prelockExtras(@truncate(msg.extra));
 
         const sender = thread.reply orelse {
@@ -244,13 +244,12 @@ pub const Reply = struct {
         if (conf.LOG_OBJ_CALLS)
             log.debug("reply reply", .{});
 
-        // const self = (caps.Ref(@This()){ .paddr = paddr }).ptr();
+        const reply_cap_id = trap.readMessage().cap;
 
         thread.reply = (caps.Ref(caps.Thread){ .paddr = paddr }).ptr();
         const sender = try Receiver.replyGetSender(thread, trap);
 
         // delete this reply object
-        const reply_cap_id: u32 = @truncate(trap.arg1);
         caps.getCapabilityLocked(reply_cap_id).owner.store(null, .release);
         caps.deallocate(reply_cap_id);
 

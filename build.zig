@@ -195,6 +195,10 @@ fn createInitfsTarGz(
         "pm",
         "rm",
         "vfs",
+        "timer",
+        "hpet",
+        // "input",
+        // "ps2",
         "init",
     };
 

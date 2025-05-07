@@ -270,6 +270,12 @@ pub fn Protocol(comptime spec: type) type {
                     try rx.reply(&msg);
                 }
 
+                pub fn replyTo(rx: caps.Reply, comptime id: MessageVariant, output: VariantOf(id).output_ty) sys.Error!void {
+                    var msg: sys.Message = undefined;
+                    variants_const[@intFromEnum(id)].output_converter.serialize(&msg, output);
+                    try rx.reply(&msg);
+                }
+
                 pub fn run(self: @This()) !void {
                     var msg: sys.Message = undefined;
                     try self.rx.recv(&msg);
@@ -339,10 +345,14 @@ const MessageUsage = struct {
             f32,
             f16,
             usize,
+            u128,
+            u64,
             u32,
             u16,
             u8,
             isize,
+            i128,
+            i64,
             i32,
             i16,
             i8,

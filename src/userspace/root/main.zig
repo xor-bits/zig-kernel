@@ -20,6 +20,7 @@ pub const LOADER_TMP = 0x2000_0000_0000;
 /// uncompressed initfs.tar location
 pub const INITFS_TAR = 0x3000_0000_0000;
 pub const FRAMEBUFFER = 0x4000_0000_0000;
+pub const INITFS_TMP = 0x5000_0000_0000;
 pub const STACK_SIZE = 0x40000;
 pub const STACK_TOP = 0x8000_0000_0000 - 0x2000;
 pub const STACK_BOTTOM = STACK_TOP - STACK_SIZE;
@@ -81,6 +82,10 @@ pub fn main() !noreturn {
         // virtual filesystem (system) (server)
         // manages the main VFS tree, everything mounted into it and file descriptors
         .vfs_bin = try binBytes("/sbin/vfs"),
+
+        // timer (system) (server)
+        // manages timer drivers and accepts sleep, sleepDeadline and timestamp calls
+        .timer_bin = try binBytes("/sbin/timer"),
 
         // init (normal) (process)
         // all the critial system servers are running, so now "normal" Linux-like init can run
@@ -320,17 +325,47 @@ const Proto = abi.RootProtocol.Server(.{
     .pmReady = pmReadyHandler,
     .rmReady = rmReadyHandler,
     .vfsReady = vfsReadyHandler,
+    .timerReady = timerReadyHandler,
+    .initfs = initfsHandler,
     .vm = vmHandler,
     .pm = pmHandler,
     .rm = rmHandler,
     .vfs = vfsHandler,
+    .timer = timerHandler,
 });
+
+// const Server = struct {
+//     /// server thread
+//     thread: caps.Thread = .{},
+//     /// vmem handle
+//     vmem_cap: ?caps.Vmem = null,
+//     /// vmem handle
+//     vmem_handle: usize = 0,
+//     /// server ELF binary
+//     bin: []const u8 = "",
+//     /// sender for communicating with the server
+//     sender: caps.Sender = .{},
+//     /// sender cap id, used for verifying that the sender is the system it says it is
+//     endpoint: u32 = 0,
+//     /// Reply objects to all callers waiting for a sender
+//     ready_waiters: std.BoundedArray(caps.Reply, 5) = std.BoundedArray(caps.Reply, 5).init(0) catch unreachable,
+// };
+
+// const ServerTy = enum {
+//     vm,
+//     pm,
+//     rm,
+//     vfs,
+//     timer,
+// };
 
 const System = struct {
     recv: caps.Receiver,
     dont_reply: bool = false,
 
     devices: std.EnumArray(abi.Device, caps.DeviceFrame),
+
+    // servers: std.EnumArray(ServerTy, Server),
 
     vm: caps.Thread = .{},
     vm_vmem: ?caps.Vmem = null,
@@ -343,31 +378,46 @@ const System = struct {
     pm_sender: caps.Sender = .{},
     pm_endpoint: u32 = 0,
     pm_vmem_handle: usize = 0,
+    pm_ready_waiters: std.BoundedArray(caps.Reply, 5) = std.BoundedArray(caps.Reply, 5).init(0) catch unreachable,
 
     rm: caps.Thread = .{},
     rm_bin: []const u8,
     rm_sender: caps.Sender = .{},
     rm_endpoint: u32 = 0,
     rm_vmem_handle: usize = 0,
+    rm_ready_waiters: std.BoundedArray(caps.Reply, 5) = std.BoundedArray(caps.Reply, 5).init(0) catch unreachable,
 
     vfs: caps.Thread = .{},
     vfs_bin: []const u8,
     vfs_sender: caps.Sender = .{},
     vfs_endpoint: u32 = 0,
     vfs_vmem_handle: usize = 0,
+    vfs_ready_waiters: std.BoundedArray(caps.Reply, 5) = std.BoundedArray(caps.Reply, 5).init(0) catch unreachable,
+
+    timer: caps.Thread = .{},
+    timer_bin: []const u8,
+    timer_sender: caps.Sender = .{},
+    timer_endpoint: u32 = 0,
+    timer_vmem_handle: usize = 0,
+    timer_ready_waiters: std.BoundedArray(caps.Reply, 5) = std.BoundedArray(caps.Reply, 5).init(0) catch unreachable,
 
     init: caps.Thread = .{},
     init_bin: []const u8,
+
+    fn expectIsSystem(ctx: *System, sender: u32) Error!void {
+        if (ctx.vm_endpoint != sender and
+            ctx.pm_endpoint != sender and
+            ctx.rm_endpoint != sender and
+            ctx.vfs_endpoint != sender and
+            ctx.timer_endpoint != sender)
+        {
+            return Error.PermissionDenied;
+        }
+    }
 };
 
 fn memoryHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.Memory } {
-    if (ctx.vm_endpoint != sender and
-        ctx.pm_endpoint != sender and
-        ctx.rm_endpoint != sender and
-        ctx.vfs_endpoint != sender)
-    {
-        return .{ Error.PermissionDenied, .{} };
-    }
+    ctx.expectIsSystem(sender) catch |err| return .{ err, .{} };
 
     const memory = alloc(abi.caps.Memory) catch |err| {
         return .{ err, .{} };
@@ -438,33 +488,38 @@ fn vmReadyHandler(ctx: *System, sender: u32, req: struct { caps.Sender }) struct
     ctx.dont_reply = true;
     Proto.reply(ctx.recv, .vmReady, .{void{}}) catch |err| {
         log.info("failed to reply manually: {}", .{err});
-        return .{void{}};
+        return .{{}};
     };
 
     log.info("vm ready, exec pm", .{});
     var endpoint: caps.Sender = undefined;
     endpoint, ctx.pm_vmem_handle = execWithVm(ctx, ctx.pm_bin) catch |err| {
         log.err("failed to exec pm: {}", .{err});
-        return .{void{}};
+        return .{{}};
     };
     ctx.pm_endpoint = endpoint.cap;
     endpoint, ctx.rm_vmem_handle = execWithVm(ctx, ctx.rm_bin) catch |err| {
         log.err("failed to exec rm: {}", .{err});
-        return .{void{}};
+        return .{{}};
     };
     ctx.rm_endpoint = endpoint.cap;
     endpoint, ctx.vfs_vmem_handle = execWithVm(ctx, ctx.vfs_bin) catch |err| {
         log.err("failed to exec vfs: {}", .{err});
-        return .{void{}};
+        return .{{}};
     };
     ctx.vfs_endpoint = endpoint.cap;
+    endpoint, ctx.timer_vmem_handle = execWithVm(ctx, ctx.timer_bin) catch |err| {
+        log.err("failed to exec timer: {}", .{err});
+        return .{{}};
+    };
+    ctx.timer_endpoint = endpoint.cap;
     // TODO: exec initfs:///sbin/init with pm
     endpoint, _ = execWithVm(ctx, ctx.init_bin) catch |err| {
         log.err("failed to exec init: {}", .{err});
-        return .{void{}};
+        return .{{}};
     };
 
-    return .{void{}};
+    return .{{}};
 }
 
 fn pmReadyHandler(ctx: *System, sender: u32, req: struct { caps.Sender }) struct { Error!void, usize } {
@@ -475,7 +530,7 @@ fn pmReadyHandler(ctx: *System, sender: u32, req: struct { caps.Sender }) struct
     // FIXME: verify that it is a cap
     ctx.pm_sender = req.@"0";
 
-    return .{ void{}, ctx.pm_vmem_handle };
+    return .{ {}, ctx.pm_vmem_handle };
 }
 
 fn rmReadyHandler(ctx: *System, sender: u32, req: struct { caps.Sender }) struct { Error!void, usize } {
@@ -486,7 +541,24 @@ fn rmReadyHandler(ctx: *System, sender: u32, req: struct { caps.Sender }) struct
     // FIXME: verify that it is a cap
     ctx.rm_sender = req.@"0";
 
-    return .{ void{}, ctx.rm_vmem_handle };
+    if (ctx.rm_ready_waiters.len != 0) {
+        log.info("rm ready, handling waiting rm requests", .{});
+
+        ctx.dont_reply = true;
+        Proto.reply(ctx.recv, .rmReady, .{ {}, ctx.rm_vmem_handle }) catch |err| {
+            log.err("failed to reply to a rmReady request: {}", .{err});
+        };
+
+        for (ctx.rm_ready_waiters.slice()) |caller| {
+            const msg = rmHandler(ctx, ctx.rm_endpoint, {});
+            Proto.replyTo(caller, .rm, msg) catch |err| {
+                log.err("failed to reply to a rm request: {}", .{err});
+            };
+        }
+        ctx.rm_ready_waiters.clear();
+    }
+
+    return .{ {}, ctx.rm_vmem_handle };
 }
 
 fn vfsReadyHandler(ctx: *System, sender: u32, req: struct { caps.Sender }) struct { Error!void, usize } {
@@ -497,16 +569,33 @@ fn vfsReadyHandler(ctx: *System, sender: u32, req: struct { caps.Sender }) struc
     // FIXME: verify that it is a cap
     ctx.vfs_sender = req.@"0";
 
-    return .{ void{}, ctx.vfs_vmem_handle };
+    return .{ {}, ctx.vfs_vmem_handle };
+}
+
+fn timerReadyHandler(ctx: *System, sender: u32, req: struct { caps.Sender }) struct { Error!void, usize } {
+    if (ctx.timer_endpoint != sender) {
+        return .{ Error.PermissionDenied, 0 };
+    }
+
+    // FIXME: verify that it is a cap
+    ctx.timer_sender = req.@"0";
+
+    return .{ {}, ctx.timer_vmem_handle };
+}
+
+fn initfsHandler(_: *System, _: u32, _: void) struct { Error!void, caps.Sender } {
+    // even init is allowed
+
+    const initfs_sender = initfsd.getSender() catch |err| {
+        log.err("failed to communicate with vm: {}", .{err});
+        return .{ err, .{} };
+    };
+
+    return .{ {}, initfs_sender };
 }
 
 fn vmHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.Sender } {
-    if (ctx.vfs_endpoint != sender and
-        ctx.pm_endpoint != sender and
-        ctx.rm_endpoint != sender)
-    {
-        return .{ Error.PermissionDenied, .{} };
-    }
+    ctx.expectIsSystem(sender) catch |err| return .{ err, .{} };
 
     const vm_client = abi.VmProtocol.Client().init(ctx.vm_sender);
 
@@ -523,16 +612,56 @@ fn vmHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.Sende
 }
 
 fn pmHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.Sender } {
-    _ = .{ ctx, sender };
-    return .{ Error.Unimplemented, .{} };
+    ctx.expectIsSystem(sender) catch |err| return .{ err, .{} };
+
+    const pm_client = abi.PmProtocol.Client().init(ctx.pm_sender);
+
+    const res, const pm_sender = pm_client.call(.newSender, void{}) catch |err| {
+        log.err("failed to communicate with pm: {}", .{err});
+        return .{ err, .{} };
+    };
+    res catch |err| {
+        log.err("failed to clone pm sender: {}", .{err});
+        return .{ err, .{} };
+    };
+
+    return .{ void{}, pm_sender };
 }
 
 fn rmHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.Sender } {
+    ctx.expectIsSystem(sender) catch |err| return .{ err, .{} };
+
+    if (ctx.rm_sender.cap == 0) {
+        log.warn("rmHandler waiting", .{});
+        const caller = ctx.recv.saveCaller() catch |err| {
+            log.err("failed to save caller: {}", .{err});
+            return .{ err, .{} };
+        };
+        ctx.dont_reply = true;
+        ctx.rm_ready_waiters.append(caller) catch unreachable;
+        return .{ {}, .{} };
+    }
+
+    const rm_client = abi.RmProtocol.Client().init(ctx.rm_sender);
+
+    const res, const rm_sender = rm_client.call(.newSender, void{}) catch |err| {
+        log.err("failed to communicate with rm: {}", .{err});
+        return .{ err, .{} };
+    };
+    res catch |err| {
+        log.err("failed to clone rm sender: {}", .{err});
+        return .{ err, .{} };
+    };
+
+    return .{ void{}, rm_sender };
+}
+
+fn vfsHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.Sender } {
     _ = .{ ctx, sender };
     return .{ Error.Unimplemented, .{} };
 }
 
-fn vfsHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.Sender } {
+fn timerHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.Sender } {
     _ = .{ ctx, sender };
     return .{ Error.Unimplemented, .{} };
 }
