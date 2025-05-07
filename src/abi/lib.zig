@@ -265,3 +265,18 @@ pub const PmProtocol = util.Protocol(struct {
     /// only root can call this
     newSender: fn () struct { sys.Error!void, caps.Sender },
 });
+
+pub const RmProtocol = util.Protocol(struct {
+    /// request PS/2 keyboard ports
+    requestPs2: fn () struct { sys.Error!void, caps.X86IoPort, caps.X86IoPort },
+
+    /// request HPET device memory for a driver
+    requestHpet: fn () struct { sys.Error!void, caps.DeviceFrame },
+
+    /// request an interrupt handler for a driver
+    requestInterruptHandler: fn (irq: u8) struct { sys.Error!void, caps.Notify },
+
+    /// create a new sender the rm server
+    /// only root can call this
+    newSender: fn () struct { sys.Error!void, caps.Sender },
+});
