@@ -302,7 +302,7 @@ fn createRootBin(
     abi: *std.Build.Module,
 ) std.Build.LazyPath {
     const root_elf_step = b.addExecutable(.{
-        .name = "root.elf",
+        .name = "root",
         .root_source_file = b.path("src/userspace/root/main.zig"),
         .target = opts.target,
         .optimize = opts.optimize,
