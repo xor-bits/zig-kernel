@@ -699,8 +699,41 @@ pub const Idt = extern struct {
         // general protection fault
         entries[13] = Entry.generateWithEc(struct {
             fn handler(interrupt_stack_frame: *const InterruptStackFrame, ec: u64) void {
-                log.err("general protection fault (0x{x})\nframe: {any}", .{ ec, interrupt_stack_frame });
-                std.debug.panic("unhandled CPU exception", .{});
+                const is_user = interrupt_stack_frame.code_segment == @as(u16, GdtDescriptor.user_code_selector);
+                if (is_user) swapgs();
+                defer if (is_user) swapgs();
+
+                log.warn(
+                    \\general protection fault (0x{x})
+                    \\ - user: {}
+                    \\ - ip: 0x{x}
+                    \\ - sp: 0x{x}
+                , .{
+                    ec,
+                    is_user,
+                    interrupt_stack_frame.ip,
+                    interrupt_stack_frame.sp,
+                });
+
+                if (is_user and !conf.KERNEL_PANIC_ON_USER_FAULT) {
+                    cpuLocal().current_thread.?.status = .stopped;
+                    proc.enter();
+                } else {
+                    std.debug.panic(
+                        \\unhandled general protection fault (0x{x})
+                        \\ - user: {}
+                        \\ - ip: 0x{x}
+                        \\ - sp: 0x{x}
+                        \\ - line:
+                        \\{}
+                    , .{
+                        ec,
+                        is_user,
+                        interrupt_stack_frame.ip,
+                        interrupt_stack_frame.sp,
+                        logs.Addr2Line{ .addr = interrupt_stack_frame.ip },
+                    });
+                }
             }
         }).asInt();
         // page fault
