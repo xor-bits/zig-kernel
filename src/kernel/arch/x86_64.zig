@@ -10,6 +10,7 @@ const pmem = @import("../pmem.zig");
 const proc = @import("../proc.zig");
 
 const log = std.log.scoped(.arch);
+const conf = abi.conf;
 
 //
 
@@ -712,7 +713,7 @@ pub const Idt = extern struct {
                 defer if (pfec.user_mode) swapgs();
 
                 log.warn(
-                    \\fault 0x{x}
+                    \\page fault 0x{x}
                     \\ - user: {any}
                     \\ - caused by write: {any}
                     \\ - instruction fetch: {any}
@@ -727,7 +728,7 @@ pub const Idt = extern struct {
                     interrupt_stack_frame.sp,
                 });
 
-                if (pfec.user_mode) {
+                if (pfec.user_mode and !conf.KERNEL_PANIC_ON_USER_FAULT) {
                     cpuLocal().current_thread.?.status = .stopped;
                     proc.enter();
                 } else {
@@ -865,7 +866,7 @@ pub const Idt = extern struct {
                 if (is_user) swapgs();
                 defer if (is_user) swapgs();
 
-                log.err("CPU-{} done", .{cpuLocal().id});
+                // log.err("CPU-{} done", .{cpuLocal().id});
                 hcf();
             }
         }).asInt();
