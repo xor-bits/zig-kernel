@@ -223,7 +223,11 @@ pub const RootProtocol = util.Protocol(struct {
 
     /// install a new timer server
     /// returns a vm handle to self
-    timerReady: fn (vfs_sender: caps.Sender) struct { sys.Error!void, usize },
+    timerReady: fn (timer_sender: caps.Sender) struct { sys.Error!void, usize },
+
+    /// install a new input server
+    /// returns a vm handle to self
+    inputReady: fn (input_sender: caps.Sender) struct { sys.Error!void, usize },
 
     /// request a sender to the initfs server
     initfs: fn () struct { sys.Error!void, caps.Sender },
@@ -242,6 +246,9 @@ pub const RootProtocol = util.Protocol(struct {
 
     /// request a sender to the timer server
     timer: fn () struct { sys.Error!void, caps.Sender },
+
+    /// request a sender to the input server
+    input: fn () struct { sys.Error!void, caps.Sender },
 });
 
 pub const InitfsProtocol = util.Protocol(struct {
@@ -344,3 +351,9 @@ pub const HpetProtocol = util.Protocol(struct {
     /// stop the `reply` thread until this timestamp is reached
     sleepDeadline: fn (nanos: u128, reply: caps.Reply) void,
 });
+
+/// root,unix app <-> input communication
+pub const InputProtocol = util.Protocol(struct {});
+
+/// input <-> ps2 communication
+pub const Ps2Protocol = util.Protocol(struct {});

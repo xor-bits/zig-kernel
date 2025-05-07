@@ -197,8 +197,8 @@ fn createInitfsTarGz(
         "vfs",
         "timer",
         "hpet",
-        // "input",
-        // "ps2",
+        "input",
+        "ps2",
         "init",
     };
 

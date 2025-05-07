@@ -87,6 +87,10 @@ pub fn main() !noreturn {
         // manages timer drivers and accepts sleep, sleepDeadline and timestamp calls
         .timer_bin = try binBytes("/sbin/timer"),
 
+        // input (system) (server)
+        // manages input drivers
+        .input_bin = try binBytes("/sbin/input"),
+
         // init (normal) (process)
         // all the critial system servers are running, so now "normal" Linux-like init can run
         // gets a Sender capability to access the initfs part of this root process
@@ -326,12 +330,14 @@ const Proto = abi.RootProtocol.Server(.{
     .rmReady = rmReadyHandler,
     .vfsReady = vfsReadyHandler,
     .timerReady = timerReadyHandler,
+    .inputReady = inputReadyHandler,
     .initfs = initfsHandler,
     .vm = vmHandler,
     .pm = pmHandler,
     .rm = rmHandler,
     .vfs = vfsHandler,
     .timer = timerHandler,
+    .input = inputHandler,
 });
 
 // const Server = struct {
@@ -401,6 +407,13 @@ const System = struct {
     timer_vmem_handle: usize = 0,
     timer_ready_waiters: std.BoundedArray(caps.Reply, 5) = std.BoundedArray(caps.Reply, 5).init(0) catch unreachable,
 
+    input: caps.Thread = .{},
+    input_bin: []const u8,
+    input_sender: caps.Sender = .{},
+    input_endpoint: u32 = 0,
+    input_vmem_handle: usize = 0,
+    input_ready_waiters: std.BoundedArray(caps.Reply, 5) = std.BoundedArray(caps.Reply, 5).init(0) catch unreachable,
+
     init: caps.Thread = .{},
     init_bin: []const u8,
 
@@ -409,7 +422,8 @@ const System = struct {
             ctx.pm_endpoint != sender and
             ctx.rm_endpoint != sender and
             ctx.vfs_endpoint != sender and
-            ctx.timer_endpoint != sender)
+            ctx.timer_endpoint != sender and
+            ctx.input_endpoint != sender)
         {
             return Error.PermissionDenied;
         }
@@ -513,6 +527,11 @@ fn vmReadyHandler(ctx: *System, sender: u32, req: struct { caps.Sender }) struct
         return .{{}};
     };
     ctx.timer_endpoint = endpoint.cap;
+    endpoint, ctx.input_vmem_handle = execWithVm(ctx, ctx.input_bin) catch |err| {
+        log.err("failed to exec input: {}", .{err});
+        return .{{}};
+    };
+    ctx.input_endpoint = endpoint.cap;
     // TODO: exec initfs:///sbin/init with pm
     endpoint, _ = execWithVm(ctx, ctx.init_bin) catch |err| {
         log.err("failed to exec init: {}", .{err});
@@ -581,6 +600,17 @@ fn timerReadyHandler(ctx: *System, sender: u32, req: struct { caps.Sender }) str
     ctx.timer_sender = req.@"0";
 
     return .{ {}, ctx.timer_vmem_handle };
+}
+
+fn inputReadyHandler(ctx: *System, sender: u32, req: struct { caps.Sender }) struct { Error!void, usize } {
+    if (ctx.input_endpoint != sender) {
+        return .{ Error.PermissionDenied, 0 };
+    }
+
+    // FIXME: verify that it is a cap
+    ctx.input_sender = req.@"0";
+
+    return .{ {}, ctx.input_vmem_handle };
 }
 
 fn initfsHandler(_: *System, _: u32, _: void) struct { Error!void, caps.Sender } {
@@ -662,6 +692,11 @@ fn vfsHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.Send
 }
 
 fn timerHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.Sender } {
+    _ = .{ ctx, sender };
+    return .{ Error.Unimplemented, .{} };
+}
+
+fn inputHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.Sender } {
     _ = .{ ctx, sender };
     return .{ Error.Unimplemented, .{} };
 }

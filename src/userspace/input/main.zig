@@ -5,16 +5,16 @@ const caps = abi.caps;
 
 //
 
-const log = std.log.scoped(.pm);
+const log = std.log.scoped(.input);
 pub const std_options = abi.std_options;
 pub const panic = abi.panic;
-pub const name = "pm";
+pub const name = "input";
 const Error = abi.sys.Error;
 
 //
 
 pub fn main() !void {
-    log.info("hello from pm", .{});
+    log.info("hello from input", .{});
 
     const root = abi.RootProtocol.Client().init(abi.rt.root_ipc);
 
@@ -22,36 +22,122 @@ pub fn main() !void {
     var res: Error!void, const memory: caps.Memory = try root.call(.memory, void{});
     try res;
 
-    // endpoint for pm server <-> unix app communication
-    log.debug("allocating pm endpoint", .{});
-    const pm_recv = try memory.alloc(caps.Receiver);
-    const pm_send = try pm_recv.subscribe();
+    // endpoint for root,unix app <-> input communication
+    log.debug("allocating input endpoint", .{});
+    const input_recv = try memory.alloc(caps.Receiver);
+    const input_send = try input_recv.subscribe();
 
-    // inform the root that pm is ready
-    log.debug("pm ready", .{});
-    res, const vmem_handle = try root.call(.pmReady, .{pm_send});
+    // inform the root that input is ready
+    log.debug("input ready", .{});
+    res, _ = try root.call(.inputReady, .{input_send});
     try res;
 
     log.debug("requesting vm sender", .{});
     res, const vm_sender = try root.call(.vm, void{});
     try res;
 
-    var system: System = .{
-        .recv = pm_recv,
-        .memory = memory,
-        .root_endpoint = pm_send.cap,
+    const vm_client = abi.VmProtocol.Client().init(vm_sender);
 
-        .vm_client = abi.VmProtocol.Client().init(vm_sender),
-        .self_vmem_handle = vmem_handle,
-    };
+    // log.debug("requesting rm sender", .{});
+    // res, const rm_sender = try root.call(.rm, void{});
+    // try res;
+    // const rm_client = abi.RmProtocol.Client().init(rm_sender);
 
-    const server = abi.PmProtocol.Server(.{
-        .Context = *System,
-        .scope = if (abi.conf.LOG_SERVERS) .vm else null,
-    }, .{
-        .newSender = newSenderHandler,
-    }).init(&system, pm_recv);
-    try server.run();
+    log.debug("requesting vm sender for ps2", .{});
+    res, const vm_ps2_sender = try root.call(.vm, void{});
+    try res;
+
+    log.debug("requesting rm sender for ps2", .{});
+    res, const rm_ps2_sender = try root.call(.rm, void{});
+    try res;
+
+    log.debug("requesting initfs sender", .{});
+    res, const initfs_sender = try root.call(.initfs, void{});
+    try res;
+    const initfs_client = abi.InitfsProtocol.Client().init(initfs_sender);
+
+    log.debug("reading ps2 server ELF", .{});
+    res, const ps2_elf_len = try initfs_client.call(.fileSize, .{("/sbin/ps2" ++ .{0} ** 23).*});
+    try res;
+    const ps2_elf_frame = try memory.allocSized(caps.Frame, abi.ChunkSize.of(ps2_elf_len) orelse return Error.OutOfMemory);
+    res, _ = try initfs_client.call(.openFile, .{ ("/sbin/ps2" ++ .{0} ** 23).*, ps2_elf_frame });
+    try res;
+
+    log.debug("creating ps2 endpoint", .{});
+    const ps2_recv = try memory.alloc(caps.Receiver);
+    // const ps2_send = try ps2_recv.subscribe();
+    // const ps2_client = abi.Ps2Protocol.Client().init(ps2_send);
+
+    log.debug("creating ps2 server", .{});
+    res, const ps2_vmem_handle: usize = try vm_client.call(.newVmem, {});
+    try res;
+    res, _ = try vm_client.call(.loadElf, .{
+        ps2_vmem_handle,
+        ps2_elf_frame,
+        0,
+        ps2_elf_len,
+    });
+    try res;
+    res, const ps2_thread: caps.Thread = try vm_client.call(.newThread, .{ ps2_vmem_handle, 0, 0 });
+    try res;
+    const ps2_notify = try memory.alloc(caps.Notify);
+
+    log.debug("giving ps2 vmem handle to ps2 server", .{});
+    res, _ = try vm_client.call(.moveOwner, .{ ps2_vmem_handle, vm_ps2_sender.cap });
+    try res;
+
+    log.debug("starting ps2 server", .{});
+    try ps2_thread.transferCap(ps2_recv.cap);
+    try ps2_thread.transferCap(vm_ps2_sender.cap);
+    try ps2_thread.transferCap(rm_ps2_sender.cap);
+    try ps2_thread.transferCap(ps2_notify.cap);
+    var regs: abi.sys.ThreadRegs = undefined;
+    try ps2_thread.readRegs(&regs);
+    regs.arg0 = ps2_recv.cap;
+    regs.arg1 = vm_ps2_sender.cap;
+    regs.arg2 = rm_ps2_sender.cap;
+    regs.arg3 = ps2_notify.cap;
+    regs.arg4 = ps2_vmem_handle;
+    try ps2_thread.writeRegs(&regs);
+    try ps2_thread.setPrio(0);
+    try ps2_thread.start();
+
+    // log.debug("spawning keyboard thread", .{});
+    // try spawn(&ps2.keyboardThread);
+
+    // log.info("mapping HPET", .{});
+    // res, const hpet_addr: usize, hpet_frame = try vm_client.call(.mapDeviceFrame, .{
+    //     vmem_handle,
+    //     hpet_frame,
+    //     abi.sys.Rights{
+    //         .writable = true,
+    //     },
+    //     abi.sys.MapFlags{
+    //         .cache = .uncacheable,
+    //     },
+    // });
+    // try res;
+
+    // log.info("HPET mapped at 0x{x}", .{hpet_addr});
+    // try hpet.init(hpet_addr);
+
+    // log.debug("spawning HPET thread", .{});
+    // try spawn(&hpet.hpetThread);
+
+    // var system: System = .{
+    //     .recv = input_recv,
+    //     .memory = memory,
+    //     .root_endpoint = input_send.cap,
+
+    //     .vm_client = abi.VmProtocol.Client().init(vm_sender),
+    //     .self_vmem_handle = vmem_handle,
+    // };
+
+    // const server = abi.InputProtocol.Server(.{
+    //     .Context = *System,
+    //     .scope = if (abi.conf.LOG_SERVERS) .vm else null,
+    // }, .{}).init(&system, input_recv);
+    // try server.run();
 }
 
 const System = struct {
@@ -62,18 +148,6 @@ const System = struct {
     vm_client: abi.VmProtocol.Client(),
     self_vmem_handle: usize,
 };
-
-fn newSenderHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.Sender } {
-    if (ctx.root_endpoint != sender)
-        return .{ Error.PermissionDenied, .{} };
-
-    const pm_sender = ctx.recv.subscribe() catch |err| {
-        log.err("failed to subscribe: {}", .{err});
-        return .{ err, .{} };
-    };
-
-    return .{ void{}, pm_sender };
-}
 
 comptime {
     abi.rt.installRuntime();

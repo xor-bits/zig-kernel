@@ -68,7 +68,7 @@ pub fn main() !void {
     const hpet_client = abi.HpetProtocol.Client().init(hpet_send);
 
     log.debug("creating HPET server", .{});
-    res, const hpet_vmem_handle = try vm_client.call(.newVmem, {});
+    res, const hpet_vmem_handle: usize = try vm_client.call(.newVmem, {});
     try res;
     res, _ = try vm_client.call(.loadElf, .{
         hpet_vmem_handle,

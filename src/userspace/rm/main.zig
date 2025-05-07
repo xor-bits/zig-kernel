@@ -50,33 +50,6 @@ pub fn main() !void {
 
     const vm_client = abi.VmProtocol.Client().init(vm_sender);
 
-    // log.debug("spawning keyboard thread", .{});
-    // try spawn(&ps2.keyboardThread);
-
-    // log.info("mapping HPET", .{});
-    // res, const hpet_addr: usize, hpet_frame = try vm_client.call(.mapDeviceFrame, .{
-    //     vmem_handle,
-    //     hpet_frame,
-    //     abi.sys.Rights{
-    //         .writable = true,
-    //     },
-    //     abi.sys.MapFlags{
-    //         .cache = .uncacheable,
-    //     },
-    // });
-    // try res;
-
-    // log.info("HPET mapped at 0x{x}", .{hpet_addr});
-    // try hpet.init(hpet_addr);
-
-    // log.debug("spawning HPET thread", .{});
-    // try spawn(&hpet.hpetThread);
-
-    // while (true) {
-    //     hpet.hpetSpinWait(1_000_000);
-    //     log.info("SEC", .{});
-    // }
-
     var system = System{
         .recv = rm_recv,
         .memory = memory,
@@ -112,7 +85,7 @@ const System = struct {
     vm_client: abi.VmProtocol.Client(),
     self_vmem_handle: usize,
 
-    ps2: bool = false,
+    ps2: bool = true,
     hpet: ?caps.DeviceFrame = null,
 
     active_irqs: [256]?caps.X86Irq = .{null} ** 256,
