@@ -235,6 +235,12 @@ pub const RootProtocol = util.Protocol(struct {
     vfs: fn () struct { sys.Error!void, caps.Sender },
 });
 
+pub const InitfsProtocol = util.Protocol(struct {
+    /// open a file from initfs, copy all of its content into
+    /// a new frame and return the frame
+    openFile: fn (path: [32:0]u8) struct { sys.Error!void, caps.Frame },
+});
+
 pub const VmProtocol = util.Protocol(struct {
     /// create a new empty address space
     /// returns a handle that can be used to create threads
@@ -279,4 +285,18 @@ pub const RmProtocol = util.Protocol(struct {
     /// create a new sender the rm server
     /// only root can call this
     newSender: fn () struct { sys.Error!void, caps.Sender },
+});
+
+pub const HpetProtocol = util.Protocol(struct {
+    /// get the current timestamp
+    timestamp: fn () u128,
+
+    /// stop the thread until the current timestamp + `nanos` is reached
+    sleep: fn (nanos: u128) void,
+
+    /// stop the thread until this timestamp is reached
+    sleepDeadline: fn (nanos: u128) void,
+
+    // /// create a new sender the hpet server
+    // newSender: fn () struct { sys.Error!void, caps.Sender },
 });
