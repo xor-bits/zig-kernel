@@ -120,7 +120,7 @@ pub const DeviceFrame = extern struct {
 /// capability to **the** receiver end of an endpoint,
 /// there can only be a single receiver
 pub const Receiver = extern struct {
-    cap: u32,
+    cap: u32 = 0,
 
     pub const Type: abi.ObjectType = .receiver;
 
