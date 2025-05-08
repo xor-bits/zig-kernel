@@ -510,7 +510,8 @@ pub const PageTableLevel3 = struct {
     pub fn canUnmapGiantFrame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt) Error!void {
         const entry = volat(&self.entries[vaddr.toParts().level3]).*;
         if (entry.present != 1) return Error.NotMapped;
-        if (entry.page_index != paddr.toParts().page) return Error.NotMapped;
+        if (entry.huge_page_or_pat != 1) return Error.NotMapped;
+        if (entry.page_index & 0xFFFF_FFFE != paddr.toParts().page) return Error.NotMapped;
     }
 
     pub fn canUnmapHugeFrame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt) Error!void {
@@ -564,7 +565,8 @@ pub const PageTableLevel2 = struct {
     pub fn canUnmapHugeFrame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt) Error!void {
         const entry: Entry = volat(&self.entries[vaddr.toParts().level2]).*;
         if (entry.present != 1) return Error.NotMapped;
-        if (entry.page_index != paddr.toParts().page) return Error.NotMapped;
+        if (entry.huge_page_or_pat != 1) return Error.NotMapped;
+        if (entry.page_index & 0xFFFF_FFFE != paddr.toParts().page) return Error.NotMapped;
     }
 
     pub fn canUnmapFrame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt) Error!void {
