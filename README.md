@@ -52,13 +52,13 @@ zig build run --prominent-compile-errors --summary none -freference-trace \
           to the (single per thread) vmem capability.
           Frame should be the only mappable capability
           and it is dynamically sized: `0x1000 * 2^size`.
-    - [ ] Mapping cache modes with PAT, uncacheable, write-combining,
+    - [x] Mapping cache modes with PAT, uncacheable, write-combining,
           write-through, write-protect, write-back and uncached
   - [x] GDT, TSS, IDT
   - [x] ACPI, APIC
   - [x] SMP
   - [x] user space
-  - [ ] HPET
+  - [x] HPET
   - [ ] TSC
   - [x] scheduler
   - [x] binary loader
@@ -86,6 +86,8 @@ zig build run --prominent-compile-errors --summary none -freference-trace \
       - [x] Reply
       - [x] Notify
   - [x] syscalls
+    - [ ] move all object methods to be syscalls
+    - [ ] method call tracker
 
 - [x] root + initfsd process
   - [x] decompress initfs.tar.gz
