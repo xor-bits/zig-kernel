@@ -127,6 +127,7 @@ pub const Receiver = struct {
         // const self = (caps.Ref(@This()){ .paddr = paddr }).ptr();
 
         const sender = try Receiver.replyGetSender(thread, trap);
+        std.debug.assert(sender != thread);
 
         // set the original caller thread as ready to run again, but return to the current thread
         proc.ready(sender);
@@ -167,13 +168,14 @@ pub const Receiver = struct {
         // push the receiver thread into the ready queue
         // if there was a sender queued
         if (thread.status == .running) {
-            thread.status = .waiting;
-            thread.trap = trap.*;
-            proc.ready(thread);
+            // return back to the server, which is prob more important
+            // and keeps the TLB cache warm
+            // + ready up the caller thread
+            proc.ready(sender);
+        } else {
+            // if the receiver went to sleep, switch to the original caller thread
+            proc.switchTo(trap, sender, thread);
         }
-
-        // switch to the original caller thread
-        proc.switchTo(trap, sender, thread);
     }
 };
 
