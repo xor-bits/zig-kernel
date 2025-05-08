@@ -214,6 +214,7 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
                 defer obj.lock.unlock();
                 trap.syscall_id = abi.sys.encode(@intFromEnum(obj.type));
             } else |err| {
+                if (conf.LOG_OBJ_CALLS) log.warn("obj call error: {}", .{err});
                 trap.syscall_id = abi.sys.encode(err);
             }
         },
@@ -221,6 +222,7 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
             if (caps.call(thread, @truncate(trap.arg0), trap)) |_| {
                 trap.syscall_id = abi.sys.encode(0);
             } else |err| {
+                if (conf.LOG_OBJ_CALLS) log.warn("obj call error: {}", .{err});
                 trap.syscall_id = abi.sys.encode(err);
             }
         },
@@ -228,6 +230,7 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
             if (caps.recv(thread, @truncate(trap.arg0), trap)) |_| {
                 trap.syscall_id = abi.sys.encode(0);
             } else |err| {
+                if (conf.LOG_OBJ_CALLS) log.warn("obj call error: {}", .{err});
                 trap.syscall_id = abi.sys.encode(err);
             }
         },
@@ -235,6 +238,7 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
             if (caps.reply(thread, @truncate(trap.arg0), trap)) |_| {
                 trap.syscall_id = abi.sys.encode(0);
             } else |err| {
+                if (conf.LOG_OBJ_CALLS) log.warn("obj call error: {}", .{err});
                 trap.syscall_id = abi.sys.encode(err);
             }
         },
@@ -242,6 +246,7 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
             if (caps.replyRecv(thread, @truncate(trap.arg0), trap)) |_| {
                 trap.syscall_id = abi.sys.encode(0);
             } else |err| {
+                if (conf.LOG_OBJ_CALLS) log.warn("obj call error: {}", .{err});
                 trap.syscall_id = abi.sys.encode(err);
             }
         },
