@@ -57,11 +57,11 @@ zig build run --prominent-compile-errors --summary none -freference-trace \
   - [x] GDT, TSS, IDT
   - [x] ACPI, APIC
   - [x] SMP
-  - [x] user space
   - [x] HPET
   - [ ] TSC
   - [x] scheduler
   - [x] binary loader
+  - [x] stack tracer with line info
   - [x] message IPC, shared memory IPC
     - [ ] multiple parallel recvs to the same endpoint
     - [x] multiple parallel calls to the same endpoint
@@ -87,7 +87,11 @@ zig build run --prominent-compile-errors --summary none -freference-trace \
       - [x] Notify
   - [x] syscalls
     - [ ] move all object methods to be syscalls
+    - [ ] syscall tracker
     - [ ] method call tracker
+
+- [x] user-space
+  - [ ] stack traces with line info
 
 - [x] root + initfsd process
   - [x] decompress initfs.tar.gz
