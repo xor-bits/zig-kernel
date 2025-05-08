@@ -81,6 +81,11 @@ pub fn main(
     hpet_regs = @ptrFromInt(hpet_addr);
     timer_count = @as(*volatile Caps, &hpet_regs.?.caps_and_id).*.n_timers_minus_one + 1;
 
+    const config = @as(*volatile Config, &hpet_regs.?.config);
+    var tmp = config.*;
+    tmp.enable_config = 1;
+    config.* = tmp;
+
     // set up the interrupts
     for (0..timer_count) |timer_idx| {
         const timer = hpet_regs.?.timer(timer_idx);
