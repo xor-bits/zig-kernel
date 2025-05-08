@@ -357,7 +357,7 @@ pub const Vmem = struct {
 
     pub fn switchTo(self: caps.Ref(@This())) void {
         const cur = arch.Cr3.read();
-        if (cur.pml4_phys_base == self.paddr.raw) {
+        if (cur.pml4_phys_base == self.paddr.toParts().page) {
             // log.info("context switch avoided", .{});
             return;
         }
