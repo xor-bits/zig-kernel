@@ -439,7 +439,6 @@ pub const PageTableLevel3 = struct {
     entries: [512]Entry align(0x1000) = std.mem.zeroes([512]Entry),
 
     pub fn mapGiantFrame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
-        if (true) @panic("");
         const entry = Entry.fromParts(true, false, rights, paddr, flags);
         self.entries[vaddr.toParts().level3] = entry;
     }
