@@ -38,16 +38,16 @@ pub const Once = struct {
 };
 
 pub const Mutex = struct {
-    lock_state: std.atomic.Value(u8) = std.atomic.Value(u8).init(0),
+    lock_state: std.atomic.Value(u8) = .init(0),
 
     const Self = @This();
 
     pub fn new() Self {
-        return .{ .lock_state = std.atomic.Value(u8).init(0) };
+        return .{ .lock_state = .init(0) };
     }
 
     pub fn newLocked() Self {
-        return .{ .lock_state = std.atomic.Value(u8).init(1) };
+        return .{ .lock_state = .init(1) };
     }
 
     pub fn lock(self: *Self) void {
@@ -70,10 +70,12 @@ pub const Mutex = struct {
     }
 
     pub fn isLocked(self: *Self) bool {
-        return self.lock_state.load(.monotonic) == 1;
+        return self.lock_state.load(.monotonic) != 0;
     }
 
     pub fn unlock(self: *Self) void {
+        if (IS_DEBUG)
+            std.debug.assert(self.lock_state.load(.seq_cst) == 1);
         self.lock_state.store(0, .release);
     }
 };

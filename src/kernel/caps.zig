@@ -58,7 +58,8 @@ pub fn pushCapability(obj: Object) u32 {
 
     cap.lock.lock();
     cap.* = obj;
-    cap.lock.unlock();
+    if (cap.lock.isLocked())
+        cap.lock.unlock();
 
     return cap_id;
 }
