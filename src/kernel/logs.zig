@@ -47,7 +47,7 @@ fn logFn(comptime message_level: std.log.Level, comptime scope: @TypeOf(.enum_li
 
         uart.print(fmt ++ "\n", args);
         if (conf.KERNEL_PANIC_RSOD and scope == .panic) {
-            fb.print(format, args);
+            fb.print(fmt ++ "\n", args);
         }
     }
 }
