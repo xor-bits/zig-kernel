@@ -72,7 +72,7 @@ const panic_printer = struct {
     }
 }{};
 
-pub fn panic(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace, ret_addr: ?usize) noreturn {
+pub fn panic(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace, _: ?usize) noreturn {
     @branchHint(.cold);
     _ = error_return_trace;
     const log = std.log.scoped(.panic);
@@ -90,7 +90,7 @@ pub fn panic(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace, ret_
 
     log.err("KERNEL PANIC STACK TRACE:", .{});
 
-    var iter = std.debug.StackIterator.init(ret_addr, @frameAddress());
+    var iter = std.debug.StackIterator.init(@returnAddress(), @frameAddress());
     if (getSelfDwarf()) |_dwarf| {
         var dwarf = _dwarf;
         defer dwarf.deinit(pmem.page_allocator);

@@ -35,16 +35,13 @@ fn logFn(comptime message_level: std.log.Level, comptime scope: @TypeOf(.enum_li
     }
 }
 
-pub fn panic(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace, ret_addr: ?usize) noreturn {
+pub fn panic(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace, _: ?usize) noreturn {
     _ = error_return_trace;
 
     const name =
         if (@hasDecl(root, "name")) root.name else "<unknown>";
     std.log.scoped(.panic).err("{s} panicked: {s}\nstack trace:", .{ name, msg });
-    var iter = std.debug.StackIterator.init(ret_addr, @frameAddress());
-    if (ret_addr) |addr| {
-        std.log.scoped(.panic).warn("  0x{x}", .{addr});
-    }
+    var iter = std.debug.StackIterator.init(@returnAddress(), @frameAddress());
     while (iter.next()) |addr| {
         std.log.scoped(.panic).warn("  0x{x}", .{addr});
     }
