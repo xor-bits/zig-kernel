@@ -55,9 +55,7 @@ fn vmmVectorFree(_: *anyopaque, _: []u8, _: std.mem.Alignment, _: usize) void {}
 fn vmmVectorGrow(top: *usize, n_pages: usize) !void {
     for (0..n_pages) |_| {
         const frame = try main.allocSized(abi.caps.Frame, .@"64KiB");
-        main.self_vmem_lock.lock();
-        defer main.self_vmem_lock.unlock();
-        try abi.caps.ROOT_SELF_VMEM.map(
+        try main.map(
             frame,
             top.*,
             .{ .writable = true },
@@ -79,7 +77,8 @@ pub fn init() !void {
     log.info("starting initfs thread", .{});
     initfs_tar_gz = std.io.fixedBufferStream(initfs);
 
-    initfs_ready = try main.alloc(caps.Notify);
+    initfs_get_ready = try main.alloc(caps.Notify);
+    initfs_set_ready = try initfs_get_ready.clone();
 
     const stack = try main.allocSized(caps.Frame, .@"256KiB");
     try main.map(stack, main.INITFS_STACK_BOTTOM, .{ .writable = true }, .{});
@@ -97,7 +96,7 @@ pub fn init() !void {
 }
 
 pub fn wait() !void {
-    _ = try initfs_ready.wait();
+    _ = try initfs_get_ready.wait();
 }
 
 pub fn getSender() !caps.Sender {
@@ -106,7 +105,8 @@ pub fn getSender() !caps.Sender {
 
 var thread: caps.Thread = undefined;
 var initfs_tar_gz: std.io.FixedBufferStream([]const u8) = undefined;
-var initfs_ready: caps.Notify = .{};
+var initfs_set_ready: caps.Notify = .{};
+var initfs_get_ready: caps.Notify = .{};
 var initfs_recv: caps.Receiver = .{};
 
 fn run() callconv(.SysV) noreturn {
@@ -125,16 +125,15 @@ fn runMain() !void {
     log.info("decompressed initfs size: 0x{x}", .{initfs_tar.items.len});
 
     initfs_recv = try main.alloc(caps.Receiver);
+    _ = try initfs_set_ready.notify();
 
-    _ = try initfs_ready.notify();
-
+    log.info("initfs ready", .{});
     var server = abi.InitfsProtocol.Server(.{
         .scope = if (abi.conf.LOG_SERVERS) .initfs else null,
     }, .{
         .openFile = openFileHandler,
         .fileSize = fileSizeHandler,
     }).init({}, initfs_recv);
-
     try server.run();
 }
 

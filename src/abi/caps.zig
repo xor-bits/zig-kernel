@@ -193,8 +193,8 @@ pub const Notify = extern struct {
         return sys.notifyNotify(self.cap);
     }
 
-    pub fn clone(self: @This()) sys.Error!u32 {
-        return sys.notifyClone(self.cap);
+    pub fn clone(self: @This()) sys.Error!Notify {
+        return .{ .cap = try sys.notifyClone(self.cap) };
     }
 };
 
