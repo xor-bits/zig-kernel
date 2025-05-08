@@ -114,14 +114,6 @@ pub fn main(
         @as(*volatile TimerNConfigAndCaps, &timer.config_and_caps).* = conf;
     }
 
-    sleepDeadline(.{}, timestampNanos() + 5_000_000_000);
-    sleepDeadline(.{}, timestampNanos() + 5_250_000_000);
-    sleepDeadline(.{}, timestampNanos() + 5_500_000_000);
-    sleepDeadline(.{}, timestampNanos() + 5_750_000_000);
-    sleepDeadline(.{}, timestampNanos() + 6_000_000_000);
-    sleepDeadline(.{}, timestampNanos() + 6_250_000_000);
-    sleepDeadline(.{}, timestampNanos() + 6_500_000_000);
-
     try spawn(&hpetThread);
 
     const server = abi.HpetProtocol.Server(.{
@@ -137,16 +129,20 @@ pub fn main(
 }
 
 fn timestampHandler(_: void, _: u32, _: void) struct { u128 } {
-    return .{0};
+    return .{timestampNanos()};
 }
 
 fn sleepHandler(_: void, _: u32, req: struct { u128, caps.Reply }) struct { void } {
-    _ = req;
+    const deadline_nanos = req.@"0";
+    const reply = req.@"1";
+    sleepDeadline(reply, deadline_nanos);
     return .{{}};
 }
 
 fn sleepDeadlineHandler(_: void, _: u32, req: struct { u128, caps.Reply }) struct { void } {
-    _ = req;
+    const deadline_nanos = req.@"0" + timestampNanos();
+    const reply = req.@"1";
+    sleepDeadline(reply, deadline_nanos);
     return .{{}};
 }
 
