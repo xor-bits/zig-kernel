@@ -38,7 +38,7 @@ pub var self_vmem_lock: abi.lock.YieldMutex = .new();
 
 //
 
-pub fn main() !noreturn {
+pub fn main() !void {
     log.info("I am root", .{});
 
     try map(
@@ -745,7 +745,7 @@ export fn zigMain() noreturn {
     };
 
     asm volatile (
-        \\ jmp zigMainRealstack
+        \\ call zigMainRealstack
         :
         : [sp] "{rsp}" (STACK_TOP),
     );
@@ -769,4 +769,5 @@ export fn zigMainRealstack() noreturn {
     main() catch |err| {
         std.debug.panic("{}", .{err});
     };
+    abi.sys.stop();
 }
