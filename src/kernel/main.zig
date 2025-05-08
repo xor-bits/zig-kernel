@@ -146,6 +146,8 @@ pub fn smpmain(smpinfo: *limine.SmpInfo) noreturn {
     proc.enter();
 }
 
+var syscall_stats: std.EnumArray(abi.sys.Id, std.atomic.Value(usize)) = .initFill(.init(0));
+
 pub fn syscall(trap: *arch.SyscallRegs) void {
     const log = std.log.scoped(.syscall);
     // log.info("syscall from cpu={} ip=0x{x} sp=0x{x}", .{ arch.cpuLocal().id, trap.user_instr_ptr, trap.user_stack_ptr });
@@ -168,9 +170,20 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
     defer if (conf.LOG_SYSCALLS)
         log.debug("syscall: {s} done cap_id={}", .{ @tagName(id), trap.arg0 });
 
+    _ = syscall_stats.getPtr(id).fetchAdd(1, .monotonic);
+
     switch (id) {
         .log => {
+
             // FIXME: disable on release builds
+
+            if (conf.LOG_SYSCALL_STATS) {
+                var it = syscall_stats.iterator();
+                while (it.next()) |e| {
+                    const v = e.value.load(.monotonic);
+                    log.debug(" - {}: {}", .{ e.key, v });
+                }
+            }
 
             // log syscall
             if (trap.arg1 > 0x1000) {
