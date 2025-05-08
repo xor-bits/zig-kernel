@@ -170,20 +170,21 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
     defer if (conf.LOG_SYSCALLS)
         log.debug("syscall: {s} done cap_id={}", .{ @tagName(id), trap.arg0 });
 
-    _ = syscall_stats.getPtr(id).fetchAdd(1, .monotonic);
+    if (conf.LOG_SYSCALL_STATS) {
+        _ = syscall_stats.getPtr(id).fetchAdd(1, .monotonic);
+
+        log.debug("syscalls:", .{});
+        var it = syscall_stats.iterator();
+        while (it.next()) |e| {
+            const v = e.value.load(.monotonic);
+            log.debug(" - {}: {}", .{ e.key, v });
+        }
+    }
 
     switch (id) {
         .log => {
 
             // FIXME: disable on release builds
-
-            if (conf.LOG_SYSCALL_STATS) {
-                var it = syscall_stats.iterator();
-                while (it.next()) |e| {
-                    const v = e.value.load(.monotonic);
-                    log.debug(" - {}: {}", .{ e.key, v });
-                }
-            }
 
             // log syscall
             if (trap.arg1 > 0x1000) {
