@@ -54,57 +54,6 @@ pub fn hpetFrame() caps.Ref(caps.DeviceFrame) {
 
 var hpet_frame: ?caps.Ref(caps.DeviceFrame) = null;
 
-// pub fn now() u64 {
-//     const regs = hpet_regs.?;
-//     return regs.main_counter_value;
-// }
-
-// pub fn asNanos(t: u64) u128 {
-//     const regs = hpet_regs.?;
-//     return @as(u128, t) * regs.caps_and_id.counter_period_femtoseconds / 1_000_000;
-// }
-
-// pub fn elapsedNanos(from_then: u64) u128 {
-//     const regs = hpet_regs.?;
-//     return @as(u128, regs.main_counter_value - from_then) * regs.caps_and_id.counter_period_femtoseconds / 1_000_000;
-// }
-
-// pub fn timestampNanos() u128 {
-//     const regs = hpet_regs.?;
-//     regs.caps_and_id.counter_period_femtoseconds;
-//     return regs.main_counter_value * regs.caps_and_id.counter_period_femtoseconds / 1_000_000;
-// }
-
-// pub fn sleepDeadline(timestamp_nanos: u128) void {
-//     const regs = hpet_regs.?;
-//     const counter = timestamp_nanos * 1_000_000 / regs.caps_and_id.counter_period_femtoseconds;
-//     if (counter > std.math.maxInt(u64)) {
-//         @branchHint(.cold);
-//         log.err("FIXME: deadline val is bigger than max main counter val", .{});
-//         return;
-//     }
-
-//     const n_timers: usize = regs.caps_and_id.n_timers_minus_one + 1;
-//     const timer_i = arch.cpuId() % n_timers;
-//     const timer_regs = regs.timer(timer_i); // distribute comparators a bit
-//     const timer = &timers[timer_i];
-// }
-
-//
-
-// var timers: [32]Timer = &.{.{}} ** 32;
-
-//
-
-// const Timer = struct {
-//     lock: spin.Mutex = .{},
-//     deadlines: std.PriorityQueue(u64, void, struct {
-//         fn inner(_: void, a: u64, b: u64) std.math.Order {
-//             return std.math.order(a, b);
-//         }
-//     }.inner) = .{},
-// };
-
 const Hpet = extern struct {
     header: acpi.SdtHeader align(1),
     flags: Flags align(1),
@@ -132,20 +81,9 @@ const HpetRegs = extern struct {
     pad0: u64,
     config: Config,
     pad1: u64,
-    interrupt_status: InterruptStatus,
+    interrupt_status: u64,
     pad2: [25]u64,
     main_counter_value: u64,
-
-    fn timer(self: *volatile @This(), n: usize) *volatile TimerRegs {
-        const timer_base: usize = @intFromPtr(self);
-        return @ptrFromInt(timer_base + 0x20 * n);
-    }
-};
-
-const TimerRegs = extern struct {
-    config_and_caps: TimerNConfigAndCaps,
-    comparator_value: u64,
-    // fsb_interrupt_route: FsbInterruptRoute,
 };
 
 const Caps = packed struct {
@@ -162,26 +100,4 @@ const Config = packed struct {
     enable_config: u1,
     legacy_replacement_config: u1,
     reserved: u62,
-};
-
-const InterruptStatus = packed struct {
-    timer_n_status: u32,
-    reserved: u32,
-};
-
-const TimerNConfigAndCaps = packed struct {
-    reserved0: u1,
-    int_type_config: u1,
-    int_enable_config: u1,
-    type_config: u1,
-    periodic_int_cap: u1,
-    u64_cap: u1,
-    value_set_config: u1,
-    reserved1: u1,
-    u32_mode_forced_config: u1,
-    int_route_config: u5,
-    fsb_enable_config: u1,
-    fsb_interrupt_mapping_cap: u1,
-    reserved: u16,
-    int_route_cap: u32,
 };
