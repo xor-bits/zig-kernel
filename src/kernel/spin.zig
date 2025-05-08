@@ -57,7 +57,7 @@ pub const Mutex = struct {
                 if (IS_DEBUG) {
                     counter += 1;
                     if (counter % 10_000 == 0) {
-                        log.warn("possible deadlock {}", .{logs.Addr2Line{ .addr = @returnAddress() }});
+                        // log.warn("possible deadlock {}", .{logs.Addr2Line{ .addr = @returnAddress() }});
                     }
                 }
                 std.atomic.spinLoopHint();
