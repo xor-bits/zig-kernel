@@ -2,6 +2,57 @@ const std = @import("std");
 
 //
 
+const Opts = struct {
+    native_target: std.Build.ResolvedTarget,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    display: bool,
+    debug: u2,
+    use_ovmf: bool,
+    ovmf_fd: []const u8,
+    gdb: bool,
+    testing: bool,
+    cpus: u8,
+};
+
+fn options(b: *std.Build, target: std.Build.ResolvedTarget) Opts {
+    return .{
+        .native_target = b.standardTargetOptions(.{}),
+        .target = target,
+        .optimize = b.standardOptimizeOption(.{}),
+
+        // QEMU gui true/false
+        .display = b.option(bool, "display", "QEMU gui true/false") orelse
+            true,
+
+        // QEMU debug level
+        .debug = b.option(u2, "debug", "QEMU debug level") orelse
+            1,
+
+        // use OVMF UEFI to boot in QEMU (OVMF is slower, but has more features)
+        .use_ovmf = b.option(bool, "uefi", "use OVMF UEFI to boot in QEMU (OVMF is slower, but has more features) (default: false)") orelse
+            false,
+
+        // OVMF.fd path
+        .ovmf_fd = b.option([]const u8, "ovmf", "OVMF.fd path") orelse
+            "/usr/share/ovmf/x64/OVMF.fd",
+
+        // use GDB
+        .gdb = b.option(bool, "gdb", "use GDB") orelse
+            false,
+
+        // include test runner
+        .testing = b.option(bool, "test", "include test runner") orelse
+            true,
+
+        // number of SMP processors, 0 means QEMU default
+        .cpus = b.option(u8, "cpus", "number of SMP processors") orelse
+            4,
+    };
+}
+
+//
+
 pub fn build(b: *std.Build) !void {
     const Target = std.Target;
     const Feature = Target.x86.Feature;
@@ -34,38 +85,6 @@ pub fn build(b: *std.Build) !void {
     const os_iso = createIso(b, kernel_elf, initfs_tar_gz, root_bin);
 
     runQemu(b, &opts, os_iso);
-}
-
-const Opts = struct {
-    native_target: std.Build.ResolvedTarget,
-    target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
-    display: bool,
-    debug: u2,
-    use_ovmf: bool,
-    ovmf_fd: []const u8,
-    gdb: bool,
-    testing: bool,
-    cpus: u8,
-};
-
-fn options(b: *std.Build, target: std.Build.ResolvedTarget) Opts {
-    return .{
-        .native_target = b.standardTargetOptions(.{}),
-        .target = target,
-        .optimize = b.standardOptimizeOption(.{}),
-        .display = b.option(bool, "display", "QEMU gui true/false") orelse true,
-        .debug = b.option(u2, "debug", "QEMU debug level") orelse 1,
-        .use_ovmf = b.option(
-            bool,
-            "uefi",
-            "use OVMF UEFI to boot in QEMU (OVMF is slower, but has more features) (default: false)",
-        ) orelse false,
-        .ovmf_fd = b.option([]const u8, "ovmf", "OVMF.fd path") orelse "/usr/share/ovmf/x64/OVMF.fd",
-        .gdb = b.option(bool, "gdb", "use GDB") orelse false,
-        .testing = b.option(bool, "test", "include test runner") orelse false,
-        .cpus = b.option(u8, "cpus", "number of SMP processors") orelse 0,
-    };
 }
 
 fn runQemu(b: *std.Build, opts: *const Opts, os_iso: std.Build.LazyPath) void {
