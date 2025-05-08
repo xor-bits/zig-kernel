@@ -42,13 +42,6 @@ pub fn init() !void {
 
     // push the null capability
     _ = pushCapability(.{});
-
-    // debugType(Object);
-    // debugType(Memory);
-    // debugType(Thread);
-    // debugType(Vmem);
-    // debugType(Receiver);
-    // debugType(Sender);
 }
 
 /// create a capability out of an object
@@ -91,33 +84,24 @@ pub fn getCapability(thread: *Thread, cap_id: u32) Error!*Object {
     if (obj.owner.load(.acquire) != current)
         return Error.InvalidCapability;
 
-    return obj;
-}
+    if (conf.LOG_OBJ_ACCESS_STATS) {
+        _ = obj_accesses.getPtr(obj.type).fetchAdd(1, .monotonic);
 
-/// returns an object from a capability,
-/// the returned object is locked
-pub fn getCapabilityAnyOwner(cap_id: u32) Error!*Object {
-    if (cap_id == 0)
-        return Error.InvalidCapability;
-
-    const caps = capabilityArray();
-    if (cap_id >= caps.len)
-        return Error.InvalidCapability;
-
-    const obj = &caps[cap_id];
-
-    errdefer if (conf.LOG_OBJ_CALLS)
-        log.debug("obj was cap={} type={}", .{ cap_id, obj.type });
-
-    if (!obj.lock.tryLock())
-        return Error.ThreadSafety;
+        log.debug("obj accesses:", .{});
+        var it = obj_accesses.iterator();
+        while (it.next()) |e| {
+            log.debug(" - {}: {}", .{ e.key, e.value.load(.monotonic) });
+        }
+    }
 
     return obj;
 }
 
 /// gets a capability when its already locked and checked to be owned
 pub fn getCapabilityLocked(cap_id: u32) *Object {
-    return &capabilityArrayUnchecked()[cap_id];
+    const obj = &capabilityArrayUnchecked()[cap_id];
+    std.debug.assert(obj.lock.isLocked());
+    return obj;
 }
 
 /// a single bidirectional call
@@ -213,6 +197,7 @@ pub var capability_array_len: std.atomic.Value(usize) = .init(0);
 pub var array_grow_lock: spin.Mutex = .new();
 pub var free_list_lock: spin.Mutex = .new();
 pub var free_list: u32 = 0;
+pub var obj_accesses: std.EnumArray(abi.ObjectType, std.atomic.Value(usize)) = .initFill(.init(0));
 
 //
 
