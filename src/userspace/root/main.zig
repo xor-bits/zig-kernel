@@ -170,7 +170,7 @@ fn startSpinner() !void {
     );
 
     const spinner_thread = try alloc(caps.Thread);
-    try spinner_thread.setPrio(0);
+    try spinner_thread.setPrio(3);
     self_vmem_lock.lock();
     defer self_vmem_lock.unlock();
     try spinner_thread.setVmem(caps.ROOT_SELF_VMEM);
