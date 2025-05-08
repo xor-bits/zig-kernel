@@ -72,9 +72,8 @@ const panic_printer = struct {
     }
 }{};
 
-pub fn panic(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace, _: ?usize) noreturn {
+pub fn panic(msg: []const u8, _: ?*std.builtin.StackTrace, _: ?usize) noreturn {
     @branchHint(.cold);
-    _ = error_return_trace;
     const log = std.log.scoped(.panic);
 
     // kill other CPUs too
