@@ -155,7 +155,7 @@ pub const Thread = struct {
             .start => {
                 if (target_thread.ptr().status != .stopped) return Error.NotStopped;
                 if (target_thread.ptr().vmem == null) return Error.NoVmem;
-                 proc.start(target_thread.ptr());
+                proc.start(target_thread.ptr());
             },
             .stop => {
                 if (target_thread.ptr().status == .stopped) return Error.IsStopped;
@@ -204,7 +204,6 @@ pub const Thread = struct {
             .set_vmem => {
                 if (target_thread.ptr().status != .stopped) return Error.NotStopped;
 
-                // TODO: require stopping the thread or something
                 const vmem_obj = try caps.getCapability(thread, @truncate(trap.arg2));
                 defer vmem_obj.lock.unlock();
                 const vmem = try vmem_obj.as(caps.Vmem);
