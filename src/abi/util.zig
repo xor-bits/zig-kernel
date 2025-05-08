@@ -61,6 +61,10 @@ pub fn unmapVector(v: *const FrameVector, vmem: caps.Vmem, _vaddr: usize) !void 
     }
 }
 
+pub fn fillVolatile(comptime T: type, dest: []volatile T, val: T) void {
+    for (dest) |*d| d.* = val;
+}
+
 pub fn copyForwardsVolatile(comptime T: type, dest: []volatile T, source: []const T) void {
     for (dest[0..source.len], source) |*d, s| d.* = s;
 }

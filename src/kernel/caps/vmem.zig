@@ -7,10 +7,12 @@ const caps = @import("../caps.zig");
 const pmem = @import("../pmem.zig");
 const proc = @import("../proc.zig");
 const spin = @import("../spin.zig");
+const util = @import("../util.zig");
 
 const conf = abi.conf;
 const log = std.log.scoped(.caps);
 const Error = abi.sys.Error;
+const volat = util.volat;
 
 //
 
@@ -67,8 +69,8 @@ fn allocPage() addr.Phys {
 
 fn allocTable() addr.Phys {
     const table = allocPage();
-    const entries = table.toHhdm().toPtr([*]volatile Entry)[0..512];
-    @memset(entries, .{});
+    const entries: []volatile Entry = table.toHhdm().toPtr([*]volatile Entry)[0..512];
+    abi.util.fillVolatile(Entry, entries, .{});
     return table;
 }
 
@@ -77,13 +79,15 @@ fn nextLevel(comptime create: bool, current: *volatile [512]Entry, i: u9) Error!
 }
 
 fn deallocLevel(current: *volatile [512]Entry, i: u9) void {
-    const entry = current[i];
-    current[i] = .{};
+    const entry = volat(&current[i]).*;
+    volat(&current[i]).* = .{};
     pmem.deallocChunk(addr.Phys.fromParts(.{ .page = entry.page_index }), .@"4KiB");
 }
 
 fn nextLevelFromEntry(comptime create: bool, entry: *volatile Entry) Error!addr.Phys {
-    if (entry.present == 0 and create) {
+    const entry_r = entry.*;
+    if (entry_r.present == 0 and create) {
+        const table = allocTable();
         entry.* = Entry.fromParts(
             false,
             false,
@@ -91,20 +95,22 @@ fn nextLevelFromEntry(comptime create: bool, entry: *volatile Entry) Error!addr.
                 .writable = true,
                 .executable = true,
             },
-            allocTable(),
+            table,
             .{},
         );
-    } else if (entry.present == 0) {
+        return table;
+    } else if (entry_r.present == 0) {
         return error.EntryNotPresent;
-    } else if (entry.huge_page_or_pat == 1) {
+    } else if (entry_r.huge_page_or_pat == 1) {
         return error.EntryIsHuge;
+    } else {
+        return addr.Phys.fromParts(.{ .page = entry_r.page_index });
     }
-    return addr.Phys.fromParts(.{ .page = entry.page_index });
 }
 
 fn isEmpty(entries: *volatile [512]Entry) bool {
-    for (entries) |entry| {
-        if (entry.present == 1)
+    for (entries) |*entry| {
+        if (volat(entry).*.present == 1)
             return false;
     }
     return true;
@@ -117,8 +123,8 @@ pub const Vmem = struct {
 
     pub fn init(self: caps.Ref(@This())) void {
         const ptr = self.ptr();
-        ptr.* = .{};
-        std.mem.copyForwards(Entry, ptr.entries[256..], kernel_table.entries[256..]);
+        abi.util.fillVolatile(Entry, ptr.entries[0..256], .{});
+        abi.util.copyForwardsVolatile(Entry, ptr.entries[256..], kernel_table.entries[256..]);
     }
 
     pub fn alloc(_: ?abi.ChunkSize) Error!addr.Phys {
@@ -131,7 +137,7 @@ pub const Vmem = struct {
         };
 
         if (conf.LOG_OBJ_CALLS)
-            log.debug("vmem call \"{s}\"", .{@tagName(call_id)});
+            log.debug("vmem call \"{s}\" {}", .{ @tagName(call_id), trap.readMessage() });
 
         const self = (caps.Ref(@This()){ .paddr = self_paddr }).ptr();
 
@@ -177,7 +183,8 @@ pub const Vmem = struct {
                 const size_2mib = comptime abi.ChunkSize.@"2MiB".sizeBytes();
                 const size_4kib = comptime abi.ChunkSize.@"4KiB".sizeBytes();
 
-                // log.info("mapping 0x{x} from 0x{x} to 0x{x}", .{ size, paddr.raw, vaddr.raw });
+                if (conf.LOG_OBJ_CALLS)
+                    log.info("mapping 0x{x} from 0x{x} to 0x{x}", .{ size, paddr.raw, vaddr.raw });
 
                 if (size >= size_1gib) {
                     try self.mapAnyFrame(
@@ -253,6 +260,9 @@ pub const Vmem = struct {
                 const size_2mib = comptime abi.ChunkSize.@"2MiB".sizeBytes();
                 const size_4kib = comptime abi.ChunkSize.@"4KiB".sizeBytes();
 
+                if (conf.LOG_OBJ_CALLS)
+                    log.info("unmapping 0x{x} from 0x{x} to 0x{x}", .{ size, paddr.raw, vaddr.raw });
+
                 if (size >= size_1gib) {
                     try self.unmapAnyFrame(
                         @This().canUnmapGiantFrame,
@@ -302,9 +312,13 @@ pub const Vmem = struct {
 
         // first check if mapping would fail (dry-run)
         for (0..count) |_| {
+            if (conf.LOG_OBJ_CALLS)
+                log.info("canMap(0x{x})", .{vaddr.raw});
             try canMap(self, vaddr);
             vaddr.raw += page_size;
         }
+        if (conf.LOG_OBJ_CALLS)
+            log.info("canUnmap pass", .{});
 
         paddr = _paddr;
         vaddr = _vaddr;
@@ -336,10 +350,14 @@ pub const Vmem = struct {
 
         // first check if unmapping would fail (dry-run)
         for (0..count) |_| {
+            if (conf.LOG_OBJ_CALLS)
+                log.info("canUnmap(0x{x}, 0x{x})", .{ paddr.raw, vaddr.raw });
             try canUnmap(self, paddr, vaddr);
             paddr.raw += page_size;
             vaddr.raw += page_size;
         }
+        if (conf.LOG_OBJ_CALLS)
+            log.info("canUnmap pass", .{});
 
         paddr = _paddr;
         vaddr = _vaddr;
@@ -440,7 +458,7 @@ pub const PageTableLevel3 = struct {
 
     pub fn mapGiantFrame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
         const entry = Entry.fromParts(true, false, rights, paddr, flags);
-        self.entries[vaddr.toParts().level3] = entry;
+        volat(&self.entries[vaddr.toParts().level3]).* = entry;
     }
 
     pub fn mapHugeFrame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
@@ -454,7 +472,7 @@ pub const PageTableLevel3 = struct {
     }
 
     pub fn canMapGiantFrame(self: *volatile @This(), vaddr: addr.Virt) Error!void {
-        const entry = self.entries[vaddr.toParts().level3];
+        const entry = volat(&self.entries[vaddr.toParts().level3]).*;
         if (entry.present == 1) return Error.MappingOverlap;
     }
 
@@ -469,7 +487,7 @@ pub const PageTableLevel3 = struct {
     }
 
     pub fn unmapGiantFrame(self: *volatile @This(), vaddr: addr.Virt) bool {
-        self.entries[vaddr.toParts().level3] = .{};
+        volat(&self.entries[vaddr.toParts().level3]).* = .{};
         return isEmpty(&self.entries);
     }
 
@@ -490,7 +508,7 @@ pub const PageTableLevel3 = struct {
     }
 
     pub fn canUnmapGiantFrame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt) Error!void {
-        const entry = self.entries[vaddr.toParts().level3];
+        const entry = volat(&self.entries[vaddr.toParts().level3]).*;
         if (entry.present != 1) return Error.NotMapped;
         if (entry.page_index != paddr.toParts().page) return Error.NotMapped;
     }
@@ -512,7 +530,7 @@ pub const PageTableLevel2 = struct {
 
     pub fn mapHugeFrame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
         const entry = Entry.fromParts(true, false, rights, paddr, flags);
-        self.entries[vaddr.toParts().level2] = entry;
+        volat(&self.entries[vaddr.toParts().level2]).* = entry;
     }
 
     pub fn mapFrame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
@@ -521,7 +539,7 @@ pub const PageTableLevel2 = struct {
     }
 
     pub fn canMapHugeFrame(self: *volatile @This(), vaddr: addr.Virt) Error!void {
-        const entry = self.entries[vaddr.toParts().level2];
+        const entry = volat(&self.entries[vaddr.toParts().level2]).*;
         if (entry.present == 1) return Error.MappingOverlap;
     }
 
@@ -531,7 +549,7 @@ pub const PageTableLevel2 = struct {
     }
 
     pub fn unmapHugeFrame(self: *volatile @This(), vaddr: addr.Virt) bool {
-        self.entries[vaddr.toParts().level2] = .{};
+        volat(&self.entries[vaddr.toParts().level2]).* = .{};
         return isEmpty(&self.entries);
     }
 
@@ -544,7 +562,7 @@ pub const PageTableLevel2 = struct {
     }
 
     pub fn canUnmapHugeFrame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt) Error!void {
-        const entry = self.entries[vaddr.toParts().level2];
+        const entry: Entry = volat(&self.entries[vaddr.toParts().level2]).*;
         if (entry.present != 1) return Error.NotMapped;
         if (entry.page_index != paddr.toParts().page) return Error.NotMapped;
     }
@@ -561,21 +579,21 @@ pub const PageTableLevel1 = struct {
 
     pub fn mapFrame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) void {
         const entry = Entry.fromParts(false, true, rights, paddr, flags);
-        self.entries[vaddr.toParts().level1] = entry;
+        volat(&self.entries[vaddr.toParts().level1]).* = entry;
     }
 
     pub fn canMapFrame(self: *volatile @This(), vaddr: addr.Virt) Error!void {
-        const entry = self.entries[vaddr.toParts().level1];
+        const entry: Entry = volat(&self.entries[vaddr.toParts().level1]).*;
         if (entry.present == 1) return Error.MappingOverlap;
     }
 
     pub fn unmapFrame(self: *volatile @This(), vaddr: addr.Virt) bool {
-        self.entries[vaddr.toParts().level1] = .{};
+        volat(&self.entries[vaddr.toParts().level1]).* = Entry{};
         return isEmpty(&self.entries);
     }
 
     pub fn canUnmapFrame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt) Error!void {
-        const entry = self.entries[vaddr.toParts().level1];
+        const entry: Entry = volat(&self.entries[vaddr.toParts().level1]).*;
         if (entry.present != 1) return Error.NotMapped;
         if (entry.page_index != paddr.toParts().page) return Error.NotMapped;
     }
