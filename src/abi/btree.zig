@@ -226,10 +226,12 @@ pub fn BTreeMap(comptime K: type, comptime V: type, comptime cfg: Config) type {
         /// insert `val` at `key`, returning it if it already exists
         pub fn tryInsert(self: *@This(), key: K, val: V) ?V {
             _ = .{ self, key, val };
+            @panic("todo");
         }
 
         pub fn remove(self: *@This(), key: K) ?V {
             _ = .{ self, key };
+            @panic("todo");
         }
 
         pub fn get(self: *const @This(), key: K) ?*V {
@@ -286,7 +288,7 @@ pub fn BTreeMap(comptime K: type, comptime V: type, comptime cfg: Config) type {
             insertArr(K, parent.keys[0..], parent.used, n, full_node.keys[full_node.min]);
             insertArr(V, parent.vals[0..], parent.used, n, full_node.vals[full_node.min]);
             // add the new child
-            insertArr(V, parent.ptrs[0..], parent.used + 1, n + 1, new_node.ptr);
+            insertArr(usize, parent.ptrs[0..], parent.used + 1, n + 1, new_node.ptr);
 
             full_node.used.* = full_node.min;
             new_node.used.* = full_node.max - full_node.min - 1;
