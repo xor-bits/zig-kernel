@@ -16,6 +16,7 @@ const conf = abi.conf;
 
 pub const IA32_APIC_BASE = 0x1B;
 pub const IA32_PAT_MSR = 0x277;
+pub const IA32_X2APIC = 0x800; // the low MSR, goes from 0x800 to 0x8FF
 pub const IA32_TCS_AUX = 0xC0000103;
 pub const EFER = 0xC0000080;
 pub const STAR = 0xC0000081;

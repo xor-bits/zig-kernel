@@ -41,7 +41,7 @@ const APIC_TIMER_DIV: u32 = 0b0010; // div by 8
 
 //
 
-var apic_base = lazy.Lazy(*volatile LocalApicRegs).new();
+var apic_base = lazy.Lazy(*LocalXApicRegs).new();
 /// all I/O APICs
 var ioapics = std.ArrayList(IoApicInfo).init(pmem.page_allocator);
 var ioapic_lock: spin.Mutex = .{};
@@ -91,7 +91,7 @@ pub fn init(madt: *const Madt) !void {
 
                 log.info("found I/O APIC addr: 0x{x}", .{entry.io_apic_addr});
                 try ioapics.append(.{
-                    .addr = addr.Phys.fromInt(entry.io_apic_addr).toHhdm().toPtr(*volatile IoApicRegs),
+                    .addr = addr.Phys.fromInt(entry.io_apic_addr).toHhdm().toPtr(*IoApicRegs),
                     .io_apic_id = entry.io_apic_id,
                     .global_system_interrupt_base = entry.global_system_interrupt_base,
                 });
@@ -131,9 +131,9 @@ pub fn init(madt: *const Madt) !void {
 
     if (arch.cpuId() == 0)
         log.info("found Local APIC addr: 0x{x}", .{lapic_addr});
-    const lapic: *volatile LocalApicRegs = addr.Phys.fromInt(lapic_addr).toHhdm().toPtr(*volatile LocalApicRegs);
+    const lapic: *LocalXApicRegs = addr.Phys.fromInt(lapic_addr).toHhdm().toPtr(*LocalXApicRegs);
 
-    const lapic_id = @as(*volatile u32, &lapic.lapic_id.val).*;
+    const lapic_id = lapic.lapic_id.read();
     if (lapic_id <= 0xF) {
         ioapic_lapic_lock.lock();
         defer ioapic_lapic_lock.unlock();
@@ -150,16 +150,16 @@ pub fn enable() void {
     const lapic = apic_base.get().?.*;
 
     // reset APIC to a well-known state
-    @as(*volatile u32, &lapic.destination_format.val).* = 0xFFFF_FFFF;
-    @as(*volatile u32, &lapic.logical_destination.val).* &= 0x00FF_FFFF;
-    @as(*volatile u32, &lapic.lvt_timer.val).* = APIC_DISABLE;
-    @as(*volatile u32, &lapic.lvt_performance_monitoring_counters.val).* = APIC_NMI;
-    @as(*volatile u32, &lapic.lvt_lint0.val).* = APIC_DISABLE;
-    @as(*volatile u32, &lapic.lvt_lint1.val).* = APIC_DISABLE;
-    @as(*volatile u32, &lapic.task_priority.val).* = 0;
+    lapic.destination_format.write(0xFFFF_FFFF);
+    lapic.logical_destination.write(0x00FF_FFFF);
+    lapic.lvt_timer.write(APIC_DISABLE);
+    lapic.lvt_performance_monitoring_counters.write(APIC_NMI);
+    lapic.lvt_lint0.write(APIC_DISABLE);
+    lapic.lvt_lint1.write(APIC_DISABLE);
+    lapic.task_priority.write(0);
 
     // enable
-    @as(*volatile u32, &lapic.spurious_interrupt_vector.val).* = APIC_SW_ENABLE | @as(u32, IRQ_SPURIOUS);
+    lapic.spurious_interrupt_vector.write(APIC_SW_ENABLE | @as(u32, IRQ_SPURIOUS));
 
     // enable APIC
     var base = ApicBaseMsr.read();
@@ -169,30 +169,30 @@ pub fn enable() void {
 
     // enable timer interrupts
     const period = measureApicTimerSpeed(lapic) * 500;
-    @as(*volatile u32, &lapic.divide_configuration.val).* = APIC_TIMER_DIV;
-    @as(*volatile u32, &lapic.lvt_timer.val).* = IRQ_TIMER | APIC_TIMER_MODE_PERIODIC;
-    @as(*volatile u32, &lapic.initial_count.val).* = period;
-    @as(*volatile u32, &lapic.lvt_thermal_sensor.val).* = 0;
-    @as(*volatile u32, &lapic.lvt_error.val).* = 0;
-    @as(*volatile u32, &lapic.divide_configuration.val).* = APIC_TIMER_DIV; // buggy hardware fix
+    lapic.divide_configuration.write(APIC_TIMER_DIV);
+    lapic.lvt_timer.write(IRQ_TIMER | APIC_TIMER_MODE_PERIODIC);
+    lapic.initial_count.write(period);
+    lapic.lvt_thermal_sensor.write(0);
+    lapic.lvt_error.write(0);
+    lapic.divide_configuration.write(APIC_TIMER_DIV); // buggy hardware fix
 
     if (arch.cpuId() == 0)
         log.info("APIC initialized", .{});
 }
 
 /// returns the apic period for 1ms
-fn measureApicTimerSpeed(lapic: *volatile LocalApicRegs) u32 {
-    @as(*volatile u32, &lapic.divide_configuration.val).* = APIC_TIMER_DIV;
+fn measureApicTimerSpeed(lapic: *LocalXApicRegs) u32 {
+    lapic.divide_configuration.write(APIC_TIMER_DIV);
 
     hpet.hpetSpinWait(1_000, struct {
-        lapic: *volatile LocalApicRegs,
+        lapic: *LocalXApicRegs,
         pub fn run(s: *const @This()) void {
-            s.lapic.initial_count.val = 0xFFFF_FFFF;
+            s.lapic.initial_count.write(0xFFFF_FFFF);
         }
     }{ .lapic = lapic });
 
-    @as(*volatile u32, &lapic.lvt_timer.val).* = APIC_DISABLE;
-    const count = 0xFFFF_FFFF - @as(*volatile u32, &lapic.current_count.val).*;
+    lapic.lvt_timer.write(APIC_DISABLE);
+    const count = 0xFFFF_FFFF - lapic.current_count.read();
 
     if (arch.cpuId() == 0)
         log.info("APIC timer speed: 1ms = {d} ticks", .{count});
@@ -201,11 +201,11 @@ fn measureApicTimerSpeed(lapic: *volatile LocalApicRegs) u32 {
 }
 
 pub fn eoi() void {
-    @as(*volatile u32, &apic_base.get().?.*.eoi.val).* = 0;
+    apic_base.get().?.*.eoi.write(0);
 }
 
 pub fn interProcessorInterrupt(target_lapic_id: u8, vector: u8) void {
-    const lapic_regs: *volatile LocalApicRegs = apic_base.get().?.*;
+    const lapic_regs: *LocalXApicRegs = apic_base.get().?.*;
 
     // log.info("ICR_HIGH: {*}", .{&lapic_regs.interrupt_command[1].val});
     // log.info("ICR_LOW: {*}", .{&lapic_regs.interrupt_command[0].val});
@@ -225,8 +225,8 @@ pub fn interProcessorInterrupt(target_lapic_id: u8, vector: u8) void {
     // log.info("ICR_HIGH: {}", .{icr_high});
     // log.info("ICR_LOW: {}", .{icr_low});
 
-    @as(*volatile u32, &lapic_regs.interrupt_command[1].val).* = @bitCast(icr_high);
-    @as(*volatile u32, &lapic_regs.interrupt_command[0].val).* = @bitCast(icr_low);
+    lapic_regs.interrupt_command[1].write(@bitCast(icr_high));
+    lapic_regs.interrupt_command[0].write(@bitCast(icr_low));
 }
 
 /// source IRQ would be the source like keyboard at 1
@@ -286,7 +286,7 @@ fn findUsableHandler() ?struct { u4, *Handler, u8 } {
     return null;
 }
 
-fn findUsableRedirectEntry(source_irq: u32) ?struct { *volatile IoApicRegs, u32 } {
+fn findUsableRedirectEntry(source_irq: u32) ?struct { *IoApicRegs, u32 } {
     for (ioapics.items) |ioapic| {
         const min = ioapic.global_system_interrupt_base;
         const max = @as(IoApicVer, @bitCast(ioapicRead(ioapic.addr, 1))).num_irqs_minus_one + 1 + min;
@@ -313,24 +313,20 @@ fn findUsableRedirectEntry(source_irq: u32) ?struct { *volatile IoApicRegs, u32 
     return null;
 }
 
-fn ioapicRead(ioapic: *volatile IoApicRegs, reg: u32) u32 {
-    const select: *volatile u32 = &ioapic.register_select.val;
-    const data: *volatile u32 = &ioapic.register_data.val;
-    select.* = reg;
-    return data.*;
+fn ioapicRead(ioapic: *IoApicRegs, reg: u32) u32 {
+    ioapic.register_select.write(reg);
+    return ioapic.register_data.read();
 }
 
-fn ioapicWrite(ioapic: *volatile IoApicRegs, reg: u32, val: u32) void {
-    const select: *volatile u32 = &ioapic.register_select.val;
-    const data: *volatile u32 = &ioapic.register_data.val;
-    select.* = reg;
-    data.* = val;
+fn ioapicWrite(ioapic: *IoApicRegs, reg: u32, val: u32) void {
+    ioapic.register_select.write(reg);
+    ioapic.register_data.write(val);
 }
 
 //
 
 pub const IoApicInfo = struct {
-    addr: *volatile IoApicRegs,
+    addr: *IoApicRegs,
     io_apic_id: u8,
     global_system_interrupt_base: u32,
 };
@@ -457,48 +453,123 @@ pub const TriggerMode = enum(u1) {
     level,
 };
 
+pub const RegisterMode = enum {
+    none,
+    r,
+    w,
+    rw,
+};
+
+// x2APIC MSR registers
+
+pub fn X2ApicReg(comptime mode: RegisterMode) type {
+    return struct {
+        _val: u8, // MSR address increment is 1, it isn't an actual memory address
+
+        pub fn read(self: *@This()) usize {
+            if (mode == .w) @compileError("cannot read from a write-only register");
+            if (mode == .none) @compileError("cannot read from a reserved register");
+            return arch.rdmsr(@intFromPtr(&self._val));
+        }
+
+        pub fn write(self: *@This(), val: usize) void {
+            if (mode == .r) @compileError("cannot write into a read-only register");
+            if (mode == .none) @compileError("cannot write into a reserved register");
+            arch.wrmsr(@intFromPtr(&self._val), val);
+        }
+    };
+}
+
+pub const LocalX2ApicRegs = struct {
+    _reserved0: [2]X2ApicReg(.none),
+    lapic_id: X2ApicReg(.r),
+    lapic_version: X2ApicReg(.r),
+    _reserved1: [4]X2ApicReg(.none),
+    task_priority: X2ApicReg(.rw),
+    _reserved2: [1]X2ApicReg(.none),
+    processor_priority: X2ApicReg(.r),
+    eoi: X2ApicReg(.w),
+    _reserved3: [1]X2ApicReg(.none),
+    logical_destination: X2ApicReg(.r),
+    _reserved4: [1]X2ApicReg(.none),
+    spurious_interrupt_vector: X2ApicReg(.rw),
+    in_service: [8]X2ApicReg(.r),
+    trigger_mode: [8]X2ApicReg(.r),
+    interrupt_request: [8]X2ApicReg(.r),
+    error_status: X2ApicReg(.rw),
+    _reserved5: [6]X2ApicReg(.none),
+    lvt_corrected_machine_check_interrupt: X2ApicReg(.rw),
+    interrupt_command: X2ApicReg(.rw),
+    _reserved6: [1]X2ApicReg(.none),
+    lvt_timer: X2ApicReg(.rw),
+    lvt_thermal_sensor: X2ApicReg(.rw),
+    lvt_performance_monitoring_counters: X2ApicReg(.rw),
+    lvt_lint0: X2ApicReg(.rw),
+    lvt_lint1: X2ApicReg(.rw),
+    lvt_error: X2ApicReg(.rw),
+    initial_count: X2ApicReg(.rw),
+    current_count: X2ApicReg(.r),
+    _reserved7: [1]X2ApicReg(.none),
+    divide_configuration: X2ApicReg(.rw),
+    self_ipi: X2ApicReg(.w),
+};
+
 // Legacy xAPIC and I/O APIC MMIO registers
 
-pub const Register = extern struct {
-    val: u32 align(16),
-};
+pub fn XApicReg(comptime mode: RegisterMode) type {
+    return extern struct {
+        _val: u32 align(16),
+
+        pub fn read(self: *@This()) u32 {
+            if (mode == .w) @compileError("cannot read from a write-only register");
+            if (mode == .none) @compileError("cannot read from a reserved register");
+            return @as(*volatile u32, &self._val).*;
+        }
+
+        pub fn write(self: *@This(), val: u32) void {
+            if (mode == .r) @compileError("cannot write into a read-only register");
+            if (mode == .none) @compileError("cannot write into a reserved register");
+            @as(*volatile u32, &self._val).* = val;
+        }
+    };
+}
 
 pub const IoApicRegs = extern struct {
-    register_select: Register,
-    register_data: Register,
+    register_select: XApicReg(.rw),
+    register_data: XApicReg(.rw),
 };
 
-pub const LocalApicRegs = extern struct {
-    _reserved0: [2]Register,
-    lapic_id: Register,
-    lapic_version: Register,
-    _reserved1: [4]Register,
-    task_priority: Register,
-    arbitration_priority: Register,
-    processor_priority: Register,
-    eoi: Register,
-    remote_read: Register,
-    logical_destination: Register,
-    destination_format: Register,
-    spurious_interrupt_vector: Register,
-    in_service: [8]Register,
-    trigger_mode: [8]Register,
-    interrupt_request: [8]Register,
-    error_status: Register,
-    _reserved2: [6]Register,
-    lvt_corrected_machine_check_interrupt: Register,
-    interrupt_command: [2]Register,
-    lvt_timer: Register,
-    lvt_thermal_sensor: Register,
-    lvt_performance_monitoring_counters: Register,
-    lvt_lint0: Register,
-    lvt_lint1: Register,
-    lvt_error: Register,
-    initial_count: Register,
-    current_count: Register,
-    _reserved3: [1]Register,
-    divide_configuration: Register,
-    _reserved4: [4]Register,
+pub const LocalXApicRegs = extern struct {
+    _reserved0: [2]XApicReg(.none),
+    lapic_id: XApicReg(.r),
+    lapic_version: XApicReg(.r),
+    _reserved1: [4]XApicReg(.none),
+    task_priority: XApicReg(.rw),
+    arbitration_priority: XApicReg(.r),
+    processor_priority: XApicReg(.r),
+    eoi: XApicReg(.w),
+    remote_read: XApicReg(.r),
+    logical_destination: XApicReg(.rw),
+    destination_format: XApicReg(.rw),
+    spurious_interrupt_vector: XApicReg(.rw),
+    in_service: [8]XApicReg(.r),
+    trigger_mode: [8]XApicReg(.r),
+    interrupt_request: [8]XApicReg(.r),
+    error_status: XApicReg(.r),
+    _reserved2: [6]XApicReg(.none),
+    lvt_corrected_machine_check_interrupt: XApicReg(.rw),
+    interrupt_command: [2]XApicReg(.rw),
+    lvt_timer: XApicReg(.rw),
+    lvt_thermal_sensor: XApicReg(.rw),
+    lvt_performance_monitoring_counters: XApicReg(.rw),
+    lvt_lint0: XApicReg(.rw),
+    lvt_lint1: XApicReg(.rw),
+    lvt_error: XApicReg(.rw),
+    initial_count: XApicReg(.rw),
+    current_count: XApicReg(.r),
+    _reserved3: [1]XApicReg(.none),
+    divide_configuration: XApicReg(.rw),
+    _reserved4: [4]XApicReg(.none),
 };
 
 // MADT SDT entries
