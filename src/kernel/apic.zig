@@ -23,8 +23,6 @@ pub const IRQ_AVAIL_LOW: u8 = 46;
 pub const IRQ_AVAIL_HIGH: u8 = 254;
 pub const IRQ_AVAIL_COUNT = IRQ_AVAIL_HIGH - IRQ_AVAIL_LOW + 1;
 
-pub const IA32_APIC_XAPIC_ENABLE: u64 = 1 << 11;
-pub const IA32_APIC_X2APIC_ENABLE: u64 = 1 << 10;
 pub const APIC_SW_ENABLE: u32 = 1 << 8;
 pub const APIC_DISABLE: u32 = 1 << 16;
 pub const APIC_NMI: u32 = 4 << 8;
@@ -164,10 +162,10 @@ pub fn enable() void {
     @as(*volatile u32, &lapic.spurious_interrupt_vector.val).* = APIC_SW_ENABLE | @as(u32, IRQ_SPURIOUS);
 
     // enable APIC
-    arch.x86_64.wrmsr(
-        arch.x86_64.IA32_APIC_BASE,
-        arch.x86_64.rdmsr(arch.x86_64.IA32_APIC_BASE) | IA32_APIC_XAPIC_ENABLE,
-    );
+    var base = ApicBaseMsr.read();
+    log.info("IA32_APIC_BASE: {}", .{base});
+    base.lapic_mode = .enabled_xapic;
+    base.write();
 
     // enable timer interrupts
     const period = measureApicTimerSpeed(lapic) * 500;
@@ -331,20 +329,34 @@ fn ioapicWrite(ioapic: *volatile IoApicRegs, reg: u32, val: u32) void {
 
 //
 
-pub const Register = extern struct {
-    val: u32 align(16),
-};
-
 pub const IoApicInfo = struct {
     addr: *volatile IoApicRegs,
     io_apic_id: u8,
     global_system_interrupt_base: u32,
 };
 
-pub const IoApicRegs = extern struct {
-    register_select: Register,
-    register_data: Register,
+pub const ApicBaseMsr = packed struct {
+    reserved0: u8,
+    is_bsp: bool,
+    reserved1: u1,
+    lapic_mode: enum(u2) {
+        disabled = 0b00,
+        enabled_xapic = 0b10,
+        enabled_x2apic = 0b11,
+    },
+    apic_base: u24,
+    reserved2: u28,
+
+    pub fn read() @This() {
+        return @bitCast(arch.rdmsr(arch.IA32_APIC_BASE));
+    }
+
+    pub fn write(self: @This()) void {
+        arch.wrmsr(arch.IA32_APIC_BASE, @bitCast(self));
+    }
 };
+
+// I/O APIC register structs
 
 /// I/O APIC register index 0
 pub const IoApicId = packed struct {
@@ -389,6 +401,36 @@ pub const IoApicRedirect = packed struct {
     _reserved1: u4 = 0,
 };
 
+// LAPIC register structs
+
+pub const IcrHigh = packed struct {
+    reserved: u24 = 0,
+    destination: u8,
+};
+
+pub const IcrLow = packed struct {
+    vector: u8,
+    delivery_mode: DeliveryMode,
+    destination_mode: DestinationMode,
+    delivery_status: DeliveryStatus = .idle,
+    reserved0: u1 = 0,
+    level: enum(u1) {
+        deassert,
+        assert,
+    },
+    trigger_mode: TriggerMode,
+    reserved1: u2 = 0,
+    destination_shorthand: enum(u2) {
+        no_shorthand,
+        self,
+        all_including_self,
+        all_excluding_self,
+    },
+    reserved2: u12 = 0,
+};
+
+// Common stuff
+
 pub const DeliveryMode = enum(u3) {
     fixed,
     lowest_priority, // this one is interesting for scheduling
@@ -415,30 +457,15 @@ pub const TriggerMode = enum(u1) {
     level,
 };
 
-pub const IcrHigh = packed struct {
-    reserved: u24 = 0,
-    destination: u8,
+// Legacy xAPIC and I/O APIC MMIO registers
+
+pub const Register = extern struct {
+    val: u32 align(16),
 };
 
-pub const IcrLow = packed struct {
-    vector: u8,
-    delivery_mode: DeliveryMode,
-    destination_mode: DestinationMode,
-    delivery_status: DeliveryStatus = .idle,
-    reserved0: u1 = 0,
-    level: enum(u1) {
-        deassert,
-        assert,
-    },
-    trigger_mode: TriggerMode,
-    reserved1: u2 = 0,
-    destination_shorthand: enum(u2) {
-        no_shorthand,
-        self,
-        all_including_self,
-        all_excluding_self,
-    },
-    reserved2: u12 = 0,
+pub const IoApicRegs = extern struct {
+    register_select: Register,
+    register_data: Register,
 };
 
 pub const LocalApicRegs = extern struct {
@@ -472,40 +499,9 @@ pub const LocalApicRegs = extern struct {
     _reserved3: [1]Register,
     divide_configuration: Register,
     _reserved4: [4]Register,
-
-    pub fn format(self: *volatile @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
-        const this = @typeInfo(@This()).Struct;
-
-        try writer.writeAll(@typeName(@This()));
-        try std.fmt.format(writer, " {{ ", .{});
-
-        inline for (this.fields) |field| {
-            if (field.name[0] == '_') {
-                continue;
-            }
-
-            switch (@typeInfo(field.type)) {
-                .Struct => {
-                    const s: *volatile Register = &@field(self, field.name);
-                    try std.fmt.format(writer, ".{s} = 0x{x}, ", .{ field.name, s.val });
-                },
-                .Array => {
-                    const s: []volatile Register = @field(self, field.name)[0..];
-
-                    try std.fmt.format(writer, ".{s} = .{{ ", .{field.name});
-                    for (s) |*reg| {
-                        // FIXME: i have no clue if Zig drops the volatile qualifier with ptr captures
-                        try std.fmt.format(writer, "0x{x}, ", .{reg.val});
-                    }
-                    try std.fmt.format(writer, "}}, ", .{});
-                },
-                else => {},
-            }
-        }
-
-        try std.fmt.format(writer, "}}", .{});
-    }
 };
+
+// MADT SDT entries
 
 pub const Madt = extern struct {
     header: acpi.SdtHeader align(1),
