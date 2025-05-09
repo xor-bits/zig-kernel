@@ -55,15 +55,15 @@ pub const CacheType = enum(u8) {
     /// All accesses are uncacheable.
     /// Write combining is not allowed.
     /// Speculative accesses are not allowed.
-    uncacheable = 0,
+    uncacheable = 3,
     /// All accesses are uncacheable.
     /// Write combining is allowed.
     /// Speculative reads are allowed.
-    write_combining = 1,
+    write_combining = 4,
     /// Reads allocate cache lines on a cache miss.
     /// Cache lines are not allocated on a write miss.
     /// Write hits update the cache and main memory.
-    write_through = 4,
+    write_through = 1,
     /// Reads allocate cache lines on a cache miss.
     /// All writes update main memory.
     /// Cache lines are not allocated on a write miss.
@@ -72,18 +72,20 @@ pub const CacheType = enum(u8) {
     /// Reads allocate cache lines on a cache miss,
     /// and can allocate to either the shared, exclusive, or modified state.
     /// Writes allocate to the modified state on a cache miss.
-    write_back = 6,
+    write_back = 0,
     /// Same as uncacheable,
     /// except that this can be overriden by Write-Combining MTRRs.
-    uncached = 7,
+    uncached = 2,
 
     pub fn patMsr() u64 {
-        return @as(u64, @intFromEnum(@This().write_back)) |
-            (@as(u64, @intFromEnum(@This().write_through)) << 8) |
-            (@as(u64, @intFromEnum(@This().uncached)) << 16) |
-            (@as(u64, @intFromEnum(@This().uncacheable)) << 24) |
-            (@as(u64, @intFromEnum(@This().write_combining)) << 32) |
-            (@as(u64, @intFromEnum(@This().write_protect)) << 40);
+        return (@as(u64, 6) << 0) |
+            (@as(u64, 4) << 8) |
+            (@as(u64, 7) << 16) |
+            (@as(u64, 0) << 24) |
+            (@as(u64, 1) << 32) |
+            (@as(u64, 5) << 40) |
+            (@as(u64, 0) << 48) |
+            (@as(u64, 0) << 56);
     }
 };
 

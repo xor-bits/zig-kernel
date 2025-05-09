@@ -128,6 +128,8 @@ fn runQemu(b: *std.Build, opts: *const Opts, os_iso: std.Build.LazyPath) void {
     if (opts.kvm) {
         qemu_step.addArgs(&.{
             "-enable-kvm",
+            "-M",
+            "smm=off,accel=kvm",
         });
     }
 

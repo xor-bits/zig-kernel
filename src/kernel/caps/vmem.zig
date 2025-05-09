@@ -625,7 +625,16 @@ pub const Entry = packed struct {
     protection_key: u4 = 0,
     no_execute: u1 = 0,
 
-    // pub fn setPresentCount()
+    pub fn getCacheMode(self: @This(), comptime is_last_level: bool) abi.sys.CacheType {
+        var idx: u3 = 0;
+        if (is_last_level)
+            idx |= @as(u3, self.huge_page_or_pat) << 2
+        else
+            idx |= @as(u3, @truncate(self.page_index & 0b1)) << 2;
+        idx |= @as(u3, self.cache_disable) << 1;
+        idx |= @as(u3, self.write_through) << 0;
+        return std.meta.intToEnum(abi.sys.CacheType, idx) catch unreachable;
+    }
 
     pub fn fromParts(
         comptime is_huge: bool,
@@ -640,7 +649,7 @@ pub const Entry = packed struct {
         var page_index = frame.toParts().page;
         var pwt: u1 = 0;
         var pcd: u1 = 0;
-        var huge_page_or_pat: u1 = @intFromBool(is_huge);
+        var huge_page_or_pat: u1 = 0;
         const pat_index = @as(u3, @truncate(@intFromEnum(flags.cache)));
         if (is_last_level) {
             if (pat_index & 0b001 != 0) pwt = 1;

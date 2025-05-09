@@ -8,7 +8,7 @@ pub const LOG_CTX_SWITCHES: bool = LOG_EVERYTHING or false;
 pub const LOG_WAITING: bool = LOG_EVERYTHING or false;
 pub const LOG_SERVERS: bool = LOG_EVERYTHING or false;
 pub const LOG_APIC: bool = LOG_EVERYTHING or false;
-pub const LOG_INTERRUPTS: bool = LOG_EVERYTHING or true;
+pub const LOG_INTERRUPTS: bool = LOG_EVERYTHING or false;
 
 pub const STACK_TRACE: bool = true;
 pub const KERNEL_PANIC_RSOD: bool = true;

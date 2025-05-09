@@ -238,7 +238,7 @@ fn measureApicTimerSpeed(locals: *main.CpuLocalStorage, regs: anytype) u32 {
 // the ISR would be selected dynamically
 pub fn eoi() void {
     const locals = arch.cpuLocal();
-    log.info("{?*}", .{locals.current_thread});
+    // log.info("{?*}", .{locals.current_thread});
     switch (locals.apic_regs) {
         .xapic => |regs| regs.eoi.write(0),
         .x2apic => |regs| regs.eoi.write(0),
