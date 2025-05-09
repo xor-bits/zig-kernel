@@ -17,6 +17,7 @@ pub fn main() !void {
     log.info("hello from pm", .{});
 
     const root = abi.RootProtocol.Client().init(abi.rt.root_ipc);
+    const vmem_handle = abi.rt.vmem_handle;
 
     log.debug("requesting memory", .{});
     var res: Error!void, const memory: caps.Memory = try root.call(.memory, void{});
@@ -26,11 +27,6 @@ pub fn main() !void {
     log.debug("allocating pm endpoint", .{});
     const pm_recv = try memory.alloc(caps.Receiver);
     const pm_send = try pm_recv.subscribe();
-
-    // inform the root that pm is ready
-    log.debug("pm ready", .{});
-    res, const vmem_handle = try root.call(.serverReady, .{ abi.ServerKind.pm, pm_send });
-    try res;
 
     log.debug("requesting vm sender", .{});
     res, const vm_sender = try root.call(.serverSender, .{abi.ServerKind.vm});
@@ -54,6 +50,12 @@ pub fn main() !void {
         // .mapDeviceFrame = mapDeviceFrameHandler,
         .newSender = newSenderHandler,
     }).init(&system, pm_recv);
+
+    // inform the root that pm is ready
+    log.debug("pm ready", .{});
+    res, _ = try root.call(.serverReady, .{ abi.ServerKind.pm, pm_send });
+    try res;
+
     try server.run();
 }
 

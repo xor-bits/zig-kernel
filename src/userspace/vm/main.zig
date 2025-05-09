@@ -19,13 +19,10 @@ pub fn main() !void {
     log.info("hello from vm", .{});
 
     const root = abi.RootProtocol.Client().init(abi.rt.root_ipc);
+    const self_vmem: caps.Vmem = .{ .cap = @truncate(abi.rt.vmem_handle) };
 
     log.debug("requesting memory", .{});
-    var res: Error!void, const memory: caps.Memory = try root.call(.memory, void{});
-    try res;
-
-    log.debug("requesting self vmem", .{});
-    res, const self_vmem: caps.Vmem = try root.call(.selfVmem, void{});
+    var res: Error!void, const memory: caps.Memory = try root.call(.memory, {});
     try res;
 
     // endpoint for pm server <-> vm server communication
@@ -33,10 +30,6 @@ pub fn main() !void {
     const vm_recv = try memory.alloc(caps.Receiver);
     const vm_send = try vm_recv.subscribe();
     const root_endpoint = vm_send.cap;
-
-    // inform the root that vm is ready
-    res, _ = try root.call(.serverReady, .{ abi.ServerKind.vm, vm_send });
-    try res;
 
     // TODO: install page fault handlers
 
@@ -60,6 +53,10 @@ pub fn main() !void {
         .newThread = newThreadHandler,
         .newSender = newSenderHandler,
     }).init(&system, vm_recv);
+
+    // inform the root that vm is ready
+    res, _ = try root.call(.serverReady, .{ abi.ServerKind.vm, vm_send });
+    try res;
 
     log.info("vm waiting for messages", .{});
     try server.run();

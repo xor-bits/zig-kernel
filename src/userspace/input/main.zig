@@ -27,11 +27,6 @@ pub fn main() !void {
     const input_recv = try memory.alloc(caps.Receiver);
     const input_send = try input_recv.subscribe();
 
-    // inform the root that input is ready
-    log.debug("input ready", .{});
-    res, _ = try root.call(.serverReady, .{ abi.ServerKind.input, input_send });
-    try res;
-
     log.debug("requesting vm sender", .{});
     res, const vm_sender = try root.call(.serverSender, .{abi.ServerKind.vm});
     try res;
@@ -102,27 +97,10 @@ pub fn main() !void {
     try ps2_thread.setPrio(0);
     try ps2_thread.start();
 
-    // log.debug("spawning keyboard thread", .{});
-    // try spawn(&ps2.keyboardThread);
-
-    // log.info("mapping HPET", .{});
-    // res, const hpet_addr: usize, hpet_frame = try vm_client.call(.mapDeviceFrame, .{
-    //     vmem_handle,
-    //     hpet_frame,
-    //     abi.sys.Rights{
-    //         .writable = true,
-    //     },
-    //     abi.sys.MapFlags{
-    //         .cache = .uncacheable,
-    //     },
-    // });
-    // try res;
-
-    // log.info("HPET mapped at 0x{x}", .{hpet_addr});
-    // try hpet.init(hpet_addr);
-
-    // log.debug("spawning HPET thread", .{});
-    // try spawn(&hpet.hpetThread);
+    // inform the root that input is ready
+    log.debug("input ready", .{});
+    res, _ = try root.call(.serverReady, .{ abi.ServerKind.input, input_send });
+    try res;
 
     // var system: System = .{
     //     .recv = input_recv,

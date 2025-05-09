@@ -195,10 +195,6 @@ pub const RootProtocol = util.Protocol(struct {
     /// only system processes are allowed request this
     memory: fn () struct { sys.Error!void, caps.Memory },
 
-    /// request self vmem capability
-    /// only vm can use this
-    selfVmem: fn () struct { sys.Error!void, caps.Vmem },
-
     /// request a x86 ioport allocator capability
     /// only rm can use this
     ioports: fn () struct { sys.Error!void, caps.X86IoPortAllocator },
@@ -214,7 +210,7 @@ pub const RootProtocol = util.Protocol(struct {
     /// inform root that the server is ready and provide a sender to the server
     /// only servers can use this, and `kind` has to match the server
     /// returns a vmem handle, if it isn't the vm server
-    serverReady: fn (kind: ServerKind, sender: caps.Sender) struct { sys.Error!void, usize },
+    serverReady: fn (kind: ServerKind, sender: caps.Sender) struct { sys.Error!void, void },
 
     /// request a sender to the server
     serverSender: fn (kind: ServerKind) struct { sys.Error!void, caps.Sender },

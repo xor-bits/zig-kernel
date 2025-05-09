@@ -17,6 +17,7 @@ pub fn main() !void {
     log.info("hello from rm", .{});
 
     const root = abi.RootProtocol.Client().init(abi.rt.root_ipc);
+    const vmem_handle = abi.rt.vmem_handle;
 
     log.debug("requesting memory", .{});
     var res: Error!void, const memory = try root.call(.memory, void{});
@@ -43,11 +44,6 @@ pub fn main() !void {
     const rm_recv = try memory.alloc(caps.Receiver);
     const rm_send = try rm_recv.subscribe();
 
-    // inform the root that rm is ready
-    log.debug("rm ready", .{});
-    res, const self_vmem_handle = try root.call(.serverReady, .{ abi.ServerKind.rm, rm_send });
-    try res;
-
     const vm_client = abi.VmProtocol.Client().init(vm_sender);
 
     var system = System{
@@ -58,7 +54,7 @@ pub fn main() !void {
         .root_endpoint = rm_send.cap,
 
         .vm_client = vm_client,
-        .self_vmem_handle = self_vmem_handle,
+        .vmem_handle = vmem_handle,
 
         .hpet = hpet_frame,
     };
@@ -72,6 +68,12 @@ pub fn main() !void {
         .requestInterruptHandler = requestInterruptHandlerHandler,
         .newSender = newSenderHandler,
     }).init(&system, rm_recv);
+
+    // inform the root that rm is ready
+    log.debug("rm ready", .{});
+    res, _ = try root.call(.serverReady, .{ abi.ServerKind.rm, rm_send });
+    try res;
+
     try server.run();
 }
 
@@ -83,7 +85,7 @@ const System = struct {
     root_endpoint: u32,
 
     vm_client: abi.VmProtocol.Client(),
-    self_vmem_handle: usize,
+    vmem_handle: usize,
 
     ps2: bool = true,
     hpet: ?caps.DeviceFrame = null,

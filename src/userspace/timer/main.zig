@@ -17,6 +17,7 @@ pub fn main() !void {
     log.info("hello from timer", .{});
 
     const root = abi.RootProtocol.Client().init(abi.rt.root_ipc);
+    const vmem_handle = abi.rt.vmem_handle;
 
     log.debug("requesting memory", .{});
     var res: Error!void, const memory: caps.Memory = try root.call(.memory, void{});
@@ -26,11 +27,6 @@ pub fn main() !void {
     log.debug("allocating timer endpoint", .{});
     const timer_recv = try memory.alloc(caps.Receiver);
     const timer_send = try timer_recv.subscribe();
-
-    // inform the root that timer is ready
-    log.debug("timer ready", .{});
-    res, const vmem_handle = try root.call(.serverReady, .{ abi.ServerKind.timer, timer_send });
-    try res;
 
     log.debug("requesting vm sender", .{});
     res, const vm_sender = try root.call(.serverSender, .{abi.ServerKind.vm});
@@ -122,6 +118,11 @@ pub fn main() !void {
         .newSender = newSenderHandler,
     }).init(&system, timer_recv);
 
+    // inform the root that timer is ready
+    log.debug("timer ready", .{});
+    res, _ = try root.call(.serverReady, .{ abi.ServerKind.timer, timer_send });
+    try res;
+
     log.debug("timer init done, server listening", .{});
     var msg: abi.sys.Message = undefined;
     try server.rx.recv(&msg);
@@ -186,6 +187,7 @@ fn sleepDeadlineHandler(ctx: *System, _: u32, req: struct { u128 }) struct { voi
 }
 
 fn newSenderHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.Sender } {
+    log.info("timer newSender req", .{});
     if (ctx.root_endpoint != sender)
         return .{ Error.PermissionDenied, .{} };
 

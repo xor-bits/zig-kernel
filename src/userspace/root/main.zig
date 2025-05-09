@@ -103,7 +103,7 @@ pub fn main() !void {
 
     const vm_sender = try recv.subscribe();
     const vm = system.servers.getPtr(.vm);
-    vm.thread, system.vm_vmem = try execElf(vm.bin, vm_sender);
+    vm.thread = try execVm(vm.bin, vm_sender);
     vm.endpoint = vm_sender.cap;
 
     const server = Proto.init(&system, system.recv);
@@ -319,7 +319,6 @@ const Proto = abi.RootProtocol.Server(.{
     .scope = if (abi.conf.LOG_SERVERS) .root else null,
 }, .{
     .memory = memoryHandler,
-    .selfVmem = selfVmemHandler,
     .ioports = ioportsHandler,
     .irqs = irqsHandler,
     .device = deviceHandler,
@@ -331,10 +330,6 @@ const Proto = abi.RootProtocol.Server(.{
 const Server = struct {
     /// server thread
     thread: caps.Thread = .{},
-    /// vmem handle
-    vmem_cap: ?caps.Vmem = null,
-    /// vmem handle
-    vmem_handle: usize = 0,
     /// server ELF binary
     bin: []const u8 = "",
     /// sender for communicating with the server
@@ -352,7 +347,6 @@ const System = struct {
 
     devices: std.EnumArray(abi.Device, caps.DeviceFrame),
 
-    vm_vmem: ?caps.Vmem = null,
     servers: std.EnumArray(abi.ServerKind, Server) = .initFill(.{}),
 
     init: caps.Thread = .{},
@@ -375,19 +369,6 @@ fn memoryHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.M
     };
 
     return .{ void{}, memory };
-}
-
-fn selfVmemHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.Vmem } {
-    if (ctx.servers.get(.vm).endpoint != sender) {
-        return .{ Error.PermissionDenied, .{} };
-    }
-
-    const vmem = ctx.vm_vmem orelse {
-        return .{ Error.AlreadyMapped, .{} };
-    };
-    ctx.vm_vmem = null;
-
-    return .{ {}, vmem };
 }
 
 fn ioportsHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.X86IoPortAllocator } {
@@ -428,12 +409,12 @@ fn deviceHandler(ctx: *System, sender: u32, req: struct { abi.Device }) struct {
     return .{ void{}, device };
 }
 
-fn serverReadyHandler(ctx: *System, sender: u32, req: struct { abi.ServerKind, caps.Sender }) struct { Error!void, usize } {
+fn serverReadyHandler(ctx: *System, sender: u32, req: struct { abi.ServerKind, caps.Sender }) struct { Error!void, void } {
     const kind = req.@"0";
     const server = ctx.servers.getPtr(kind);
 
     if (server.endpoint != sender) {
-        return .{ Error.PermissionDenied, 0 };
+        return .{ Error.PermissionDenied, {} };
     }
 
     // FIXME: verify that it is a cap
@@ -444,7 +425,7 @@ fn serverReadyHandler(ctx: *System, sender: u32, req: struct { abi.ServerKind, c
 
     if (is_vm or is_requested) {
         ctx.dont_reply = true;
-        Proto.reply(ctx.recv, .serverReady, .{ {}, 0 }) catch |err| {
+        Proto.reply(ctx.recv, .serverReady, .{ {}, {} }) catch |err| {
             log.info("failed to reply manually: {}", .{err});
         };
     }
@@ -456,21 +437,21 @@ fn serverReadyHandler(ctx: *System, sender: u32, req: struct { abi.ServerKind, c
         while (it.next()) |next| {
             if (next.key == .vm) continue;
 
-            next.value.endpoint, next.value.vmem_handle = execWithVm(ctx, next.value.bin) catch |err| {
+            next.value.endpoint = execWithVm(ctx, next.value.bin) catch |err| {
                 log.err("failed to exec {}: {}", .{ next.key, err });
-                return .{ {}, 0 };
+                return .{ {}, {} };
             };
         }
 
         // TODO: exec initfs:///sbin/init with pm
-        _, _ = execWithVm(ctx, ctx.init_bin) catch |err| {
+        _ = execWithVm(ctx, ctx.init_bin) catch |err| {
             log.err("failed to exec init: {}", .{err});
-            return .{ {}, 0 };
+            return .{ {}, {} };
         };
     }
 
     if (is_requested) {
-        log.info("server ready, handling waiting serverSender requests", .{});
+        log.info("server ready, handling waiting {} requests", .{kind});
 
         for (server.ready_waiters.slice()) |caller| {
             const msg = serverSenderHandler(ctx, server.endpoint, .{kind});
@@ -481,15 +462,16 @@ fn serverReadyHandler(ctx: *System, sender: u32, req: struct { abi.ServerKind, c
         server.ready_waiters.clear();
     }
 
-    return .{ {}, server.vmem_handle };
+    return .{ {}, {} };
 }
 
-fn serverSenderHandler(ctx: *System, sender: u32, req: struct { abi.ServerKind }) struct { Error!void, caps.Sender } {
-    ctx.expectIsSystem(sender) catch |err| return .{ err, .{} };
+fn serverSenderHandler(ctx: *System, _: u32, req: struct { abi.ServerKind }) struct { Error!void, caps.Sender } {
+    // ctx.expectIsSystem(sender) catch |err| return .{ err, .{} };
 
     const server = ctx.servers.getPtr(req.@"0");
 
     if (server.sender.cap == 0) {
+        log.info("deferred serverSender call {}", .{req.@"0"});
         const caller = ctx.recv.saveCaller() catch |err| {
             log.err("failed to save caller: {}", .{err});
             return .{ err, .{} };
@@ -501,13 +483,15 @@ fn serverSenderHandler(ctx: *System, sender: u32, req: struct { abi.ServerKind }
         };
         return .{ {}, .{} };
     }
+    log.info("handling serverSender call {}", .{req.@"0"});
 
     var result: Error!struct { Error!void, caps.Sender } = undefined;
     switch (req.@"0") {
         .vm => result = abi.VmProtocol.Client().init(server.sender).call(.newSender, {}),
         .pm => result = abi.PmProtocol.Client().init(server.sender).call(.newSender, {}),
         .rm => result = abi.RmProtocol.Client().init(server.sender).call(.newSender, {}),
-        .vfs, .timer, .input => @panic("todo"),
+        .timer => result = abi.TimerProtocol.Client().init(server.sender).call(.newSender, {}),
+        .vfs, .input => @panic("todo"),
         // .vfs => result = abi.VfsProtocol.Client().init(server.sender).call(.newSender, {}),
         // .timer => result = abi.TimerProtocol.Client().init(server.sender).call(.newSender, {}),
         // .input => result = abi.InputProtocol.Client().init(server.sender).call(.newSender, {}),
@@ -536,7 +520,8 @@ fn initfsHandler(_: *System, _: u32, _: void) struct { Error!void, caps.Sender }
     return .{ {}, initfs_sender };
 }
 
-fn execWithVm(ctx: *System, bin: []const u8) !struct { u32, usize } {
+/// returns the endpoint id of the server, used for verifying server identity
+fn execWithVm(ctx: *System, bin: []const u8) !u32 {
     // send the file to vm server using shared memory IPC
 
     const frame = try allocSized(
@@ -584,14 +569,15 @@ fn execWithVm(ctx: *System, bin: []const u8) !struct { u32, usize } {
     try thread.transferCap(sender.cap);
     var regs: abi.sys.ThreadRegs = undefined;
     try thread.readRegs(&regs);
-    regs.arg0 = sender.cap; // set RDI to the sender cap
+    regs.arg0 = sender.cap; // set RDI to the root client (sender cap)
+    regs.arg1 = vmem_handle; // set RSI to the server's own vmem handle
     try thread.writeRegs(&regs);
     try thread.start();
 
-    return .{ sender.cap, vmem_handle };
+    return sender.cap;
 }
 
-fn execElf(elf_bytes: []const u8, sender: abi.caps.Sender) !struct { caps.Thread, caps.Vmem } {
+fn execVm(elf_bytes: []const u8, sender: abi.caps.Sender) !caps.Thread {
     var elf = std.io.fixedBufferStream(elf_bytes);
 
     var crc: u32 = 0;
@@ -689,7 +675,7 @@ fn execElf(elf_bytes: []const u8, sender: abi.caps.Sender) !struct { caps.Thread
 
     // map a stack
     // log.info("mapping a stack", .{});
-    const stack = try allocSized(abi.caps.Frame, .@"256KiB");
+    const stack = try allocSized(caps.Frame, .@"256KiB");
     try new_vmem.map(
         stack,
         0x7FFF_FFF0_0000,
@@ -699,7 +685,7 @@ fn execElf(elf_bytes: []const u8, sender: abi.caps.Sender) !struct { caps.Thread
 
     // map an initial heap
     // log.info("mapping a heap", .{});
-    const heap = try allocSized(abi.caps.Frame, .@"256KiB");
+    const heap = try allocSized(caps.Frame, .@"256KiB");
     try new_vmem.map(
         heap,
         heap_bottom,
@@ -708,12 +694,14 @@ fn execElf(elf_bytes: []const u8, sender: abi.caps.Sender) !struct { caps.Thread
     );
 
     // log.info("creating a new thread", .{});
-    const new_thread = try alloc(abi.caps.Thread);
+    const new_thread: caps.Thread = try alloc(caps.Thread);
 
     try new_thread.setVmem(new_vmem);
+    try new_thread.transferCap(new_vmem.cap);
     try new_thread.setPrio(0);
     try new_thread.writeRegs(&.{
         .arg0 = sender.cap, // set RDI to
+        .arg1 = new_vmem.cap, // set RSI to the self Vmem cap
         .user_instr_ptr = header.entry,
         .user_stack_ptr = 0x7FFF_FFF4_0000 - 0x100,
     });
@@ -724,7 +712,7 @@ fn execElf(elf_bytes: []const u8, sender: abi.caps.Sender) !struct { caps.Thread
     log.info("everything ready, exec", .{});
     try new_thread.start();
 
-    return .{ new_thread, new_vmem };
+    return new_thread;
 }
 
 pub extern var __stack_end: u8;
