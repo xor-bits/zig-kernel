@@ -20,7 +20,7 @@ pub fn main() !void {
     const vmem_handle = abi.rt.vmem_handle;
 
     log.debug("requesting memory", .{});
-    var res: Error!void, const memory = try root.call(.memory, void{});
+    var res: Error!void, const memory = try root.call(.memory, {});
     try res;
 
     log.debug("requesting vm sender", .{});
@@ -28,15 +28,15 @@ pub fn main() !void {
     try res;
 
     log.debug("requesting ioport allocator", .{});
-    res, const ioports = try root.call(.ioports, void{});
+    res, const ioports = try root.call(.ioports, {});
     try res;
 
     log.debug("requesting irq allocator", .{});
-    res, const irqs = try root.call(.irqs, void{});
+    res, const irqs = try root.call(.irqs, {});
     try res;
 
     log.debug("requesting HPET", .{});
-    res, const hpet_frame: caps.DeviceFrame = try root.call(.device, .{abi.Device.hpet});
+    res, const hpet_frame: caps.DeviceFrame, _ = try root.call(.device, .{abi.Device.hpet});
     try res;
 
     // endpoint for rm server <-> unix app communication
@@ -131,7 +131,7 @@ fn newSenderHandler(ctx: *System, sender: u32, _: void) struct { Error!void, cap
         return .{ err, .{} };
     };
 
-    return .{ void{}, rm_sender };
+    return .{ {}, rm_sender };
 }
 
 comptime {

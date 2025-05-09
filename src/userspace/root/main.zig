@@ -20,6 +20,7 @@ pub const LOADER_TMP = 0x2000_0000_0000;
 /// uncompressed initfs.tar location
 pub const INITFS_TAR = 0x3000_0000_0000;
 pub const FRAMEBUFFER = 0x4000_0000_0000;
+pub const BACKBUFFER = 0x4800_0000_0000;
 pub const INITFS_TMP = 0x5000_0000_0000;
 pub const STACK_SIZE = 0x40000;
 pub const STACK_TOP = 0x8000_0000_0000 - 0x2000;
@@ -198,20 +199,27 @@ fn framebufferSplash(_boot_info: *const volatile abi.BootInfo) !void {
         return;
     }
 
+    const fb_dev_size = try boot_info.framebuffer.sizeOf();
+
     try mapDevice(boot_info.framebuffer, FRAMEBUFFER, .{ .writable = true }, .{
         .cache = .write_combining,
     });
+
+    const frame = try allocSized(caps.Frame, fb_dev_size);
+    try map(frame, BACKBUFFER, .{ .writable = true }, .{});
 
     const width = boot_info.framebuffer_width;
     const height = boot_info.framebuffer_height;
     const pitch = boot_info.framebuffer_pitch / 4;
     const framebuffer = @as([*]volatile u32, @ptrFromInt(FRAMEBUFFER))[0 .. width * pitch];
+    const backbuffer = @as([*]u32, @ptrFromInt(BACKBUFFER))[0 .. width * pitch];
 
     const fb_info: FbInfo = .{
         .width = width,
         .height = height,
         .pitch = pitch,
-        .buffer = framebuffer,
+        .buffer = backbuffer,
+        .framebuffer = framebuffer,
     };
 
     const mid_x = width / 2;
@@ -233,7 +241,8 @@ const FbInfo = struct {
     width: usize,
     height: usize,
     pitch: usize,
-    buffer: []volatile u32,
+    buffer: []u32,
+    framebuffer: []volatile u32,
 };
 
 fn drawFrame(fb: *const FbInfo, mid_x: usize, mid_y: usize, millis: f32) void {
@@ -243,10 +252,11 @@ fn drawFrame(fb: *const FbInfo, mid_x: usize, mid_y: usize, millis: f32) void {
         const phase = @as(f32, @floatFromInt(i)) / 20.0;
         drawTriangleDot(fb, mid_x, mid_y, phase * 3.0 - millis * speed, millis, 0xFF8000);
     }
+
+    blit(fb, mid_x, mid_y);
 }
 
 fn dim(fb: *const FbInfo, mid_x: usize, mid_y: usize) void {
-    // FIXME: use a backbuffer for reads
     const minx = @max(mid_x, 120) - 120;
     const miny = @max(mid_y, 120) - 120;
     const maxx = mid_x + 121;
@@ -259,6 +269,19 @@ fn dim(fb: *const FbInfo, mid_x: usize, mid_y: usize) void {
             col.g = @max(col.g, 3) - 3;
             col.b = @max(col.b, 3) - 3;
             fb.buffer[x + y * fb.pitch] = @bitCast(col);
+        }
+    }
+}
+
+fn blit(fb: *const FbInfo, mid_x: usize, mid_y: usize) void {
+    const minx = @max(mid_x, 120) - 120;
+    const miny = @max(mid_y, 120) - 120;
+    const maxx = mid_x + 121;
+    const maxy = mid_y + 121;
+
+    for (miny..maxy) |y| {
+        for (minx..maxx) |x| {
+            fb.framebuffer[x + y * fb.pitch] = fb.buffer[x + y * fb.pitch];
         }
     }
 }
@@ -341,6 +364,13 @@ const Server = struct {
         std.BoundedArray(caps.Reply, 8).init(0) catch unreachable,
 };
 
+const Device = struct {
+    /// the actual physical device frame
+    mmio_frame: caps.DeviceFrame,
+    /// info about the device
+    info_frame: caps.Frame,
+};
+
 const System = struct {
     recv: caps.Receiver,
     dont_reply: bool = false,
@@ -395,18 +425,18 @@ fn irqsHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.X86
     return .{ void{}, irqs };
 }
 
-fn deviceHandler(ctx: *System, sender: u32, req: struct { abi.Device }) struct { Error!void, caps.DeviceFrame } {
+fn deviceHandler(ctx: *System, sender: u32, req: struct { abi.Device }) struct { Error!void, caps.DeviceFrame, caps.Frame } {
     if (ctx.servers.get(.rm).endpoint != sender) {
-        return .{ Error.PermissionDenied, .{} };
+        return .{ Error.PermissionDenied, .{}, .{} };
     }
 
     const kind = req.@"0";
     const device = ctx.devices.get(kind);
     ctx.devices.set(kind, .{});
 
-    if (device.cap == 0) return .{ Error.AlreadyMapped, .{} };
+    if (device.cap == 0) return .{ Error.AlreadyMapped, .{}, .{} };
 
-    return .{ void{}, device };
+    return .{ void{}, device, .{} };
 }
 
 fn serverReadyHandler(ctx: *System, sender: u32, req: struct { abi.ServerKind, caps.Sender }) struct { Error!void, void } {
