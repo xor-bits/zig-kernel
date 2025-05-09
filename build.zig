@@ -34,8 +34,13 @@ fn options(b: *std.Build, target: std.Build.ResolvedTarget) Opts {
             false,
 
         // OVMF.fd path
-        .ovmf_fd = b.option([]const u8, "ovmf", "OVMF.fd path") orelse
-            "/usr/share/ovmf/x64/OVMF.fd",
+        .ovmf_fd = b.option([]const u8, "ovmf", "OVMF.fd path") orelse b: {
+            if (std.posix.getenvZ("OVMF_FD")) |override| {
+                break :b override[0..];
+            } else {
+                break :b "/usr/share/ovmf/x64/OVMF.fd";
+            }
+        },
 
         // use GDB
         .gdb = b.option(bool, "gdb", "use GDB") orelse
