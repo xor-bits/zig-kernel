@@ -71,13 +71,6 @@ pub fn main() !void {
 
     try initfsd.wait();
 
-    // init (normal) (process)
-    // all the critial system servers are running, so now "normal" Linux-like init can run
-    // gets a Sender capability to access the initfs part of this root process
-    // just runs normal processes according to the init configuration
-    // launches stuff like the window manager and virtual TTYs
-    system.init_bin = try binBytes("/sbin/init");
-
     // virtual memory manager (system) (server)
     // maps new processes to memory and manages page faults,
     // heaps, lazy alloc, shared memory, swapping, etc.
@@ -385,9 +378,6 @@ const System = struct {
 
     servers: std.EnumArray(abi.ServerKind, Server) = .initFill(.{}),
 
-    init: caps.Thread = .{},
-    init_bin: []const u8 = "",
-
     fn expectIsSystem(ctx: *System, sender: u32) Error!void {
         var it = ctx.servers.iterator();
         while (it.next()) |next| {
@@ -478,12 +468,6 @@ fn serverReadyHandler(ctx: *System, sender: u32, req: struct { abi.ServerKind, c
                 return .{ {}, {} };
             };
         }
-
-        // TODO: exec initfs:///sbin/init with pm
-        _ = execWithVm(ctx, ctx.init_bin) catch |err| {
-            log.err("failed to exec init: {}", .{err});
-            return .{ {}, {} };
-        };
     }
 
     if (is_requested) {

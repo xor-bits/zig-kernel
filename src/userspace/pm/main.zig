@@ -45,6 +45,11 @@ pub fn main() !void {
     res, _ = try initfs_client.call(.openFile, .{ ("/sbin/init" ++ .{0} ** 22).*, init_elf_frame });
     try res;
 
+    // init (normal) (process)
+    // all the critial system servers are running, so now "normal" Linux-like init can run
+    // gets a Sender capability to access the initfs part of this root process
+    // just runs normal processes according to the init configuration
+    // launches stuff like the window manager and virtual TTYs
     log.debug("creating init process", .{});
     res, const init_vmem_handle: usize = try vm_client.call(.newVmem, {});
     try res;
@@ -53,8 +58,17 @@ pub fn main() !void {
     res, const init_thread: caps.Thread = try vm_client.call(.newThread, .{ init_vmem_handle, 0, 0 });
     try res;
 
+    log.debug("requesting root sender for HPET", .{});
+    res, const init_root_sender: caps.Sender = try root.call(.newSender, {});
+    try res;
+
     log.debug("starting init process", .{});
+    var regs: abi.sys.ThreadRegs = undefined;
+    try init_thread.transferCap(init_root_sender.cap);
     try init_thread.setPrio(0);
+    try init_thread.readRegs(&regs);
+    regs.arg0 = init_root_sender.cap;
+    try init_thread.writeRegs(&regs);
     try init_thread.start();
 
     var system: System = .{
