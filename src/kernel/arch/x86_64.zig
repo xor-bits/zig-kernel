@@ -330,6 +330,78 @@ pub fn cpuid(branch: u32, leaf: u32) Cpuid {
     };
 }
 
+pub const CpuFeatures = packed struct {
+    sse3: bool,
+    pclmul: bool,
+    dtes64: bool,
+    monitor: bool,
+    ds_cpl: bool,
+    vmx: bool,
+    smx: bool,
+    est: bool,
+    tm2: bool,
+    ssse3: bool,
+    cid: bool,
+    sdbg: bool,
+    fma: bool,
+    cx16: bool,
+    xtpr: bool,
+    pdcm: bool,
+    _reserved0: bool,
+    pcid: bool,
+    dca: bool,
+    sse4_1: bool,
+    sse4_2: bool,
+    x2apic: bool,
+    movbe: bool,
+    popcnt: bool,
+    tsc_ecx: bool,
+    aes: bool,
+    xsave: bool,
+    osxsave: bool,
+    avx: bool,
+    f16c: bool,
+    rdrand: bool,
+    hypervisor: bool,
+    fpu: bool,
+    vme: bool,
+    de: bool,
+    pse: bool,
+    tsc_edx: bool,
+    msr: bool,
+    pae: bool,
+    mce: bool,
+    cx8: bool,
+    apic: bool,
+    _reserved1: bool,
+    sep: bool,
+    mtrr: bool,
+    pge: bool,
+    mca: bool,
+    cmov: bool,
+    pat: bool,
+    pse36: bool,
+    psn: bool,
+    clflush: bool,
+    _reserved2: bool,
+    ds: bool,
+    acpi: bool,
+    mmx: bool,
+    fxsr: bool,
+    sse: bool,
+    sse2: bool,
+    ss: bool,
+    htt: bool,
+    tm: bool,
+    ia64: bool,
+    pbe: bool,
+
+    pub fn read() @This() {
+        const result = cpuid(1, 0);
+        return @bitCast([2]u32{ result.ecx, result.edx });
+    }
+};
+
 pub fn wrcr3(sel: u64) void {
     asm volatile (
         \\ mov %[v], %cr3

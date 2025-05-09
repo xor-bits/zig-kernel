@@ -73,6 +73,8 @@ pub fn main() noreturn {
     log.info("kernel version: 0.0.2{s}", .{if (builtin.is_test) "-testing" else ""});
     log.info("kernel git revision: {s}", .{comptime std.mem.trimRight(u8, @embedFile("git-rev"), "\n\r")});
 
+    log.info("CPUID features: {}", .{arch.CpuFeatures.read()});
+
     log.info("initializing physical memory allocator", .{});
     pmem.init() catch |err| {
         std.debug.panic("failed to initialize PMM: {}", .{err});
