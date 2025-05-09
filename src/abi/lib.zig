@@ -175,7 +175,7 @@ pub const SysLog = struct {
 
 //
 
-pub const Device = enum(u8) {
+pub const DeviceKind = enum(u8) {
     hpet,
     framebuffer,
 };
@@ -187,6 +187,13 @@ pub const ServerKind = enum(u8) {
     vfs,
     timer,
     input,
+};
+
+pub const Device = struct {
+    /// the actual physical device frame
+    mmio_frame: caps.DeviceFrame = .{},
+    /// info about the device
+    info_frame: caps.Frame = .{},
 };
 
 pub const RootProtocol = util.Protocol(struct {
@@ -204,7 +211,7 @@ pub const RootProtocol = util.Protocol(struct {
 
     /// request a device physical frame and its info frame
     /// only rm can use this
-    device: fn (kind: Device) struct { sys.Error!void, caps.DeviceFrame, caps.Frame },
+    device: fn (kind: DeviceKind) struct { sys.Error!void, caps.DeviceFrame, caps.Frame },
 
     /// inform root that the server is ready and provide a sender to the server
     /// only servers can use this, and `kind` has to match the server

@@ -36,7 +36,7 @@ pub fn main() !void {
     try res;
 
     log.debug("requesting HPET", .{});
-    res, const hpet_frame: caps.DeviceFrame, _ = try root.call(.device, .{abi.Device.hpet});
+    res, const hpet_frame: caps.DeviceFrame, _ = try root.call(.device, .{abi.DeviceKind.hpet});
     try res;
 
     // endpoint for rm server <-> unix app communication

@@ -363,18 +363,11 @@ const Server = struct {
         std.BoundedArray(caps.Reply, 8).init(0) catch unreachable,
 };
 
-const Device = struct {
-    /// the actual physical device frame
-    mmio_frame: caps.DeviceFrame = .{},
-    /// info about the device
-    info_frame: caps.Frame = .{},
-};
-
 const System = struct {
     recv: caps.Receiver,
     dont_reply: bool = false,
 
-    devices: std.EnumArray(abi.Device, Device) = .initFill(.{}),
+    devices: std.EnumArray(abi.DeviceKind, abi.Device) = .initFill(.{}),
 
     servers: std.EnumArray(abi.ServerKind, Server) = .initFill(.{}),
 
@@ -421,7 +414,7 @@ fn irqsHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.X86
     return .{ void{}, irqs };
 }
 
-fn deviceHandler(ctx: *System, sender: u32, req: struct { abi.Device }) struct { Error!void, caps.DeviceFrame, caps.Frame } {
+fn deviceHandler(ctx: *System, sender: u32, req: struct { abi.DeviceKind }) struct { Error!void, caps.DeviceFrame, caps.Frame } {
     if (ctx.servers.get(.rm).endpoint != sender) {
         return .{ Error.PermissionDenied, .{}, .{} };
     }
