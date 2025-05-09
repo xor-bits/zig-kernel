@@ -67,6 +67,8 @@ pub fn main() !void {
         .info_frame = boot_info.framebuffer_info,
     });
 
+    const vm_sender = try recv.subscribe();
+
     try initfsd.wait();
 
     // init (normal) (process)
@@ -103,7 +105,6 @@ pub fn main() !void {
 
     // FIXME: figure out a way to reclaim capabilities from crashed processes
 
-    const vm_sender = try recv.subscribe();
     const vm = system.servers.getPtr(.vm);
     vm.thread = try execVm(vm.bin, vm_sender);
     vm.endpoint = vm_sender.cap;
