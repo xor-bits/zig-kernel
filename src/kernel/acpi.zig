@@ -117,7 +117,7 @@ fn walkTables(comptime T: type, pointers: []align(1) const T) !void {
     try apic.init(@ptrCast(apic_table));
     try hpet.init(@ptrCast(hpet_table));
 
-    apic.enable();
+    try apic.enable();
 }
 
 pub const SdtType = enum {

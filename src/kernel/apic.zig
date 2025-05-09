@@ -1,5 +1,6 @@
-const std = @import("std");
+const abi = @import("abi");
 const builtin = @import("builtin");
+const std = @import("std");
 
 const acpi = @import("acpi.zig");
 const addr = @import("addr.zig");
@@ -7,10 +8,12 @@ const arch = @import("arch.zig");
 const caps = @import("caps.zig");
 const hpet = @import("hpet.zig");
 const lazy = @import("lazy.zig");
+const main = @import("main.zig");
 const pmem = @import("pmem.zig");
 const spin = @import("spin.zig");
 
 const log = std.log.scoped(.apic);
+const conf = abi.conf;
 
 //
 
@@ -41,15 +44,23 @@ const APIC_TIMER_DIV: u32 = 0b0010; // div by 8
 
 //
 
-var apic_base = lazy.Lazy(*LocalXApicRegs).new();
 /// all I/O APICs
 var ioapics = std.ArrayList(IoApicInfo).init(pmem.page_allocator);
 var ioapic_lock: spin.Mutex = .{};
 /// all Local APIC IDs that I/O APICs can use as interrupt destinations
 var ioapic_lapics = std.ArrayList(IoApicLapic).init(pmem.page_allocator);
+
 var ioapic_lapic_lock: spin.Mutex = .{};
 
+//
+
 pub const Handler = std.atomic.Value(?*caps.Notify);
+
+pub const ApicRegs = union(enum) {
+    xapic: *LocalXApicRegs,
+    x2apic: *LocalX2ApicRegs,
+    none: void,
+};
 
 const IoApicLapic = struct {
     lapic_id: u4,
@@ -131,9 +142,42 @@ pub fn init(madt: *const Madt) !void {
 
     if (arch.cpuId() == 0)
         log.info("found Local APIC addr: 0x{x}", .{lapic_addr});
-    const lapic: *LocalXApicRegs = addr.Phys.fromInt(lapic_addr).toHhdm().toPtr(*LocalXApicRegs);
+    const locals = arch.cpuLocal();
 
-    const lapic_id = lapic.lapic_id.read();
+    const cpu_features = arch.CpuFeatures.read();
+    if (cpu_features.x2apic) {
+        log.info("x2APIC mode", .{});
+        locals.apic_regs = .{ .x2apic = @ptrFromInt(arch.IA32_X2APIC) };
+    } else if (cpu_features.apic) {
+        log.info("legacy xAPIC mode", .{});
+        locals.apic_regs = .{ .xapic = addr.Phys.fromInt(lapic_addr).toHhdm().toPtr(*LocalXApicRegs) };
+    } else {
+        log.err("CPU doesn't support x2APIC nor xAPIC", .{});
+        arch.hcf();
+    }
+}
+
+pub fn enable() !void {
+    const locals = arch.cpuLocal();
+    switch (locals.apic_regs) {
+        .xapic => |regs| try enableAny(locals, regs, .enabled_xapic),
+        .x2apic => |regs| try enableAny(locals, regs, .enabled_x2apic),
+        .none => unreachable,
+    }
+}
+
+fn enableAny(
+    locals: *main.CpuLocalStorage,
+    regs: anytype,
+    comptime mode: @TypeOf(@as(ApicBaseMsr, undefined).lapic_mode),
+) !void {
+    // enable APIC
+    var base = ApicBaseMsr.read();
+    base.lapic_mode = mode;
+    base.write();
+
+    // install this as a usable I/O APIC LAPIC target
+    const lapic_id: u32 = regs.lapic_id.read();
     if (lapic_id <= 0xF) {
         ioapic_lapic_lock.lock();
         defer ioapic_lapic_lock.unlock();
@@ -143,73 +187,66 @@ pub fn init(madt: *const Madt) !void {
         });
     }
 
-    apic_base.initNow(lapic);
-}
-
-pub fn enable() void {
-    const lapic = apic_base.get().?.*;
-
     // reset APIC to a well-known state
-    lapic.destination_format.write(0xFFFF_FFFF);
-    lapic.logical_destination.write(0x00FF_FFFF);
-    lapic.lvt_timer.write(APIC_DISABLE);
-    lapic.lvt_performance_monitoring_counters.write(APIC_NMI);
-    lapic.lvt_lint0.write(APIC_DISABLE);
-    lapic.lvt_lint1.write(APIC_DISABLE);
-    lapic.task_priority.write(0);
+    if (mode == .enabled_xapic) {
+        regs.destination_format.write(0xFFFF_FFFF);
+        regs.logical_destination.write(0x00FF_FFFF);
+    }
+    regs.lvt_timer.write(APIC_DISABLE);
+    regs.lvt_performance_monitoring_counters.write(APIC_NMI);
+    regs.lvt_lint0.write(APIC_DISABLE);
+    regs.lvt_lint1.write(APIC_DISABLE);
+    regs.task_priority.write(0);
 
     // enable
-    lapic.spurious_interrupt_vector.write(APIC_SW_ENABLE | @as(u32, IRQ_SPURIOUS));
-
-    // enable APIC
-    var base = ApicBaseMsr.read();
-    log.info("IA32_APIC_BASE: {}", .{base});
-    base.lapic_mode = .enabled_xapic;
-    base.write();
+    regs.spurious_interrupt_vector.write(APIC_SW_ENABLE | @as(u32, IRQ_SPURIOUS));
 
     // enable timer interrupts
-    const period = measureApicTimerSpeed(lapic) * 500;
-    lapic.divide_configuration.write(APIC_TIMER_DIV);
-    lapic.lvt_timer.write(IRQ_TIMER | APIC_TIMER_MODE_PERIODIC);
-    lapic.initial_count.write(period);
-    lapic.lvt_thermal_sensor.write(0);
-    lapic.lvt_error.write(0);
-    lapic.divide_configuration.write(APIC_TIMER_DIV); // buggy hardware fix
+    const period = measureApicTimerSpeed(locals, regs) * 500;
+    regs.divide_configuration.write(APIC_TIMER_DIV);
+    regs.lvt_timer.write(IRQ_TIMER | APIC_TIMER_MODE_PERIODIC);
+    regs.initial_count.write(period);
+    regs.lvt_thermal_sensor.write(0);
+    regs.lvt_error.write(0);
+    regs.divide_configuration.write(APIC_TIMER_DIV); // buggy hardware fix
 
-    if (arch.cpuId() == 0)
+    if (locals.id == 0)
         log.info("APIC initialized", .{});
 }
 
 /// returns the apic period for 1ms
-fn measureApicTimerSpeed(lapic: *LocalXApicRegs) u32 {
-    lapic.divide_configuration.write(APIC_TIMER_DIV);
+fn measureApicTimerSpeed(locals: *main.CpuLocalStorage, regs: anytype) u32 {
+    regs.divide_configuration.write(APIC_TIMER_DIV);
 
     hpet.hpetSpinWait(1_000, struct {
-        lapic: *LocalXApicRegs,
+        regs: @TypeOf(regs),
         pub fn run(s: *const @This()) void {
-            s.lapic.initial_count.write(0xFFFF_FFFF);
+            s.regs.initial_count.write(0xFFFF_FFFF);
         }
-    }{ .lapic = lapic });
+    }{ .regs = regs });
 
-    lapic.lvt_timer.write(APIC_DISABLE);
-    const count = 0xFFFF_FFFF - lapic.current_count.read();
+    regs.lvt_timer.write(APIC_DISABLE);
+    const count = 0xFFFF_FFFF - regs.current_count.read();
 
-    if (arch.cpuId() == 0)
+    if (locals.id == 0)
         log.info("APIC timer speed: 1ms = {d} ticks", .{count});
 
     return count;
 }
 
+// TODO: the mode could be comptime here,
+// the ISR would be selected dynamically
 pub fn eoi() void {
-    apic_base.get().?.*.eoi.write(0);
+    const locals = arch.cpuLocal();
+    log.info("{?*}", .{locals.current_thread});
+    switch (locals.apic_regs) {
+        .xapic => |regs| regs.eoi.write(0),
+        .x2apic => |regs| regs.eoi.write(0),
+        .none => unreachable,
+    }
 }
 
 pub fn interProcessorInterrupt(target_lapic_id: u8, vector: u8) void {
-    const lapic_regs: *LocalXApicRegs = apic_base.get().?.*;
-
-    // log.info("ICR_HIGH: {*}", .{&lapic_regs.interrupt_command[1].val});
-    // log.info("ICR_LOW: {*}", .{&lapic_regs.interrupt_command[0].val});
-
     const icr_high = IcrHigh{
         .destination = target_lapic_id,
     };
@@ -222,11 +259,16 @@ pub fn interProcessorInterrupt(target_lapic_id: u8, vector: u8) void {
         .destination_shorthand = .no_shorthand,
     };
 
-    // log.info("ICR_HIGH: {}", .{icr_high});
-    // log.info("ICR_LOW: {}", .{icr_low});
-
-    lapic_regs.interrupt_command[1].write(@bitCast(icr_high));
-    lapic_regs.interrupt_command[0].write(@bitCast(icr_low));
+    switch (arch.cpuLocal().apic_regs) {
+        .xapic => |regs| {
+            regs.interrupt_command[1].write(@bitCast(icr_high));
+            regs.interrupt_command[0].write(@bitCast(icr_low));
+        },
+        .x2apic => |regs| {
+            regs.interrupt_command.writeIcr(@bitCast([2]u32{ @bitCast(icr_low), @bitCast(icr_high) }));
+        },
+        .none => unreachable,
+    }
 }
 
 /// source IRQ would be the source like keyboard at 1
@@ -466,16 +508,32 @@ pub fn X2ApicReg(comptime mode: RegisterMode) type {
     return struct {
         _val: u8, // MSR address increment is 1, it isn't an actual memory address
 
-        pub fn read(self: *@This()) usize {
-            if (mode == .w) @compileError("cannot read from a write-only register");
-            if (mode == .none) @compileError("cannot read from a reserved register");
-            return arch.rdmsr(@intFromPtr(&self._val));
+        pub fn read(self: *@This()) u32 {
+            return @truncate(readIcr(self));
         }
 
-        pub fn write(self: *@This(), val: usize) void {
+        pub fn write(self: *@This(), val: u32) void {
+            self.writeIcr(val);
+        }
+
+        pub fn readIcr(self: *@This()) u64 {
+            if (mode == .w) @compileError("cannot read from a write-only register");
+            if (mode == .none) @compileError("cannot read from a reserved register");
+            const msr: usize = @intFromPtr(&self._val);
+            std.debug.assert(0x800 <= msr and msr <= 0x8FF);
+
+            if (conf.LOG_APIC) log.debug("x2apic read from {x}H", .{msr});
+            return arch.rdmsr(@truncate(msr));
+        }
+
+        pub fn writeIcr(self: *@This(), val: u64) void {
             if (mode == .r) @compileError("cannot write into a read-only register");
             if (mode == .none) @compileError("cannot write into a reserved register");
-            arch.wrmsr(@intFromPtr(&self._val), val);
+            const msr: usize = @intFromPtr(&self._val);
+            std.debug.assert(0x800 <= msr and msr <= 0x8FF);
+
+            if (conf.LOG_APIC) log.debug("x2apic write to {x}H", .{msr});
+            arch.wrmsr(@truncate(msr), val);
         }
     };
 }
@@ -523,12 +581,16 @@ pub fn XApicReg(comptime mode: RegisterMode) type {
         pub fn read(self: *@This()) u32 {
             if (mode == .w) @compileError("cannot read from a write-only register");
             if (mode == .none) @compileError("cannot read from a reserved register");
+
+            if (conf.LOG_APIC) log.debug("xapic read from {x}H", .{@intFromPtr(&self._val)});
             return @as(*volatile u32, &self._val).*;
         }
 
         pub fn write(self: *@This(), val: u32) void {
             if (mode == .r) @compileError("cannot write into a read-only register");
             if (mode == .none) @compileError("cannot write into a reserved register");
+
+            if (conf.LOG_APIC) log.debug("xapic write to {x}H", .{@intFromPtr(&self._val)});
             @as(*volatile u32, &self._val).* = val;
         }
     };
