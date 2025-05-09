@@ -353,6 +353,7 @@ const Proto = abi.RootProtocol.Server(.{
     .serverReady = serverReadyHandler,
     .serverSender = serverSenderHandler,
     .initfs = initfsHandler,
+    .newSender = newSenderHandler,
 });
 
 const Server = struct {
@@ -553,6 +554,17 @@ fn initfsHandler(_: *System, _: u32, _: void) struct { Error!void, caps.Sender }
     };
 
     return .{ {}, initfs_sender };
+}
+
+fn newSenderHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.Sender } {
+    ctx.expectIsSystem(sender) catch |err| return .{ err, .{} };
+
+    const root_sender = ctx.recv.subscribe() catch |err| {
+        log.err("failed to subscribe: {}", .{err});
+        return .{ err, .{} };
+    };
+
+    return .{ {}, root_sender };
 }
 
 /// returns the endpoint id of the server, used for verifying server identity

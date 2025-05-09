@@ -216,6 +216,9 @@ pub const RootProtocol = util.Protocol(struct {
 
     /// request a sender to the initfs server
     initfs: fn () struct { sys.Error!void, caps.Sender },
+
+    /// create a new sender to the root
+    newSender: fn () struct { sys.Error!void, caps.Sender },
 });
 
 pub const InitfsProtocol = util.Protocol(struct {
