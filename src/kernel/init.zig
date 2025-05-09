@@ -87,7 +87,7 @@ fn mapRoot(thread: *caps.Thread, vmem: *caps.Vmem, boot_info: *caps.Frame, a: ar
         .initfs_path_len = a.initfs_path.len,
     };
 
-    fb.bootInfoInstallFramebuffer(boot_info_ptr, thread);
+    try fb.bootInfoInstallFramebuffer(boot_info_ptr, thread);
 
     const hpet_cap_id = caps.pushCapability(hpet.hpetFrame().object(thread));
     volat(&boot_info_ptr.hpet).* = .{ .cap = hpet_cap_id };

@@ -138,11 +138,9 @@ pub const BootInfo = extern struct {
     initfs_path: [*]u8,
     initfs_path_len: usize,
     framebuffer: caps.DeviceFrame = .{},
-    framebuffer_width: usize = 0,
-    framebuffer_height: usize = 0,
-    framebuffer_pitch: usize = 0,
-    framebuffer_bpp: u16 = 0,
+    framebuffer_info: caps.Frame = .{},
     hpet: caps.DeviceFrame = .{},
+    hpet_info: caps.Frame = .{},
 
     pub fn rootData(self: @This()) []u8 {
         return self.root_data[0..self.root_data_len];
@@ -255,7 +253,7 @@ pub const VmProtocol = util.Protocol(struct {
     /// ip and sp are already set
     newThread: fn (handle: usize, ip_override: usize, sp_override: usize) struct { sys.Error!void, caps.Thread },
 
-    /// create a new sender the vm server
+    /// create a new sender to the vm server
     /// only root can call this
     newSender: fn () struct { sys.Error!void, caps.Sender },
 });
@@ -288,7 +286,7 @@ pub const RmProtocol = util.Protocol(struct {
     /// request an interrupt handler for a driver
     requestInterruptHandler: fn (irq: u8, notify: caps.Notify) struct { sys.Error!void, caps.Notify },
 
-    /// create a new sender the rm server
+    /// create a new sender to the rm server
     /// only root can call this
     newSender: fn () struct { sys.Error!void, caps.Sender },
 });
@@ -304,7 +302,7 @@ pub const TimerProtocol = util.Protocol(struct {
     /// stop the thread until this timestamp is reached
     sleepDeadline: fn (nanos: u128) void,
 
-    /// create a new sender the hpet server
+    /// create a new sender to the hpet server
     /// only root can call this
     newSender: fn () struct { sys.Error!void, caps.Sender },
 });
@@ -326,3 +324,16 @@ pub const InputProtocol = util.Protocol(struct {});
 
 /// input <-> ps2 communication
 pub const Ps2Protocol = util.Protocol(struct {});
+
+pub const FramebufferInfoFrame = struct {
+    width: usize = 0,
+    height: usize = 0,
+    pitch: usize = 0,
+    bpp: u16 = 0,
+    red_mask_size: u8,
+    red_mask_shift: u8,
+    green_mask_size: u8,
+    green_mask_shift: u8,
+    blue_mask_size: u8,
+    blue_mask_shift: u8,
+};

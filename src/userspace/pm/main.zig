@@ -20,7 +20,7 @@ pub fn main() !void {
     const vmem_handle = abi.rt.vmem_handle;
 
     log.debug("requesting memory", .{});
-    var res: Error!void, const memory: caps.Memory = try root.call(.memory, void{});
+    var res: Error!void, const memory: caps.Memory = try root.call(.memory, {});
     try res;
 
     // endpoint for pm server <-> unix app communication
@@ -29,15 +29,40 @@ pub fn main() !void {
     const pm_send = try pm_recv.subscribe();
 
     log.debug("requesting vm sender", .{});
-    res, const vm_sender = try root.call(.serverSender, .{abi.ServerKind.vm});
+    res, const vm_sender: caps.Sender = try root.call(.serverSender, .{abi.ServerKind.vm});
     try res;
+    const vm_client = abi.VmProtocol.Client().init(vm_sender);
+
+    log.debug("requesting initfs sender", .{});
+    res, const initfs_sender: caps.Sender = try root.call(.initfs, {});
+    try res;
+    const initfs_client = abi.InitfsProtocol.Client().init(initfs_sender);
+
+    log.debug("opening init ELF", .{});
+    res, const init_elf_len: usize = try initfs_client.call(.fileSize, .{("/sbin/init" ++ .{0} ** 22).*});
+    try res;
+    const init_elf_frame: caps.Frame = try memory.allocSized(caps.Frame, abi.ChunkSize.of(init_elf_len) orelse return Error.OutOfMemory);
+    res, _ = try initfs_client.call(.openFile, .{ ("/sbin/init" ++ .{0} ** 22).*, init_elf_frame });
+    try res;
+
+    log.debug("creating init process", .{});
+    res, const init_vmem_handle: usize = try vm_client.call(.newVmem, {});
+    try res;
+    res, _ = try vm_client.call(.loadElf, .{ init_vmem_handle, init_elf_frame, 0, init_elf_len });
+    try res;
+    res, const init_thread: caps.Thread = try vm_client.call(.newThread, .{ init_vmem_handle, 0, 0 });
+    try res;
+
+    log.debug("starting init process", .{});
+    try init_thread.setPrio(0);
+    try init_thread.start();
 
     var system: System = .{
         .recv = pm_recv,
         .memory = memory,
         .root_endpoint = pm_send.cap,
 
-        .vm_client = abi.VmProtocol.Client().init(vm_sender),
+        .vm_client = vm_client,
         .self_vmem_handle = vmem_handle,
     };
 

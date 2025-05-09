@@ -19,7 +19,7 @@ pub export var framebuffer: limine.FramebufferRequest = .{};
 
 //
 
-pub fn bootInfoInstallFramebuffer(boot_info: *volatile abi.BootInfo, thread: *caps.Thread) void {
+pub fn bootInfoInstallFramebuffer(boot_info: *volatile abi.BootInfo, thread: *caps.Thread) !void {
     const resp = framebuffer.response orelse return;
     if (resp.framebuffer_count == 0) return;
 
@@ -27,15 +27,30 @@ pub fn bootInfoInstallFramebuffer(boot_info: *volatile abi.BootInfo, thread: *ca
     const fb_paddr = addr.Virt.fromPtr(first_fb.address).hhdmToPhys();
     const bytes: usize = first_fb.height * first_fb.pitch * (std.math.divCeil(usize, first_fb.bpp, 8) catch unreachable);
     const fb_size = abi.ChunkSize.of(bytes) orelse return;
+    const fb_info_size = comptime abi.ChunkSize.of(@sizeOf(abi.FramebufferInfoFrame)) orelse unreachable;
 
     const fb_obj: caps.Ref(caps.DeviceFrame) = .{ .paddr = caps.DeviceFrame.new(fb_paddr, fb_size) };
+    const fb_info_obj: caps.Ref(caps.Frame) = try caps.Ref(caps.Frame).alloc(fb_info_size);
 
-    const id = caps.pushCapability(fb_obj.object(thread));
+    const fb_info = @as(*volatile abi.FramebufferInfoFrame, @ptrCast(fb_info_obj.ptr()));
+    fb_info.* = .{
+        .width = first_fb.width,
+        .height = first_fb.height,
+        .pitch = first_fb.pitch,
+        .bpp = first_fb.bpp,
+        .red_mask_size = first_fb.red_mask_size,
+        .red_mask_shift = first_fb.red_mask_shift,
+        .green_mask_size = first_fb.green_mask_size,
+        .green_mask_shift = first_fb.green_mask_shift,
+        .blue_mask_size = first_fb.blue_mask_size,
+        .blue_mask_shift = first_fb.blue_mask_shift,
+    };
+
+    var id: u32 = undefined;
+    id = caps.pushCapability(fb_obj.object(thread));
     volat(&boot_info.framebuffer).* = .{ .cap = id };
-    volat(&boot_info.framebuffer_width).* = first_fb.width;
-    volat(&boot_info.framebuffer_height).* = first_fb.height;
-    volat(&boot_info.framebuffer_pitch).* = first_fb.pitch;
-    volat(&boot_info.framebuffer_bpp).* = first_fb.bpp;
+    id = caps.pushCapability(fb_info_obj.object(thread));
+    volat(&boot_info.framebuffer_info).* = .{ .cap = id };
 }
 
 // EVERYTHING BELOW THIS IS JUST FOR THE KERNEL PANIC WRITER

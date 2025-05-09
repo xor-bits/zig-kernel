@@ -20,7 +20,8 @@ pub const LOADER_TMP = 0x2000_0000_0000;
 /// uncompressed initfs.tar location
 pub const INITFS_TAR = 0x3000_0000_0000;
 pub const FRAMEBUFFER = 0x4000_0000_0000;
-pub const BACKBUFFER = 0x4800_0000_0000;
+pub const BACKBUFFER = 0x4100_0000_0000;
+pub const FRAMEBUFFER_INFO = 0x4200_0000_0000;
 pub const INITFS_TMP = 0x5000_0000_0000;
 pub const STACK_SIZE = 0x40000;
 pub const STACK_TOP = 0x8000_0000_0000 - 0x2000;
@@ -50,30 +51,30 @@ pub fn main() !void {
     );
     log.info("boot info mapped", .{});
 
-    const boot_info = @as(*const volatile abi.BootInfo, @ptrFromInt(BOOT_INFO)).*;
-
-    try startSpinner();
     try initfsd.init();
+    try startSpinner();
 
     const recv = try alloc(abi.caps.Receiver);
+    var system: System = .{ .recv = recv };
 
-    var devices = std.EnumArray(abi.Device, caps.DeviceFrame).initFill(.{});
-    devices.set(abi.Device.hpet, boot_info.hpet);
+    const boot_info = @as(*const volatile abi.BootInfo, @ptrFromInt(BOOT_INFO)).*;
+    system.devices.set(.hpet, .{
+        .mmio_frame = boot_info.hpet,
+        .info_frame = .{},
+    });
+    system.devices.set(.framebuffer, .{
+        .mmio_frame = boot_info.framebuffer,
+        .info_frame = boot_info.framebuffer_info,
+    });
 
     try initfsd.wait();
 
-    var system: System = .{
-        .recv = recv,
-
-        .devices = devices,
-
-        // init (normal) (process)
-        // all the critial system servers are running, so now "normal" Linux-like init can run
-        // gets a Sender capability to access the initfs part of this root process
-        // just runs normal processes according to the init configuration
-        // launches stuff like the window manager and virtual TTYs
-        .init_bin = try binBytes("/sbin/init"),
-    };
+    // init (normal) (process)
+    // all the critial system servers are running, so now "normal" Linux-like init can run
+    // gets a Sender capability to access the initfs part of this root process
+    // just runs normal processes according to the init configuration
+    // launches stuff like the window manager and virtual TTYs
+    system.init_bin = try binBytes("/sbin/init");
 
     // virtual memory manager (system) (server)
     // maps new processes to memory and manages page faults,
@@ -194,12 +195,15 @@ fn framebufferSplash(_boot_info: *const volatile abi.BootInfo) !void {
 
     if (boot_info.framebuffer.cap == 0) return;
 
-    if (boot_info.framebuffer_bpp != 32) {
+    const fb_dev_size = try boot_info.framebuffer.sizeOf();
+
+    try map(boot_info.framebuffer_info, FRAMEBUFFER_INFO, .{}, .{});
+    const framebuffer_info: *const abi.FramebufferInfoFrame = @ptrFromInt(FRAMEBUFFER_INFO);
+
+    if (framebuffer_info.bpp != 32) {
         log.warn("unrecognized framebuffer format", .{});
         return;
     }
-
-    const fb_dev_size = try boot_info.framebuffer.sizeOf();
 
     try mapDevice(boot_info.framebuffer, FRAMEBUFFER, .{ .writable = true }, .{
         .cache = .write_combining,
@@ -208,9 +212,9 @@ fn framebufferSplash(_boot_info: *const volatile abi.BootInfo) !void {
     const frame = try allocSized(caps.Frame, fb_dev_size);
     try map(frame, BACKBUFFER, .{ .writable = true }, .{});
 
-    const width = boot_info.framebuffer_width;
-    const height = boot_info.framebuffer_height;
-    const pitch = boot_info.framebuffer_pitch / 4;
+    const width = framebuffer_info.width;
+    const height = framebuffer_info.height;
+    const pitch = framebuffer_info.pitch / 4;
     const framebuffer = @as([*]volatile u32, @ptrFromInt(FRAMEBUFFER))[0 .. width * pitch];
     const backbuffer = @as([*]u32, @ptrFromInt(BACKBUFFER))[0 .. width * pitch];
 
@@ -366,21 +370,21 @@ const Server = struct {
 
 const Device = struct {
     /// the actual physical device frame
-    mmio_frame: caps.DeviceFrame,
+    mmio_frame: caps.DeviceFrame = .{},
     /// info about the device
-    info_frame: caps.Frame,
+    info_frame: caps.Frame = .{},
 };
 
 const System = struct {
     recv: caps.Receiver,
     dont_reply: bool = false,
 
-    devices: std.EnumArray(abi.Device, caps.DeviceFrame),
+    devices: std.EnumArray(abi.Device, Device) = .initFill(.{}),
 
     servers: std.EnumArray(abi.ServerKind, Server) = .initFill(.{}),
 
     init: caps.Thread = .{},
-    init_bin: []const u8,
+    init_bin: []const u8 = "",
 
     fn expectIsSystem(ctx: *System, sender: u32) Error!void {
         var it = ctx.servers.iterator();
@@ -434,9 +438,9 @@ fn deviceHandler(ctx: *System, sender: u32, req: struct { abi.Device }) struct {
     const device = ctx.devices.get(kind);
     ctx.devices.set(kind, .{});
 
-    if (device.cap == 0) return .{ Error.AlreadyMapped, .{}, .{} };
+    if (device.mmio_frame.cap == 0) return .{ Error.AlreadyMapped, .{}, .{} };
 
-    return .{ void{}, device, .{} };
+    return .{ void{}, device.mmio_frame, device.info_frame };
 }
 
 fn serverReadyHandler(ctx: *System, sender: u32, req: struct { abi.ServerKind, caps.Sender }) struct { Error!void, void } {
