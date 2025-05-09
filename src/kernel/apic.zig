@@ -509,7 +509,7 @@ pub const LocalX2ApicRegs = struct {
     lvt_error: X2ApicReg(.rw),
     initial_count: X2ApicReg(.rw),
     current_count: X2ApicReg(.r),
-    _reserved7: [1]X2ApicReg(.none),
+    _reserved7: [4]X2ApicReg(.none),
     divide_configuration: X2ApicReg(.rw),
     self_ipi: X2ApicReg(.w),
 };
@@ -567,7 +567,7 @@ pub const LocalXApicRegs = extern struct {
     lvt_error: XApicReg(.rw),
     initial_count: XApicReg(.rw),
     current_count: XApicReg(.r),
-    _reserved3: [1]XApicReg(.none),
+    _reserved3: [4]XApicReg(.none),
     divide_configuration: XApicReg(.rw),
     _reserved4: [4]XApicReg(.none),
 };
