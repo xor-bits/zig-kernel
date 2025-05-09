@@ -91,7 +91,7 @@ pub fn main(
         const timer = hpet_regs.?.timer(timer_idx);
 
         var conf = @as(*volatile TimerNConfigAndCaps, &timer.config_and_caps).*;
-        for (0..24) |irq_idx| {
+        for (3..24) |irq_idx| {
             if (conf.int_route_cap & (@as(u32, 1) << @as(u5, @truncate(irq_idx))) == 0) continue;
 
             if (!irqs[irq_idx]) {
@@ -102,10 +102,10 @@ pub fn main(
 
             log.info("timer hooked up to IRQ{}", .{irq_idx});
 
-            conf = .{
+            // log.info("default timer conf {}", .{conf});
+            conf = TimerNConfigAndCaps{
                 .int_route_cap = conf.int_route_cap,
                 .int_route_config = @as(u5, @truncate(irq_idx)),
-                // .pe
             };
             break;
         } else {
