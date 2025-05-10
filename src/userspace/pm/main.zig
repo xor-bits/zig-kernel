@@ -94,6 +94,7 @@ pub fn main() !void {
         .Context = *System,
         .scope = if (abi.conf.LOG_SERVERS) .vm else null,
     }, .{
+        .spawn = spawnHandler,
         .growHeap = growHeapHandler,
         .mapFrame = mapFrameHandler,
         .mapDeviceFrame = mapDeviceFrameHandler,
@@ -125,9 +126,35 @@ const Process = struct {
     main_thread: caps.Thread,
 };
 
+fn spawnHandler(ctx: *System, sender: u32, req: struct { usize, usize }) struct { Error!void, caps.Thread } {
+    const ip_override = req.@"0";
+    const sp_override = req.@"1";
+
+    for (ctx.processes[1..]) |proc| {
+        const process = proc orelse continue;
+        if (process.pm_endpoint != sender) continue;
+
+        const res, const thread = ctx.vm_client.call(.newThread, .{
+            process.vmem_handle,
+            ip_override,
+            sp_override,
+        }) catch |err| {
+            log.err("failed to spawn a thread: {}", .{err});
+            return .{ Error.Internal, .{} };
+        };
+        res catch |err| {
+            log.err("failed to spawn a thread: {}", .{err});
+            return .{ Error.Internal, .{} };
+        };
+
+        return .{ {}, thread };
+    }
+
+    return .{ Error.PermissionDenied, .{} };
+}
+
 fn growHeapHandler(ctx: *System, sender: u32, req: struct { usize }) struct { Error!void, usize } {
     const by = req.@"0";
-    // TODO: give each sender some id that the sender itself cannot change
     for (ctx.processes[1..]) |proc| {
         const process = proc orelse continue;
         if (process.pm_endpoint != sender) continue;

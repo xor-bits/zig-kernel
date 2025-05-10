@@ -110,7 +110,7 @@ pub fn main() !void {
 
     const server = abi.TimerProtocol.Server(.{
         .Context = *System,
-        .scope = if (abi.conf.LOG_SERVERS) .vm else null,
+        .scope = if (abi.conf.LOG_SERVERS) .timer else null,
     }, .{
         .timestamp = timestampHandler,
         .sleep = sleepHandler,

@@ -11,8 +11,17 @@ pub const panic = abi.panic;
 pub const name = "ps2";
 const Error = abi.sys.Error;
 pub const log_level = .info;
+const KeyEvent = abi.input.KeyEvent;
+const KeyCode = abi.input.KeyCode;
 
 var self_vmem_handle: usize = 0;
+var vm_client: abi.VmProtocol.Client() = undefined;
+var rm_client: abi.RmProtocol.Client() = undefined;
+var notify: caps.Notify = .{};
+var done_lock: abi.lock.YieldMutex = .newLocked();
+
+var waiting_lock: abi.lock.YieldMutex = .{};
+var waiting: std.ArrayList(caps.Reply) = .init(tmp_allocator);
 
 //
 
@@ -45,322 +54,95 @@ pub fn main(
 ) !void {
     log.info("hello from ps2", .{});
 
-    _ = .{ recv_cap_id, vm_sender_cap_id };
-    // const recv = caps.Receiver{ .cap = recv_cap_id };
-    // const vm_client = abi.VmProtocol.Client().init(.{ .cap = vm_sender_cap_id });
-    const rm_client = abi.RmProtocol.Client().init(.{ .cap = rm_sender_cap_id });
-    const notify = caps.Notify{ .cap = notify_cap_id };
+    const recv = caps.Receiver{ .cap = recv_cap_id };
+    vm_client = abi.VmProtocol.Client().init(.{ .cap = vm_sender_cap_id });
+    rm_client = abi.RmProtocol.Client().init(.{ .cap = rm_sender_cap_id });
+    notify = caps.Notify{ .cap = notify_cap_id };
+    done_lock.unlock();
 
-    var keyboard = try Keyboard.init(rm_client, notify);
-    try keyboard.run();
+    try spawn(keyboardMain);
+
+    var vm_server = abi.Ps2Protocol.Server(
+        .{
+            .scope = if (abi.conf.LOG_SERVERS) .ps2 else null,
+        },
+        .{
+            .nextKey = nextKeyHandler,
+        },
+    ).init({}, recv);
+    try vm_server.run();
 }
 
-const KeyCode = enum(u8) {
-    escape,
-    f1,
-    f2,
-    f3,
-    f4,
-    f5,
-    f6,
-    f7,
-    f8,
-    f9,
-    f10,
-    f11,
-    f12,
+fn nextKeyHandler(_: void, _: u32, req: struct { caps.Reply }) struct { void } {
+    waiting_lock.lock();
+    defer waiting_lock.unlock();
 
-    print_screen,
-    sysrq,
-    scroll_lock,
-    pause_break,
+    waiting.append(req.@"0") catch |err| {
+        log.err("failed to add a reply cap: {}", .{err});
+    };
 
-    /// backtick `~
-    oem8,
-    key1,
-    key2,
-    key3,
-    key4,
-    key5,
-    key6,
-    key7,
-    key8,
-    key9,
-    key0,
-    /// -_
-    oem_minus,
-    /// =+
-    oem_plus,
-    backspace,
+    return .{{}};
+}
 
-    insert,
-    home,
-    page_up,
+fn keyboardMain() callconv(.SysV) noreturn {
+    done_lock.lock();
+    _ = b: {
+        var keyboard = Keyboard.init() catch |err| break :b err;
+        keyboard.run() catch |err| break :b err;
+    } catch |err| {
+        log.err("ps2 server error: {}", .{err});
+    };
+    @panic("ps2 server died");
+}
 
-    numpad_lock,
-    numpad_div,
-    numpad_mul,
-    numpad_sub,
+//
 
-    tab,
-    q,
-    w,
-    e,
-    r,
-    t,
-    y,
-    u,
-    i,
-    o,
-    p,
-    /// [{
-    oem4,
-    /// ]}
-    oem6,
-    /// \|
-    oem5,
-    /// #~ ISO layout
-    oem7,
+fn spawn(f: *const fn () callconv(.SysV) noreturn) !void {
+    const res, const kb_thread: caps.Thread = try vm_client.call(.newThread, .{
+        self_vmem_handle,
+        @intFromPtr(f),
+        0,
+    });
+    try res;
 
-    delete,
-    end,
-    page_down,
+    try kb_thread.setPrio(0);
+    try kb_thread.start();
+}
 
-    numpad7,
-    numpad8,
-    numpad9,
-    numpad_add,
-
-    caps_lock,
-    a,
-    s,
-    d,
-    f,
-    g,
-    h,
-    j,
-    k,
-    l,
-    /// ;:
-    oem1,
-    /// '"
-    oem3,
-
-    enter,
-
-    numpad4,
-    numpad5,
-    numpad6,
-
-    left_shift,
-    z,
-    x,
-    c,
-    v,
-    b,
-    n,
-    m,
-    /// ,<
-    oem_comma,
-    /// .>
-    oem_period,
-    /// /?
-    oem2,
-    right_shift,
-
-    arrow_up,
-
-    numpad1,
-    numpad2,
-    numpad3,
-    numpad_enter,
-
-    left_control,
-    left_super,
-    left_alt,
-    space,
-    right_altgr,
-    right_super,
-    menu,
-    right_control,
-
-    arrow_left,
-    arrow_down,
-    arrow_right,
-
-    numpad0,
-    numpad_period,
-
-    oem9,
-    oem10,
-    oem11,
-    oem12,
-    oem13,
-
-    prev_track,
-    next_track,
-    mute,
-    calculator,
-    play,
-    stop,
-    volume_down,
-    volume_up,
-    browser,
-
-    power_on,
-    too_many_keys,
-    right_control2,
-    right_alt2,
-
-    pub fn fromScancode0(code: u8) ?@This() {
-        return switch (code) {
-            0x00 => .too_many_keys,
-            0x01 => .f9,
-            0x03 => .f5,
-            0x04 => .f3,
-            0x05 => .f1,
-            0x06 => .f2,
-            0x07 => .f12,
-            0x09 => .f10,
-            0x0a => .f8,
-            0x0b => .f6,
-            0x0c => .f4,
-            0x0d => .tab,
-            0x0e => .oem8,
-            0x11 => .left_alt,
-            0x12 => .left_shift,
-            0x13 => .oem11,
-            0x14 => .left_control,
-            0x15 => .q,
-            0x16 => .key1,
-            0x1a => .z,
-            0x1b => .s,
-            0x1c => .a,
-            0x1d => .w,
-            0x1e => .key2,
-            0x21 => .c,
-            0x22 => .x,
-            0x23 => .d,
-            0x24 => .e,
-            0x25 => .key4,
-            0x26 => .key3,
-            0x29 => .space,
-            0x2a => .v,
-            0x2b => .f,
-            0x2c => .t,
-            0x2d => .r,
-            0x2e => .key5,
-            0x31 => .n,
-            0x32 => .b,
-            0x33 => .h,
-            0x34 => .g,
-            0x35 => .y,
-            0x36 => .key6,
-            0x3a => .m,
-            0x3b => .j,
-            0x3c => .u,
-            0x3d => .key7,
-            0x3e => .key8,
-            0x41 => .oem_comma,
-            0x42 => .k,
-            0x43 => .i,
-            0x44 => .o,
-            0x45 => .key0,
-            0x46 => .key9,
-            0x49 => .oem_period,
-            0x4a => .oem2,
-            0x4b => .l,
-            0x4c => .oem1,
-            0x4d => .p,
-            0x4e => .oem_minus,
-            0x51 => .oem12,
-            0x52 => .oem3,
-            0x54 => .oem4,
-            0x55 => .oem_plus,
-            0x58 => .caps_lock,
-            0x59 => .right_shift,
-            0x5a => .enter,
-            0x5b => .oem6,
-            0x5d => .oem7,
-            0x61 => .oem5,
-            0x64 => .oem10,
-            0x66 => .backspace,
-            0x67 => .oem9,
-            0x69 => .numpad1,
-            0x6a => .oem13,
-            0x6b => .numpad4,
-            0x6c => .numpad7,
-            0x70 => .numpad0,
-            0x71 => .numpad_period,
-            0x72 => .numpad2,
-            0x73 => .numpad5,
-            0x74 => .numpad6,
-            0x75 => .numpad8,
-            0x76 => .escape,
-            0x77 => .numpad_lock,
-            0x78 => .f11,
-            0x79 => .numpad_add,
-            0x7a => .numpad3,
-            0x7b => .numpad_sub,
-            0x7c => .numpad_mul,
-            0x7d => .numpad9,
-            0x7e => .scroll_lock,
-            0x7f => .sysrq,
-            0x83 => .f7,
-            0xaa => .power_on,
-            else => null,
-        };
-    }
-
-    /// prefixed with 0xe0
-    pub fn fromScancode1(code: u8) ?@This() {
-        return switch (code) {
-            0x11 => .right_altgr,
-            0x12 => .right_alt2,
-            0x14 => .right_control,
-            0x15 => .prev_track,
-            0x1f => .left_super,
-            0x21 => .volume_down,
-            0x23 => .mute,
-            0x27 => .right_super,
-            0x2b => .calculator,
-            0x2f => .menu,
-            0x32 => .volume_up,
-            0x34 => .play,
-            0x3a => .browser,
-            0x3b => .stop,
-            0x4a => .numpad_div,
-            0x4d => .next_track,
-            0x5a => .numpad_enter,
-            0x69 => .end,
-            0x6b => .arrow_left,
-            0x6c => .home,
-            0x70 => .insert,
-            0x71 => .delete,
-            0x72 => .arrow_down,
-            0x74 => .arrow_right,
-            0x75 => .arrow_up,
-            0x7a => .page_down,
-            0x7c => .print_screen,
-            0x7d => .page_up,
-            else => null,
-        };
-    }
-
-    /// prefixed with 0xe1
-    pub fn fromScancode2(code: u8) ?@This() {
-        return switch (code) {
-            0x14 => .right_control2,
-            else => null,
-        };
-    }
+const tmp_allocator = std.mem.Allocator{
+    .ptr = @ptrFromInt(0x1000),
+    .vtable = &.{
+        .alloc = _alloc,
+        .resize = _resize,
+        .remap = _remap,
+        .free = _free,
+    },
 };
 
-pub const KeyState = enum(u8) {
-    press,
-    release,
-    single,
-};
+fn _alloc(_: *anyopaque, len: usize, _: std.mem.Alignment, _: usize) ?[*]u8 {
+    const res, const addr = vm_client.call(.mapAnon, .{
+        self_vmem_handle,
+        len,
+        abi.sys.Rights{ .writable = true },
+        abi.sys.MapFlags{},
+    }) catch return null;
+    res catch return null;
+
+    return @ptrFromInt(addr);
+}
+
+fn _resize(_: *anyopaque, mem: []u8, _: std.mem.Alignment, new_len: usize, _: usize) bool {
+    const n = abi.ChunkSize.of(mem.len) orelse return false;
+    return n.sizeBytes() >= new_len;
+}
+
+fn _remap(_: *anyopaque, _: []u8, _: std.mem.Alignment, _: usize, _: usize) ?[*]u8 {
+    return null;
+}
+
+fn _free(_: *anyopaque, _: []u8, _: std.mem.Alignment, _: usize) void {}
+
+//
 
 const ControllerConfig = packed struct {
     keyboard_interrupt: enum(u1) { disable, enable },
@@ -371,11 +153,6 @@ const ControllerConfig = packed struct {
     mouse_clock: enum(u1) { enable, disable },
     keyboard_translation: enum(u1) { disable, enable },
     zero1: u1 = 0,
-};
-
-const KeyEvent = struct {
-    code: KeyCode,
-    state: KeyState,
 };
 
 const Keyboard = struct {
@@ -397,10 +174,7 @@ const Keyboard = struct {
     shift: bool = false,
     caps: bool = false,
 
-    pub fn init(
-        rm_client: abi.RmProtocol.Client(),
-        notify: caps.Notify,
-    ) !@This() {
+    pub fn init() !@This() {
         var res, _ = try rm_client.call(.requestInterruptHandler, .{ 1, notify });
         try res;
 

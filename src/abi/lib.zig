@@ -9,6 +9,7 @@ pub const ring = @import("ring.zig");
 pub const rt = @import("rt.zig");
 pub const sys = @import("sys.zig");
 pub const util = @import("util.zig");
+pub const input = @import("input.zig");
 
 //
 
@@ -278,6 +279,11 @@ pub const PmProtocol = util.Protocol(struct {
     // /// exec an elf file
     // execElf: fn (path: [32:0]u8) struct { sys.Error!void, usize },
 
+    /// spawn a new thread in the current process
+    /// uses the ELF entrypoint if `ip_override` is 0
+    /// creates a new stack if `sp_override` is 0
+    spawn: fn (ip_override: usize, sp_override: usize) struct { sys.Error!void, caps.Thread },
+
     /// grow the caller process' heap
     growHeap: fn (by: usize) struct { sys.Error!void, usize },
 
@@ -339,10 +345,20 @@ pub const HpetProtocol = util.Protocol(struct {
 });
 
 /// root,unix app <-> input communication
-pub const InputProtocol = util.Protocol(struct {});
+pub const InputProtocol = util.Protocol(struct {
+    /// wait for the next keyboard input
+    nextKey: fn () struct { sys.Error!void, input.KeyCode, input.KeyState },
+
+    /// create a new sender to the input server
+    /// only root can call this
+    newSender: fn () struct { sys.Error!void, caps.Sender },
+});
 
 /// input <-> ps2 communication
-pub const Ps2Protocol = util.Protocol(struct {});
+pub const Ps2Protocol = util.Protocol(struct {
+    /// stop the `reply` thread until there is some keyboard input
+    nextKey: fn (reply: caps.Reply) void,
+});
 
 pub const FramebufferInfoFrame = struct {
     width: usize = 0,

@@ -60,8 +60,8 @@ pub fn main() !void {
 
     log.debug("creating ps2 endpoint", .{});
     const ps2_recv = try memory.alloc(caps.Receiver);
-    // const ps2_send = try ps2_recv.subscribe();
-    // const ps2_client = abi.Ps2Protocol.Client().init(ps2_send);
+    const ps2_send = try ps2_recv.subscribe();
+    const ps2_client = abi.Ps2Protocol.Client().init(ps2_send);
 
     log.debug("creating ps2 server", .{});
     res, const ps2_vmem_handle: usize = try vm_client.call(.newVmem, {});
@@ -102,30 +102,67 @@ pub fn main() !void {
     res, _ = try root.call(.serverReady, .{ abi.ServerKind.input, input_send });
     try res;
 
-    // var system: System = .{
-    //     .recv = input_recv,
-    //     .memory = memory,
-    //     .root_endpoint = input_send.cap,
+    var system: System = .{
+        .recv = input_recv,
+        .ps2_client = ps2_client,
+        .root_endpoint = input_send.cap,
+    };
 
-    //     .vm_client = abi.VmProtocol.Client().init(vm_sender),
-    //     .self_vmem_handle = vmem_handle,
-    // };
+    const server = abi.InputProtocol.Server(.{
+        .Context = *System,
+        .scope = if (abi.conf.LOG_SERVERS) .input else null,
+    }, .{
+        .nextKey = nextKeyHandler,
+        .newSender = newSenderHandler,
+    }).init(&system, input_recv);
 
-    // const server = abi.InputProtocol.Server(.{
-    //     .Context = *System,
-    //     .scope = if (abi.conf.LOG_SERVERS) .vm else null,
-    // }, .{}).init(&system, input_recv);
-    // try server.run();
+    log.debug("input init done, server listening", .{});
+    var msg: abi.sys.Message = undefined;
+    try server.rx.recv(&msg);
+    while (true) {
+        server.process(&msg);
+        if (server.ctx.no_reply)
+            try server.rx.recv(&msg)
+        else
+            try server.rx.replyRecv(&msg);
+    }
 }
 
 const System = struct {
-    recv: caps.Receiver,
-    memory: caps.Memory,
-    root_endpoint: u32,
+    no_reply: bool = false,
 
-    vm_client: abi.VmProtocol.Client(),
-    self_vmem_handle: usize,
+    recv: caps.Receiver,
+    ps2_client: abi.Ps2Protocol.Client(),
+    root_endpoint: u32,
 };
+
+fn nextKeyHandler(ctx: *System, _: u32, _: void) struct { Error!void, abi.input.KeyCode, abi.input.KeyState } {
+    // no reply, the ps2 interrupt handler sends replies
+    const reply = ctx.recv.saveCaller() catch |err| {
+        log.warn("could not save caller: {}", .{err});
+        return .{ {}, .too_many_keys, .single };
+    };
+    // TODO: non-blocking call
+    ctx.no_reply = true;
+    _ = ctx.ps2_client.call(.nextKey, .{reply}) catch |err| {
+        log.warn("call to ps2 server failed: {}", .{err});
+        return .{ {}, .too_many_keys, .single };
+    };
+    return .{ {}, .too_many_keys, .single };
+}
+
+fn newSenderHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.Sender } {
+    log.info("input newSender req", .{});
+    if (ctx.root_endpoint != sender)
+        return .{ Error.PermissionDenied, .{} };
+
+    const input_sender = ctx.recv.subscribe() catch |err| {
+        log.err("failed to subscribe: {}", .{err});
+        return .{ err, .{} };
+    };
+
+    return .{ {}, input_sender };
+}
 
 comptime {
     abi.rt.installRuntime();
