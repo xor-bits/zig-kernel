@@ -73,12 +73,12 @@ fn framebufferSplash(
     const mid_x = width / 2;
     const mid_y = height / 2;
 
-    var millis: f32 = 0.0;
+    const _nanos = try main.timer.call(.timestamp, {});
+    var nanos: u128 = _nanos.@"0";
     while (true) {
-        drawFrame(&fb_info, mid_x, mid_y, millis);
-        millis += 10.0;
-        _ = try main.timer.call(.sleep, .{10_000_000});
-        // abi.sys.yield();
+        drawFrame(&fb_info, mid_x, mid_y, @floatCast(@as(f64, @floatFromInt(nanos)) / 1_000_000.0));
+        nanos += 16_666_666;
+        _ = try main.timer.call(.sleepDeadline, .{nanos});
     }
 }
 
@@ -112,9 +112,9 @@ fn dim(fb: *const FbInfo, mid_x: usize, mid_y: usize) void {
     for (miny..maxy) |y| {
         for (minx..maxx) |x| {
             var col: Pixel = @bitCast(fb.buffer[x + y * fb.pitch]);
-            col.r = @max(col.r, 7) - 7;
-            col.g = @max(col.g, 7) - 7;
-            col.b = @max(col.b, 7) - 7;
+            col.r = @max(col.r, 10) - 10;
+            col.g = @max(col.g, 10) - 10;
+            col.b = @max(col.b, 10) - 10;
             fb.buffer[x + y * fb.pitch] = @bitCast(col);
         }
     }
