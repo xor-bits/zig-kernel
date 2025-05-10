@@ -293,7 +293,7 @@ fn serverReadyHandler(ctx: *System, sender: u32, req: struct { abi.ServerKind, c
 
         for (server.ready_waiters.slice()) |caller| {
             const msg = serverSenderHandler(ctx, server.endpoint, .{kind});
-            Proto.replyTo(caller, .serverSender, msg) catch |err| {
+            abi.RootProtocol.replyTo(caller, .serverSender, msg) catch |err| {
                 log.info("failed to reply manually: {}", .{err});
             };
         }
@@ -329,10 +329,8 @@ fn serverSenderHandler(ctx: *System, _: u32, req: struct { abi.ServerKind }) str
         .pm => result = abi.PmProtocol.Client().init(server.sender).call(.newSender, {}),
         .rm => result = abi.RmProtocol.Client().init(server.sender).call(.newSender, {}),
         .timer => result = abi.TimerProtocol.Client().init(server.sender).call(.newSender, {}),
-        .vfs, .input => @panic("todo"),
-        // .vfs => result = abi.VfsProtocol.Client().init(server.sender).call(.newSender, {}),
-        // .timer => result = abi.TimerProtocol.Client().init(server.sender).call(.newSender, {}),
-        // .input => result = abi.InputProtocol.Client().init(server.sender).call(.newSender, {}),
+        .input => result = abi.InputProtocol.Client().init(server.sender).call(.newSender, {}),
+        .vfs => @panic("todo"),
     }
 
     const res: Error!void, const dupe_sender: caps.Sender = result catch |err| {

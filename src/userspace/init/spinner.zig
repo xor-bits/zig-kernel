@@ -34,6 +34,11 @@ pub fn spinnerMain() !void {
     });
     try res;
 
+    res, const key_thread: caps.Thread = try main.pm.call(.spawn, .{ @intFromPtr(&tickKey), 0 });
+    try res;
+
+    try key_thread.start();
+
     framebufferSplash(
         fb_dev_size,
         @ptrFromInt(fb_addr),
@@ -41,6 +46,20 @@ pub fn spinnerMain() !void {
     ) catch |err| {
         log.warn("spinner failed: {}", .{err});
     };
+    abi.sys.stop();
+}
+
+var dir: std.atomic.Value(i32) = .init(1);
+
+fn tickKey() noreturn {
+    while (true) {
+        const res, _, const state: abi.input.KeyState = main.input.call(.nextKey, {}) catch break;
+        res catch break;
+
+        if (state == .release) continue;
+        _ = dir.fetchXor(1, .seq_cst);
+    }
+
     abi.sys.stop();
 }
 
@@ -75,10 +94,13 @@ fn framebufferSplash(
 
     const _nanos = try main.timer.call(.timestamp, {});
     var nanos: u128 = _nanos.@"0";
+    var phase: i128 = 0;
     while (true) {
-        drawFrame(&fb_info, mid_x, mid_y, @floatCast(@as(f64, @floatFromInt(nanos)) / 1_000_000.0));
-        nanos += 16_666_666;
-        _ = try main.timer.call(.sleepDeadline, .{nanos});
+        drawFrame(&fb_info, mid_x, mid_y, @floatCast(@as(f64, @floatFromInt(phase)) / 1_000_000.0));
+
+        phase += (dir.load(.monotonic) * 2 - 1) * 16_666_667;
+        nanos += 16_666_667;
+        _ = main.timer.call(.sleepDeadline, .{nanos}) catch break;
     }
 }
 

@@ -311,6 +311,9 @@ pub const RmProtocol = util.Protocol(struct {
     /// request an interrupt handler for a driver
     requestInterruptHandler: fn (irq: u8, notify: caps.Notify) struct { sys.Error!void, caps.Notify },
 
+    /// request a notify kernel object
+    requestNotify: fn () struct { sys.Error!void, caps.Notify },
+
     /// create a new sender to the rm server
     /// only root can call this
     newSender: fn () struct { sys.Error!void, caps.Sender },

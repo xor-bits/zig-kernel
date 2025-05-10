@@ -360,7 +360,20 @@ const Keyboard = struct {
         while (true) {
             const inb = try self.readWait();
             if (try self.runOn(inb)) |ev| {
-                log.info("key event {}", .{ev});
+                waiting_lock.lock();
+                defer waiting_lock.unlock();
+
+                for (waiting.items) |reply| {
+                    abi.InputProtocol.replyTo(reply, .nextKey, .{
+                        {},
+                        ev.code,
+                        ev.state,
+                    }) catch |err| {
+                        log.warn("ps2 failed to reply: {}", .{err});
+                    };
+                }
+                waiting.clearRetainingCapacity();
+                // log.info("key event {}", .{ev});
             }
         }
     }

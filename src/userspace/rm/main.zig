@@ -77,6 +77,7 @@ pub fn main() !void {
         .requestHpet = requestHpetHandler,
         .requestFramebuffer = requestFramebufferHandler,
         .requestInterruptHandler = requestInterruptHandlerHandler,
+        .requestNotify = requestNotifyHandler,
         .newSender = newSenderHandler,
     }).init(&system, rm_recv);
 
@@ -139,6 +140,11 @@ fn requestInterruptHandlerHandler(ctx: *System, _: u32, req: struct { u8, caps.N
     const irq_cap = ctx.irqs.alloc(irq) catch |err| return .{ err, notify };
     irq_cap.subscribe(notify) catch |err| return .{ err, notify };
 
+    return .{ {}, notify };
+}
+
+fn requestNotifyHandler(ctx: *System, _: u32, _: void) struct { Error!void, caps.Notify } {
+    const notify = ctx.memory.alloc(caps.Notify) catch |err| return .{ err, .{} };
     return .{ {}, notify };
 }
 

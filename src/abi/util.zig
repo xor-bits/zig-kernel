@@ -206,6 +206,12 @@ pub fn Protocol(comptime spec: type) type {
             return variants_const[@intFromEnum(id)];
         }
 
+        pub fn replyTo(rx: caps.Reply, comptime id: MessageVariant, output: VariantOf(id).output_ty) sys.Error!void {
+            var msg: sys.Message = undefined;
+            variants_const[@intFromEnum(id)].output_converter.serialize(&msg, output);
+            try rx.reply(&msg);
+        }
+
         pub fn Client() type {
             return struct {
                 tx: caps.Sender,
@@ -269,12 +275,6 @@ pub fn Protocol(comptime spec: type) type {
                 }
 
                 pub fn reply(rx: caps.Receiver, comptime id: MessageVariant, output: VariantOf(id).output_ty) sys.Error!void {
-                    var msg: sys.Message = undefined;
-                    variants_const[@intFromEnum(id)].output_converter.serialize(&msg, output);
-                    try rx.reply(&msg);
-                }
-
-                pub fn replyTo(rx: caps.Reply, comptime id: MessageVariant, output: VariantOf(id).output_ty) sys.Error!void {
                     var msg: sys.Message = undefined;
                     variants_const[@intFromEnum(id)].output_converter.serialize(&msg, output);
                     try rx.reply(&msg);
