@@ -1,8 +1,11 @@
 const std = @import("std");
 const abi = @import("abi");
 
+const spinner = @import("spinner.zig");
+
 //
 
+const caps = abi.caps;
 const log = std.log.scoped(.init);
 pub const std_options = abi.std_options;
 pub const panic = abi.panic;
@@ -10,19 +13,29 @@ pub const name = "init";
 
 //
 
+// pub var vm: abi.VmProtocol.Client() = undefined;
+pub var rm: abi.RmProtocol.Client() = undefined;
+pub var pm: abi.PmProtocol.Client() = undefined;
+pub var timer: abi.TimerProtocol.Client() = undefined;
+pub var root: abi.RootProtocol.Client() = undefined;
+
+//
+
 pub fn main() !void {
     log.info("hello from init", .{});
 
-    const root = abi.RootProtocol.Client().init(abi.rt.root_ipc);
+    root = abi.RootProtocol.Client().init(abi.rt.root_ipc);
+    pm = abi.PmProtocol.Client().init(.{ .cap = @truncate(abi.rt.vmem_handle) });
 
-    const res, const sender = try root.call(.serverSender, .{abi.ServerKind.timer});
+    var res, var sender: caps.Sender = try root.call(.serverSender, .{abi.ServerKind.timer});
     try res;
+    timer = abi.TimerProtocol.Client().init(sender);
 
-    const timer = abi.TimerProtocol.Client().init(sender);
+    res, sender = try root.call(.serverSender, .{abi.ServerKind.rm});
+    try res;
+    rm = abi.RmProtocol.Client().init(sender);
 
-    log.info("waiting 5 seconds", .{});
-    _ = try timer.call(.sleep, .{5_000_000_000});
-    log.info("waiting done", .{});
+    try spinner.spinnerMain();
 }
 
 comptime {

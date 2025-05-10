@@ -125,6 +125,12 @@ pub const ChunkSize = enum(u5) {
     pub fn sizeBytes(self: @This()) usize {
         return @as(usize, 0x1000) << @intFromEnum(self);
     }
+
+    pub fn alignOf(self: @This()) usize {
+        if (self.sizeBytes() >= ChunkSize.@"1GiB".sizeBytes()) return ChunkSize.@"1GiB".sizeBytes();
+        if (self.sizeBytes() >= ChunkSize.@"2MiB".sizeBytes()) return ChunkSize.@"2MiB".sizeBytes();
+        return ChunkSize.@"4KiB".sizeBytes();
+    }
 };
 
 /// data structure in the boot info frame provided to the root process
@@ -272,14 +278,14 @@ pub const PmProtocol = util.Protocol(struct {
     // /// exec an elf file
     // execElf: fn (path: [32:0]u8) struct { sys.Error!void, usize },
 
-    // /// grow the caller process' heap
-    // growHeap: fn (by: usize) struct { sys.Error!void, usize },
+    /// grow the caller process' heap
+    growHeap: fn (by: usize) struct { sys.Error!void, usize },
 
-    // /// map a frame into the caller process' heap
-    // mapFrame: fn (frame: caps.Frame, rights: sys.Rights, flags: sys.MapFlags) struct { sys.Error!void, caps.Frame },
+    /// map a frame into the caller process' heap
+    mapFrame: fn (frame: caps.Frame, rights: sys.Rights, flags: sys.MapFlags) struct { sys.Error!void, usize, caps.Frame },
 
-    // /// map a device frame into the caller process' heap
-    // mapDeviceFrame: fn (frame: caps.DeviceFrame, rights: sys.Rights, flags: sys.MapFlags) struct { sys.Error!void, caps.DeviceFrame },
+    /// map a device frame into the caller process' heap
+    mapDeviceFrame: fn (frame: caps.DeviceFrame, rights: sys.Rights, flags: sys.MapFlags) struct { sys.Error!void, usize, caps.DeviceFrame },
 
     /// create a new sender the pm server
     /// only root can call this
@@ -292,6 +298,9 @@ pub const RmProtocol = util.Protocol(struct {
 
     /// request HPET device memory for a driver (and the PIT port)
     requestHpet: fn () struct { sys.Error!void, caps.DeviceFrame, caps.X86IoPort },
+
+    /// request framebuffer device memory and its info frame
+    requestFramebuffer: fn () struct { sys.Error!void, caps.DeviceFrame, caps.Frame },
 
     /// request an interrupt handler for a driver
     requestInterruptHandler: fn (irq: u8, notify: caps.Notify) struct { sys.Error!void, caps.Notify },

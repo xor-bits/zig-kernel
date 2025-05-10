@@ -35,9 +35,19 @@ pub fn main() !void {
     res, const irqs = try root.call(.irqs, {});
     try res;
 
+    var devices = std.EnumArray(abi.DeviceKind, abi.Device).initFill(.{});
+    var mmio_frame: caps.DeviceFrame = .{};
+    var info_frame: caps.Frame = .{};
+
     log.debug("requesting HPET", .{});
-    res, const hpet_frame: caps.DeviceFrame, _ = try root.call(.device, .{abi.DeviceKind.hpet});
+    res, mmio_frame, info_frame = try root.call(.device, .{abi.DeviceKind.hpet});
     try res;
+    devices.set(.hpet, .{ .mmio_frame = mmio_frame, .info_frame = info_frame });
+
+    log.debug("requesting Framebuffer", .{});
+    res, mmio_frame, info_frame = try root.call(.device, .{abi.DeviceKind.framebuffer});
+    try res;
+    devices.set(.framebuffer, .{ .mmio_frame = mmio_frame, .info_frame = info_frame });
 
     // endpoint for rm server <-> unix app communication
     log.debug("allocating rm endpoint", .{});
@@ -56,7 +66,7 @@ pub fn main() !void {
         .vm_client = vm_client,
         .vmem_handle = vmem_handle,
 
-        .hpet = hpet_frame,
+        .devices = devices,
     };
 
     const server = abi.RmProtocol.Server(.{
@@ -65,6 +75,7 @@ pub fn main() !void {
     }, .{
         .requestPs2 = requestPs2Handler,
         .requestHpet = requestHpetHandler,
+        .requestFramebuffer = requestFramebufferHandler,
         .requestInterruptHandler = requestInterruptHandlerHandler,
         .newSender = newSenderHandler,
     }).init(&system, rm_recv);
@@ -88,7 +99,7 @@ const System = struct {
     vmem_handle: usize,
 
     ps2: bool = true,
-    hpet: ?caps.DeviceFrame = null,
+    devices: std.EnumArray(abi.DeviceKind, abi.Device) = .initFill(.{}),
 
     active_irqs: [256]?caps.X86Irq = .{null} ** 256,
 };
@@ -105,11 +116,20 @@ fn requestPs2Handler(ctx: *System, _: u32, _: void) struct { Error!void, caps.X8
 }
 
 fn requestHpetHandler(ctx: *System, _: u32, _: void) struct { Error!void, caps.DeviceFrame, caps.X86IoPort } {
-    const hpet = ctx.hpet orelse return .{ Error.PermissionDenied, .{}, .{} };
+    const hpet = ctx.devices.get(.hpet);
+    if (hpet.mmio_frame.cap == 0) return .{ Error.PermissionDenied, .{}, .{} };
     const pit = ctx.ioports.alloc(0x43) catch |err| return .{ err, .{}, .{} };
 
-    ctx.hpet = null;
-    return .{ {}, hpet, pit };
+    ctx.devices.set(.hpet, .{});
+    return .{ {}, hpet.mmio_frame, pit };
+}
+
+fn requestFramebufferHandler(ctx: *System, _: u32, _: void) struct { Error!void, caps.DeviceFrame, caps.Frame } {
+    const framebuffer = ctx.devices.get(.framebuffer);
+    if (framebuffer.mmio_frame.cap == 0) return .{ Error.PermissionDenied, .{}, .{} };
+
+    ctx.devices.set(.framebuffer, .{});
+    return .{ {}, framebuffer.mmio_frame, framebuffer.info_frame };
 }
 
 fn requestInterruptHandlerHandler(ctx: *System, _: u32, req: struct { u8, caps.Notify }) struct { Error!void, caps.Notify } {

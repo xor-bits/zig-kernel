@@ -133,14 +133,14 @@ fn timestampHandler(_: void, _: u32, _: void) struct { u128 } {
 }
 
 fn sleepHandler(_: void, _: u32, req: struct { u128, caps.Reply }) struct { void } {
-    const deadline_nanos = req.@"0";
+    const deadline_nanos = req.@"0" + timestampNanos();
     const reply = req.@"1";
     sleepDeadline(reply, deadline_nanos);
     return .{{}};
 }
 
 fn sleepDeadlineHandler(_: void, _: u32, req: struct { u128, caps.Reply }) struct { void } {
-    const deadline_nanos = req.@"0" + timestampNanos();
+    const deadline_nanos = req.@"0";
     const reply = req.@"1";
     sleepDeadline(reply, deadline_nanos);
     return .{{}};
@@ -170,7 +170,7 @@ fn hpetThreadMain() !void {
     while (true) {
         const main_counter = regs.readMainCounter();
 
-        log.debug("HPET INTERRUPT", .{});
+        // log.debug("HPET INTERRUPT", .{});
 
         for (timers[0..timer_count], 0..) |*timer, i| {
             timer.lock.lock();
@@ -181,6 +181,7 @@ fn hpetThreadMain() !void {
 
             // wake up the current waiter
             if (current.deadline <= main_counter) {
+                timer.current = null;
                 var msg: abi.sys.Message = .{};
                 current.reply.reply(&msg) catch |err| {
                     log.err("invalid reply cap: {}", .{err});
