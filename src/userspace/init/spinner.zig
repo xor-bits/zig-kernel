@@ -8,6 +8,7 @@ const main = @import("main.zig");
 const log = std.log.scoped(.spinner);
 const caps = abi.caps;
 const Error = abi.sys.Error;
+const dark_mode: bool = true;
 
 //
 
@@ -17,8 +18,6 @@ pub fn spinnerMain() !void {
     var res: Error!void, const framebuffer: caps.DeviceFrame, const framebuffer_info: caps.Frame =
         try main.rm.call(.requestFramebuffer, {});
     try res;
-
-    const fb_dev_size = try framebuffer.sizeOf();
 
     res, const fb_addr, _ = try main.pm.call(.mapDeviceFrame, .{
         framebuffer,
@@ -40,7 +39,6 @@ pub fn spinnerMain() !void {
     try key_thread.start();
 
     framebufferSplash(
-        fb_dev_size,
         @ptrFromInt(fb_addr),
         @ptrFromInt(fb_info_addr),
     ) catch |err| {
@@ -64,13 +62,9 @@ fn tickKey() noreturn {
 }
 
 fn framebufferSplash(
-    fb_dev_size: abi.ChunkSize,
     framebuffer: [*]volatile u32,
     framebuffer_info: *const abi.FramebufferInfoFrame,
 ) !void {
-    const res: Error!void, const backbuffer_addr = try main.pm.call(.growHeap, .{fb_dev_size.sizeBytes()});
-    try res;
-
     if (framebuffer_info.bpp != 32) {
         log.warn("unrecognized framebuffer format", .{});
         return;
@@ -79,15 +73,25 @@ fn framebufferSplash(
     const width = framebuffer_info.width;
     const height = framebuffer_info.height;
     const pitch = framebuffer_info.pitch / 4;
-    const backbuffer = @as([*]u32, @ptrFromInt(backbuffer_addr))[0 .. width * pitch];
+
+    const res: Error!void, const backbuffer_addr = try main.pm.call(
+        .growHeap,
+        .{4 * FbInfo.width * FbInfo.height},
+    );
+    try res;
 
     const fb_info: FbInfo = .{
-        .width = width,
-        .height = height,
-        .pitch = pitch,
-        .buffer = backbuffer,
-        .framebuffer = framebuffer[0 .. width * pitch],
+        .buffer = @as([*]u32, @ptrFromInt(backbuffer_addr))[0 .. FbInfo.width * FbInfo.height],
+        .fb_width = width,
+        .fb_height = height,
+        .fb_pitch = pitch,
+        .fb = framebuffer[0 .. width * pitch],
     };
+
+    @memset(fb_info.fb, if (dark_mode) 0x0 else 0xFFFFFF);
+    @memset(fb_info.buffer, if (dark_mode) 0x0 else 0xFFFFFF);
+
+    log.info("done", .{});
 
     const mid_x = width / 2;
     const mid_y = height / 2;
@@ -107,50 +111,67 @@ fn framebufferSplash(
 const speed: f32 = 0.001;
 
 const FbInfo = struct {
-    width: usize,
-    height: usize,
-    pitch: usize,
+    const width = 480;
+    const height = 480;
+
     buffer: []u32,
-    framebuffer: []volatile u32,
+
+    fb_width: usize,
+    fb_height: usize,
+    fb_pitch: usize,
+    fb: []volatile u32,
 };
 
 fn drawFrame(fb: *const FbInfo, mid_x: usize, mid_y: usize, millis: f32) void {
-    dim(fb, mid_x, mid_y);
+    dim(fb);
 
     for (0..20) |i| {
         const phase = @as(f32, @floatFromInt(i)) / 20.0;
-        drawTriangleDot(fb, mid_x, mid_y, phase * 3.0 - millis * speed, millis, 0xFF8000);
+        drawTriangleDot(fb, FbInfo.width / 2, FbInfo.height / 2, phase * 3.0 - millis * speed, millis, 0xFF8000);
     }
 
     blit(fb, mid_x, mid_y);
 }
 
-fn dim(fb: *const FbInfo, mid_x: usize, mid_y: usize) void {
-    const minx = @max(mid_x, 120) - 120;
-    const miny = @max(mid_y, 120) - 120;
-    const maxx = mid_x + 121;
-    const maxy = mid_y + 121;
-
-    for (miny..maxy) |y| {
-        for (minx..maxx) |x| {
-            var col: Pixel = @bitCast(fb.buffer[x + y * fb.pitch]);
-            col.r = @max(col.r, 10) - 10;
-            col.g = @max(col.g, 10) - 10;
-            col.b = @max(col.b, 10) - 10;
-            fb.buffer[x + y * fb.pitch] = @bitCast(col);
+fn dim(fb: *const FbInfo) void {
+    for (0..FbInfo.height) |y| {
+        for (0..FbInfo.width) |x| {
+            var col: Pixel = @bitCast(fb.buffer[x + y * FbInfo.width]);
+            if (dark_mode) {
+                col.r = @max(col.r, 10) - 10;
+                col.g = @max(col.g, 10) - 10;
+                col.b = @max(col.b, 10) - 10;
+            } else {
+                col.r = @min(col.r, 245) + 10;
+                col.g = @min(col.g, 245) + 10;
+                col.b = @min(col.b, 245) + 10;
+            }
+            fb.buffer[x + y * FbInfo.width] = @bitCast(col);
         }
     }
 }
 
 fn blit(fb: *const FbInfo, mid_x: usize, mid_y: usize) void {
-    const minx = @max(mid_x, 120) - 120;
-    const miny = @max(mid_y, 120) - 120;
-    const maxx = mid_x + 121;
-    const maxy = mid_y + 121;
+    for (0..FbInfo.height / 2) |y| {
+        for (0..FbInfo.width / 2) |x| {
+            const px0: Pixel = @bitCast(fb.buffer[(x * 2 + 0) + (y * 2 + 0) * FbInfo.width]);
+            const px1: Pixel = @bitCast(fb.buffer[(x * 2 + 1) + (y * 2 + 0) * FbInfo.width]);
+            const px2: Pixel = @bitCast(fb.buffer[(x * 2 + 0) + (y * 2 + 1) * FbInfo.width]);
+            const px3: Pixel = @bitCast(fb.buffer[(x * 2 + 1) + (y * 2 + 1) * FbInfo.width]);
 
-    for (miny..maxy) |y| {
-        for (minx..maxx) |x| {
-            fb.framebuffer[x + y * fb.pitch] = fb.buffer[x + y * fb.pitch];
+            const multisampled = Pixel{
+                .r = @truncate((@as(u16, px0.r) + px1.r + px2.r + px3.r) / 4),
+                .g = @truncate((@as(u16, px0.g) + px1.g + px2.g + px3.g) / 4),
+                .b = @truncate((@as(u16, px0.b) + px1.b + px2.b + px3.b) / 4),
+            };
+
+            // const target_x = x;
+            // const target_y = y;
+            // _ = .{ mid_x, mid_y };
+            const target_x = x + mid_x - FbInfo.width / 4;
+            const target_y = y + mid_y - FbInfo.height / 4;
+            fb.fb[target_x + target_y * fb.fb_pitch] =
+                @bitCast(multisampled);
         }
     }
 }
@@ -159,7 +180,7 @@ const Pixel = extern struct {
     r: u8,
     g: u8,
     b: u8,
-    _p: u8,
+    _p: u8 = 0,
 };
 
 fn drawTriangleDot(fb: *const FbInfo, mid_x: usize, mid_y: usize, t: f32, millis: f32, col: u32) void {
@@ -172,17 +193,17 @@ fn drawTriangleDot(fb: *const FbInfo, mid_x: usize, mid_y: usize, t: f32, millis
 
     drawDot(
         fb,
-        @as(usize, @intFromFloat(pt_x * 60.0 + @as(f32, @floatFromInt(mid_x)))),
-        @as(usize, @intFromFloat(pt_y * 60.0 + @as(f32, @floatFromInt(mid_y)))),
+        @as(usize, @intFromFloat(pt_x * 120.0 + @as(f32, @floatFromInt(mid_x)))),
+        @as(usize, @intFromFloat(pt_y * 120.0 + @as(f32, @floatFromInt(mid_y)))),
         col,
     );
 }
 
 fn drawDot(fb: *const FbInfo, mid_x: usize, mid_y: usize, col: u32) void {
-    const minx = @max(mid_x, 5) - 5;
-    const miny = @max(mid_y, 5) - 5;
-    const maxx = mid_x + 6;
-    const maxy = mid_y + 6;
+    const minx = @max(mid_x, 10) - 10;
+    const miny = @max(mid_y, 10) - 10;
+    const maxx = mid_x + 11;
+    const maxy = mid_y + 11;
 
     for (miny..maxy) |y| {
         for (minx..maxx) |x| {
@@ -190,10 +211,8 @@ fn drawDot(fb: *const FbInfo, mid_x: usize, mid_y: usize, col: u32) void {
             const dy = if (mid_y > y) mid_y - y else y - mid_y;
             const dsqr = dx * dx + dy * dy;
 
-            if (dsqr <= 3 * 3 - 2) {
-                fb.buffer[x + y * fb.pitch] = col;
-            } else if (dsqr <= 3 * 3 + 2) {
-                // fb.buffer[x + y * fb.pitch] = (col >> 4) & 0x0F0F0F0F;
+            if (dsqr <= 7 * 7 - 3) {
+                fb.buffer[x + y * FbInfo.width] = col;
             }
         }
     }
