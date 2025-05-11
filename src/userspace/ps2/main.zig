@@ -60,8 +60,10 @@ pub fn main(
     notify = caps.Notify{ .cap = notify_cap_id };
     done_lock.unlock();
 
+    log.info("spawning keyboard thread", .{});
     try spawn(keyboardMain);
 
+    log.info("ps2 init done, server listening", .{});
     var vm_server = abi.Ps2Protocol.Server(
         .{
             .scope = if (abi.conf.LOG_SERVERS) .ps2 else null,
@@ -360,6 +362,8 @@ const Keyboard = struct {
         while (true) {
             const inb = try self.readWait();
             if (try self.runOn(inb)) |ev| {
+                log.debug("keyboard ev: {}", .{ev});
+
                 waiting_lock.lock();
                 defer waiting_lock.unlock();
 
