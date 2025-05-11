@@ -31,7 +31,10 @@ pub fn spinnerMain() !void {
     });
     try res;
 
-    res, const key_thread: caps.Thread = try main.pm.call(.spawn, .{ @intFromPtr(&tickKey), 0 });
+    res, const key_thread: caps.Thread = try main.pm.call(
+        .spawn,
+        .{ @intFromPtr(&tickKey), 0 },
+    );
     try res;
 
     try key_thread.start();
@@ -49,7 +52,10 @@ var dir: std.atomic.Value(i32) = .init(1);
 
 fn tickKey() callconv(.SysV) noreturn {
     while (true) {
-        const res, _, const state: abi.input.KeyState = main.input.call(.nextKey, {}) catch break;
+        const res, _, const state: abi.input.KeyState = main.input.call(
+            .nextKey,
+            {},
+        ) catch break;
         res catch break;
 
         if (state == .release) continue;
@@ -96,7 +102,12 @@ fn framebufferSplash(
     var nanos: u128 = _nanos.@"0";
     var phase: i128 = 0;
     while (true) {
-        drawFrame(&fb_info, mid_x, mid_y, @floatCast(@as(f64, @floatFromInt(phase)) / 1_000_000.0));
+        drawFrame(
+            &fb_info,
+            mid_x,
+            mid_y,
+            @floatCast(@as(f64, @floatFromInt(phase)) / 1_000_000.0),
+        );
 
         phase += (dir.load(.monotonic) * 2 - 1) * 16_666_667;
         nanos += 16_666_667;
@@ -123,7 +134,14 @@ fn drawFrame(fb: *const FbInfo, mid_x: usize, mid_y: usize, millis: f32) void {
 
     for (0..20) |i| {
         const phase = @as(f32, @floatFromInt(i)) / 20.0;
-        drawTriangleDot(fb, FbInfo.width / 2, FbInfo.height / 2, phase * 3.0 - millis * speed, millis, 0xFF8000);
+        drawTriangleDot(
+            fb,
+            FbInfo.width / 2,
+            FbInfo.height / 2,
+            phase * 3.0 - millis * speed,
+            millis,
+            0xFF8000,
+        );
     }
 
     blit(fb, mid_x, mid_y);
