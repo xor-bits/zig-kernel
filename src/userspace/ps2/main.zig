@@ -364,6 +364,9 @@ const Keyboard = struct {
             if (try self.runOn(inb)) |ev| {
                 log.debug("keyboard ev: {}", .{ev});
 
+                if (ev.code == .print_screen and abi.conf.KERNEL_PANIC_SYSCALL)
+                    abi.sys.kernelPanic();
+
                 waiting_lock.lock();
                 defer waiting_lock.unlock();
 
