@@ -34,7 +34,7 @@ pub const CapMutex = struct {
             @branchHint(.cold);
         }
 
-        var counter = if (IS_DEBUG) @as(usize, 0) else void{};
+        var counter = if (IS_DEBUG) @as(usize, 0) else {};
         while (true) {
             if (IS_DEBUG) {
                 counter += 1;
@@ -79,7 +79,7 @@ pub const YieldMutex = struct {
     pub fn lock(self: *Self) void {
         if (self.tryLock()) return;
 
-        var counter = if (IS_DEBUG) @as(usize, 0) else void{};
+        var counter = if (IS_DEBUG) @as(usize, 0) else {};
         while (true) {
             if (IS_DEBUG) {
                 counter += 1;
@@ -116,7 +116,7 @@ pub const SpinMutex = struct {
     }
 
     pub fn lock(self: *Self) void {
-        var counter = if (IS_DEBUG) @as(usize, 0) else void{};
+        var counter = if (IS_DEBUG) @as(usize, 0) else {};
         while (null != self.lock_state.cmpxchgWeak(0, 1, .acquire, .monotonic)) {
             while (self.isLocked()) {
                 if (IS_DEBUG) {

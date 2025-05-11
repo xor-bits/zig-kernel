@@ -20,7 +20,7 @@ pub fn main() !void {
     const vmem_handle = abi.rt.vmem_handle;
 
     log.debug("requesting memory", .{});
-    var res: Error!void, const memory: caps.Memory = try root.call(.memory, void{});
+    var res: Error!void, const memory: caps.Memory = try root.call(.memory, {});
     try res;
 
     // endpoint for timer server <-> unix app communication
@@ -34,7 +34,7 @@ pub fn main() !void {
     const vm_client = abi.VmProtocol.Client().init(vm_sender);
 
     // log.debug("requesting rm sender", .{});
-    // res, const rm_sender = try root.call(.rm, void{});
+    // res, const rm_sender = try root.call(.rm, {});
     // try res;
     // const rm_client = abi.RmProtocol.Client().init(rm_sender);
 
@@ -47,7 +47,7 @@ pub fn main() !void {
     try res;
 
     log.debug("requesting initfs sender", .{});
-    res, const initfs_sender = try root.call(.initfs, void{});
+    res, const initfs_sender = try root.call(.initfs, {});
     try res;
     const initfs_client = abi.InitfsProtocol.Client().init(initfs_sender);
 
@@ -196,7 +196,7 @@ fn newSenderHandler(ctx: *System, sender: u32, _: void) struct { Error!void, cap
         return .{ err, .{} };
     };
 
-    return .{ void{}, timer_sender };
+    return .{ {}, timer_sender };
 }
 
 comptime {

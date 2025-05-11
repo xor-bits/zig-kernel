@@ -19,7 +19,7 @@ pub fn main() !void {
     const root = abi.RootProtocol.Client().init(abi.rt.root_ipc);
 
     log.debug("requesting memory", .{});
-    var res: Error!void, const memory: caps.Memory = try root.call(.memory, void{});
+    var res: Error!void, const memory: caps.Memory = try root.call(.memory, {});
     try res;
 
     // endpoint for vfs server <-> unix app communication

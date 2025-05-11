@@ -19,7 +19,7 @@ pub fn main() !void {
     const root = abi.RootProtocol.Client().init(abi.rt.root_ipc);
 
     log.debug("requesting memory", .{});
-    var res: Error!void, const memory: caps.Memory = try root.call(.memory, void{});
+    var res: Error!void, const memory: caps.Memory = try root.call(.memory, {});
     try res;
 
     // endpoint for root,unix app <-> input communication
@@ -34,7 +34,7 @@ pub fn main() !void {
     const vm_client = abi.VmProtocol.Client().init(vm_sender);
 
     // log.debug("requesting rm sender", .{});
-    // res, const rm_sender = try root.call(.rm, void{});
+    // res, const rm_sender = try root.call(.rm, {});
     // try res;
     // const rm_client = abi.RmProtocol.Client().init(rm_sender);
 
@@ -47,7 +47,7 @@ pub fn main() !void {
     try res;
 
     log.debug("requesting initfs sender", .{});
-    res, const initfs_sender = try root.call(.initfs, void{});
+    res, const initfs_sender = try root.call(.initfs, {});
     try res;
     const initfs_client = abi.InitfsProtocol.Client().init(initfs_sender);
 

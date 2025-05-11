@@ -256,7 +256,7 @@ fn newSenderHandler(ctx: *System, sender: u32, _: void) struct { Error!void, cap
         return .{ err, .{} };
     };
 
-    return .{ void{}, pm_sender };
+    return .{ {}, pm_sender };
 }
 
 comptime {

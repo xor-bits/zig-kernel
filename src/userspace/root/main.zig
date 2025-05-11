@@ -212,7 +212,7 @@ fn memoryHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.M
         return .{ err, .{} };
     };
 
-    return .{ void{}, memory };
+    return .{ {}, memory };
 }
 
 fn ioportsHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.X86IoPortAllocator } {
@@ -224,7 +224,7 @@ fn ioportsHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.
         return .{ err, .{} };
     };
 
-    return .{ void{}, ioports };
+    return .{ {}, ioports };
 }
 
 fn irqsHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.X86IrqAllocator } {
@@ -236,7 +236,7 @@ fn irqsHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.X86
         return .{ err, .{} };
     };
 
-    return .{ void{}, irqs };
+    return .{ {}, irqs };
 }
 
 fn deviceHandler(ctx: *System, sender: u32, req: struct { abi.DeviceKind }) struct { Error!void, caps.DeviceFrame, caps.Frame } {
@@ -250,7 +250,7 @@ fn deviceHandler(ctx: *System, sender: u32, req: struct { abi.DeviceKind }) stru
 
     if (device.mmio_frame.cap == 0) return .{ Error.AlreadyMapped, .{}, .{} };
 
-    return .{ void{}, device.mmio_frame, device.info_frame };
+    return .{ {}, device.mmio_frame, device.info_frame };
 }
 
 fn serverReadyHandler(ctx: *System, sender: u32, req: struct { abi.ServerKind, caps.Sender }) struct { Error!void, void } {
@@ -396,7 +396,7 @@ fn execWithVm(ctx: *System, bin: []const u8) !u32 {
     );
 
     const vm_sender = abi.VmProtocol.Client().init(ctx.servers.get(.vm).sender);
-    const res0, const vmem_handle = try vm_sender.call(.newVmem, void{});
+    const res0, const vmem_handle = try vm_sender.call(.newVmem, {});
     _ = try res0;
 
     const res1 = try vm_sender.call(.loadElf, .{

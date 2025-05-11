@@ -116,7 +116,7 @@ pub fn totalPages() usize {
 //
 
 /// tells if the frame allocator can be used already (debugging)
-var initialized = if (IS_DEBUG) false else void{};
+var initialized = if (IS_DEBUG) false else {};
 
 /// approximately 2 bits for each 4KiB page to track
 /// 4KiB, 8KiB, 16KiB, 32KiB, .. 2MiB, 4MiB, .., 512MiB and 1GiB chunks
@@ -312,7 +312,7 @@ pub fn init() !void {
         };
     }
 
-    initialized = if (comptime IS_DEBUG) true else void{};
+    initialized = if (comptime IS_DEBUG) true else {};
 
     log.info("freeing usable memory", .{});
     for (memory_response.entries()) |memory_map_entry| {

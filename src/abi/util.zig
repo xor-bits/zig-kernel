@@ -400,7 +400,7 @@ const MessageUsage = struct {
 
         // make message register use more efficient
         // sorts everything except leaves the union tag (enum) as the first thing, because it has to
-        std.sort.pdq(DataEntry, self.data[@intFromBool(is_union)..self.data_cnt], void{}, struct {
+        std.sort.pdq(DataEntry, self.data[@intFromBool(is_union)..self.data_cnt], {}, struct {
             fn lessThanFn(_: void, lhs: DataEntry, rhs: DataEntry) bool {
                 return @sizeOf(lhs.type) < @sizeOf(rhs.type);
             }
@@ -636,7 +636,7 @@ fn TupleWithoutFirst(comptime tuple: type) type {
 
 fn tuplePopFirst(tuple: anytype) TupleWithoutFirst(@TypeOf(tuple)) {
     // if (@typeInfo(@TypeOf(tuple)) != .@"struct")
-    //     return void{};
+    //     return {};
 
     const Result = TupleWithoutFirst(@TypeOf(tuple));
 
@@ -645,7 +645,7 @@ fn tuplePopFirst(tuple: anytype) TupleWithoutFirst(@TypeOf(tuple)) {
     if (prev.fields.len == 0)
         @compileError("cannot pop the first field from an empty struct");
     if (prev.fields.len == 1)
-        return void{};
+        return {};
     // if (prev.fields.len == 2)
     //     return tuple.@"1";
 
@@ -683,7 +683,7 @@ test "comptime RPC Protocol generator" {
 
     const client = Proto.Client().init(.{});
     const res1 = client.call(.hello1, .{5});
-    const res2 = client.call(.hello2, void{});
+    const res2 = client.call(.hello2, {});
     const res3 = client.call(.hello3, .{try caps.ROOT_MEMORY.alloc(caps.Frame)});
 
     try std.testing.expect(@TypeOf(res1) == sys.Error!struct { sys.Error!void });
@@ -693,17 +693,17 @@ test "comptime RPC Protocol generator" {
     const S = struct {
         fn hello1(_: void, _: u32, request: struct { usize }) struct { sys.Error!void } {
             std.log.info("pm hello1 request: {}", .{request});
-            return .{void{}};
+            return .{{}};
         }
 
         fn hello2(_: void, _: u32, request: void) struct { void } {
             std.log.info("pm hello2 request: {}", .{request});
-            return .{void{}};
+            return .{{}};
         }
 
         fn hello3(_: void, _: u32, request: struct { caps.Frame }) struct { sys.Error!void, usize } {
             std.log.info("pm hello3 request: {}", .{request});
-            return .{ void{}, 0 };
+            return .{ {}, 0 };
         }
     };
 
@@ -711,6 +711,6 @@ test "comptime RPC Protocol generator" {
         .hello1 = S.hello1,
         .hello2 = S.hello2,
         .hello3 = S.hello3,
-    }).init(void{}, .{});
+    }).init({}, .{});
     try std.testing.expectError(sys.Error.InvalidCapability, server.run());
 }

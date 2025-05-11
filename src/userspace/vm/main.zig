@@ -95,7 +95,7 @@ fn newVmemHandler(ctx: *System, sender: u32, _: void) struct { Error!void, usize
             .vmem = vmem,
         };
 
-        return .{ void{}, i };
+        return .{ {}, i };
     }
 
     return .{ Error.Internal, 0 };
@@ -165,7 +165,7 @@ fn loadElfHandler(ctx: *System, sender: u32, req: struct { usize, caps.Frame, us
 
     log.debug("got ELF to load {}", .{.{ frame, offset, length }});
 
-    return .{ void{}, entry };
+    return .{ {}, entry };
 }
 
 fn mapFrameHandler(
@@ -213,7 +213,7 @@ fn mapFrameHandler(
         return .{ Error.Internal, 0, frame };
     };
 
-    return .{ void{}, vaddr, .{} };
+    return .{ {}, vaddr, .{} };
 }
 
 fn mapDeviceFrameHandler(
@@ -261,7 +261,7 @@ fn mapDeviceFrameHandler(
         return .{ Error.Internal, 0, frame };
     };
 
-    return .{ void{}, vaddr, .{} };
+    return .{ {}, vaddr, .{} };
 }
 
 fn mapAnonHandler(
@@ -313,7 +313,7 @@ fn mapAnonHandler(
         return .{ Error.Internal, 0 };
     };
 
-    return .{ void{}, vaddr };
+    return .{ {}, vaddr };
 }
 
 fn newSenderHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.Sender } {
@@ -325,7 +325,7 @@ fn newSenderHandler(ctx: *System, sender: u32, _: void) struct { Error!void, cap
         return .{ err, .{} };
     };
 
-    return .{ void{}, vm_sender };
+    return .{ {}, vm_sender };
 }
 
 fn newThreadHandler(ctx: *System, sender: u32, req: struct { usize, usize, usize }) struct { Error!void, caps.Thread } {
@@ -348,7 +348,7 @@ fn newThreadHandler(ctx: *System, sender: u32, req: struct { usize, usize, usize
         return .{ Error.Internal, .{} };
     };
 
-    return .{ void{}, thread };
+    return .{ {}, thread };
 }
 
 // this is the real ELF loader for the os
