@@ -13,8 +13,6 @@ const dark_mode: bool = true;
 //
 
 pub fn spinnerMain() !void {
-    log.info("starting spinner thread", .{});
-
     var res: Error!void, const framebuffer: caps.DeviceFrame, const framebuffer_info: caps.Frame =
         try main.rm.call(.requestFramebuffer, {});
     try res;
@@ -49,7 +47,7 @@ pub fn spinnerMain() !void {
 
 var dir: std.atomic.Value(i32) = .init(1);
 
-fn tickKey() noreturn {
+fn tickKey() callconv(.SysV) noreturn {
     while (true) {
         const res, _, const state: abi.input.KeyState = main.input.call(.nextKey, {}) catch break;
         res catch break;
@@ -90,8 +88,6 @@ fn framebufferSplash(
 
     @memset(fb_info.fb, if (dark_mode) 0x0 else 0xFFFFFF);
     @memset(fb_info.buffer, if (dark_mode) 0x0 else 0xFFFFFF);
-
-    log.info("done", .{});
 
     const mid_x = width / 2;
     const mid_y = height / 2;
