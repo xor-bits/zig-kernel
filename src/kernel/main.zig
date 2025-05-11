@@ -226,6 +226,14 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
 
             trap.syscall_id = abi.sys.encode(0);
         },
+        .kernelPanic => {
+            if (!conf.KERNEL_PANIC_SYSCALL) {
+                trap.syscall_id = abi.sys.encode(abi.sys.Error.InvalidSyscall);
+                return;
+            }
+
+            @panic("manual kernel panic");
+        },
         .debug => {
             if (caps.getCapability(thread, @truncate(trap.arg0))) |obj| {
                 defer obj.lock.unlock();

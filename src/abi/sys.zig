@@ -8,6 +8,7 @@ const ring = @import("ring.zig");
 pub const Id = enum(usize) {
     /// print debug logs to serial output
     log = 1,
+    kernelPanic,
     /// identify the object type of a capability
     debug,
     call,
@@ -607,6 +608,12 @@ comptime {
 
 pub fn log(s: []const u8) void {
     _ = syscall(.log, .{ @intFromPtr(s.ptr), s.len }) catch unreachable;
+}
+
+pub fn kernelPanic() noreturn {
+    if (!abi.conf.KERNEL_PANIC_SYSCALL) @compileError("debug kernel panics not enabled");
+    _ = syscall(.kernelPanic, .{}) catch {};
+    unreachable;
 }
 
 pub fn debug(cap: u32) !abi.ObjectType {
