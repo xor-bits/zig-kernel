@@ -246,11 +246,16 @@ pub fn eoi() void {
     }
 }
 
-pub fn interProcessorInterrupt(target_lapic_id: u8, vector: u8) void {
+pub fn interProcessorInterrupt(target_lapic_id: u32, vector: u8) void {
     switch (arch.cpuLocal().apic_regs) {
         .xapic => |regs| {
+            if (target_lapic_id > std.math.maxInt(u8)) {
+                log.err("tried to IPI a processor ({}) that doesn't exist", .{target_lapic_id});
+                return;
+            }
+
             const icr_high = XApicIcrHigh{
-                .destination = target_lapic_id,
+                .destination = @truncate(target_lapic_id),
             };
             const icr_low = XApicIcrLow{
                 .vector = vector,

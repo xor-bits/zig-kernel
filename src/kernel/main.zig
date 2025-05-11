@@ -39,7 +39,7 @@ pub const CpuLocalStorage = struct {
 
     current_thread: ?*caps.Thread = null,
     id: u32,
-    lapic_id: u8,
+    lapic_id: u32,
     apic_regs: apic.ApicRegs = .{ .none = {} },
 
     // FIXME: remove notify caps from here
