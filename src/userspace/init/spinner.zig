@@ -9,6 +9,20 @@ const log = std.log.scoped(.spinner);
 const caps = abi.caps;
 const Error = abi.sys.Error;
 const dark_mode: bool = true;
+const msaa: u16 = 2;
+const frametime_ns: u32 = 16_666_667;
+// const frametime_ns: u32 = 1_000_000;
+const speed: f32 = 0.001;
+const dot_count: u16 = 18;
+const radius: u16 = 60;
+const trail: u8 = 10;
+const color: u32 = 0xFF8000;
+// const color: u32 = 0x0080FF;
+// const color: u32 = 0x00FFFF;
+// const color: u32 = 0x00FF80;
+// const color: u32 = 0x80FF00;
+// const color: u32 = 0xFFFFFF;
+// const color: u32 = 0x000000;
 
 //
 
@@ -80,7 +94,7 @@ fn framebufferSplash(
 
     const res: Error!void, const backbuffer_addr = try main.pm.call(
         .growHeap,
-        .{4 * FbInfo.width * FbInfo.height},
+        .{@as(usize, 4) * FbInfo.width * FbInfo.height},
     );
     try res;
 
@@ -109,17 +123,15 @@ fn framebufferSplash(
             @floatCast(@as(f64, @floatFromInt(phase)) / 1_000_000.0),
         );
 
-        phase += (dir.load(.monotonic) * 2 - 1) * 16_666_667;
-        nanos += 16_666_667;
+        phase += (dir.load(.monotonic) * 2 - 1) * frametime_ns;
+        nanos += frametime_ns;
         _ = main.timer.call(.sleepDeadline, .{nanos}) catch break;
     }
 }
 
-const speed: f32 = 0.001;
-
 const FbInfo = struct {
-    const width = 480;
-    const height = 480;
+    const width: usize = 3 * radius * msaa;
+    const height: usize = 3 * radius * msaa;
 
     buffer: []u32,
 
@@ -132,15 +144,15 @@ const FbInfo = struct {
 fn drawFrame(fb: *const FbInfo, mid_x: usize, mid_y: usize, millis: f32) void {
     dim(fb);
 
-    for (0..20) |i| {
-        const phase = @as(f32, @floatFromInt(i)) / 20.0;
+    for (0..dot_count) |i| {
+        const phase = @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(dot_count));
         drawTriangleDot(
             fb,
             FbInfo.width / 2,
             FbInfo.height / 2,
             phase * 3.0 - millis * speed,
             millis,
-            0xFF8000,
+            color,
         );
     }
 
@@ -152,13 +164,13 @@ fn dim(fb: *const FbInfo) void {
         for (0..FbInfo.width) |x| {
             var col: Pixel = @bitCast(fb.buffer[x + y * FbInfo.width]);
             if (dark_mode) {
-                col.r = @max(col.r, 10) - 10;
-                col.g = @max(col.g, 10) - 10;
-                col.b = @max(col.b, 10) - 10;
+                col.r = @max(col.r, trail) - trail;
+                col.g = @max(col.g, trail) - trail;
+                col.b = @max(col.b, trail) - trail;
             } else {
-                col.r = @min(col.r, 245) + 10;
-                col.g = @min(col.g, 245) + 10;
-                col.b = @min(col.b, 245) + 10;
+                col.r = @min(col.r, 255 - trail) + trail;
+                col.g = @min(col.g, 255 - trail) + trail;
+                col.b = @min(col.b, 255 - trail) + trail;
             }
             fb.buffer[x + y * FbInfo.width] = @bitCast(col);
         }
@@ -166,24 +178,33 @@ fn dim(fb: *const FbInfo) void {
 }
 
 fn blit(fb: *const FbInfo, mid_x: usize, mid_y: usize) void {
-    for (0..FbInfo.height / 2) |y| {
-        for (0..FbInfo.width / 2) |x| {
-            const px0: Pixel = @bitCast(fb.buffer[(x * 2 + 0) + (y * 2 + 0) * FbInfo.width]);
-            const px1: Pixel = @bitCast(fb.buffer[(x * 2 + 1) + (y * 2 + 0) * FbInfo.width]);
-            const px2: Pixel = @bitCast(fb.buffer[(x * 2 + 0) + (y * 2 + 1) * FbInfo.width]);
-            const px3: Pixel = @bitCast(fb.buffer[(x * 2 + 1) + (y * 2 + 1) * FbInfo.width]);
+    for (0..FbInfo.height / msaa) |y| {
+        for (0..FbInfo.width / msaa) |x| {
+            var avg_r: u16 = 0;
+            var avg_g: u16 = 0;
+            var avg_b: u16 = 0;
+            inline for (0..msaa) |msaa_y| {
+                inline for (0..msaa) |msaa_x| {
+                    const px: Pixel = @bitCast(
+                        fb.buffer[(x * msaa + msaa_x) + (y * msaa + msaa_y) * FbInfo.width],
+                    );
+                    avg_r += px.r;
+                    avg_g += px.g;
+                    avg_b += px.b;
+                }
+            }
 
             const multisampled = Pixel{
-                .r = @truncate((@as(u16, px0.r) + px1.r + px2.r + px3.r) / 4),
-                .g = @truncate((@as(u16, px0.g) + px1.g + px2.g + px3.g) / 4),
-                .b = @truncate((@as(u16, px0.b) + px1.b + px2.b + px3.b) / 4),
+                .r = @truncate(avg_r / msaa / msaa),
+                .g = @truncate(avg_g / msaa / msaa),
+                .b = @truncate(avg_b / msaa / msaa),
             };
 
             // const target_x = x;
             // const target_y = y;
             // _ = .{ mid_x, mid_y };
-            const target_x = x + mid_x - FbInfo.width / 4;
-            const target_y = y + mid_y - FbInfo.height / 4;
+            const target_x = x + mid_x - FbInfo.width / 2 / msaa;
+            const target_y = y + mid_y - FbInfo.height / 2 / msaa;
             fb.fb[target_x + target_y * fb.fb_pitch] =
                 @bitCast(multisampled);
         }
@@ -191,9 +212,9 @@ fn blit(fb: *const FbInfo, mid_x: usize, mid_y: usize) void {
 }
 
 const Pixel = extern struct {
-    r: u8,
-    g: u8,
-    b: u8,
+    r: u8 = 0,
+    g: u8 = 0,
+    b: u8 = 0,
     _p: u8 = 0,
 };
 
@@ -205,27 +226,30 @@ fn drawTriangleDot(fb: *const FbInfo, mid_x: usize, mid_y: usize, t: f32, millis
     const pt_x = ft * std.math.cos(b) + (1.0 - ft) * std.math.cos(a);
     const pt_y = ft * std.math.sin(b) + (1.0 - ft) * std.math.sin(a);
 
+    const rad = @as(f32, @floatFromInt(radius * msaa));
+
     drawDot(
         fb,
-        @as(usize, @intFromFloat(pt_x * 120.0 + @as(f32, @floatFromInt(mid_x)))),
-        @as(usize, @intFromFloat(pt_y * 120.0 + @as(f32, @floatFromInt(mid_y)))),
+        @as(usize, @intFromFloat(pt_x * rad + @as(f32, @floatFromInt(mid_x)))),
+        @as(usize, @intFromFloat(pt_y * rad + @as(f32, @floatFromInt(mid_y)))),
         col,
     );
 }
 
 fn drawDot(fb: *const FbInfo, mid_x: usize, mid_y: usize, col: u32) void {
-    const minx = @max(mid_x, 10) - 10;
-    const miny = @max(mid_y, 10) - 10;
-    const maxx = mid_x + 11;
-    const maxy = mid_y + 11;
+    const minx = @max(mid_x, msaa * 5) - msaa * 5;
+    const miny = @max(mid_y, msaa * 5) - msaa * 5;
+    const maxx = mid_x + msaa * 5 + 1;
+    const maxy = mid_y + msaa * 5 + 1;
 
     for (miny..maxy) |y| {
         for (minx..maxx) |x| {
             const dx = if (mid_x > x) mid_x - x else x - mid_x;
             const dy = if (mid_y > y) mid_y - y else y - mid_y;
             const dsqr = dx * dx + dy * dy;
+            const rad = 3 * msaa + 1;
 
-            if (dsqr <= 7 * 7 - 3) {
+            if (dsqr <= rad * rad - msaa + 1) {
                 fb.buffer[x + y * FbInfo.width] = col;
             }
         }
