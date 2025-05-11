@@ -26,7 +26,7 @@ pub fn init() !void {
         addr.Phys.fromInt(@intFromPtr(rsdp_resp.address)).toHhdm().toPtr(*const Rsdp)
     else
         @ptrCast(rsdp_resp.address);
-    log.debug("RSDP={*}", .{rsdp});
+    // log.debug("RSDP={*}", .{rsdp});
     if (!isChecksumValid(Rsdp, rsdp)) {
         return error.InvalidRsdpChecksum;
     }
@@ -40,7 +40,6 @@ pub fn init() !void {
     if (rsdp.revision == 0) {
         try acpiv1(rsdp);
     } else {
-        log.err("no x2APIC support", .{});
         try acpiv2(rsdp);
     }
 }
@@ -51,7 +50,8 @@ fn acpiv1(rsdp: *const Rsdp) !void {
 
     // FIXME: this is unaligned most of the time, but zig doesnt like that
     const rsdt: *const Rsdt = addr.Phys.fromInt(rsdp.rsdt_addr).toHhdm().toPtr(*const Rsdt);
-    log.debug("RSDT={*}", .{rsdt});
+    if (arch.cpuId() == 0)
+        log.debug("RSDT={*}", .{rsdt});
     if (!isChecksumValid(Rsdt, rsdt)) {
         return error.InvalidRsdtChecksum;
     }
@@ -72,7 +72,8 @@ fn acpiv2(rsdp: *const Rsdp) !void {
     }
 
     const xsdt: *const Xsdt = addr.Phys.fromInt(xsdp.xsdt_addr).toHhdm().toPtr(*const Xsdt);
-    log.debug("XSDT={*}", .{xsdt});
+    if (arch.cpuId() == 0)
+        log.debug("XSDT={*}", .{xsdt});
     if (!isChecksumValid(Xsdt, xsdt)) {
         return error.InvalidXsdtChecksum;
     }
