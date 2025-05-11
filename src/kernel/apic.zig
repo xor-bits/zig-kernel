@@ -247,25 +247,35 @@ pub fn eoi() void {
 }
 
 pub fn interProcessorInterrupt(target_lapic_id: u8, vector: u8) void {
-    const icr_high = IcrHigh{
-        .destination = target_lapic_id,
-    };
-    const icr_low = IcrLow{
-        .vector = vector,
-        .delivery_mode = .fixed,
-        .destination_mode = .physical,
-        .level = .assert,
-        .trigger_mode = .edge,
-        .destination_shorthand = .no_shorthand,
-    };
-
     switch (arch.cpuLocal().apic_regs) {
         .xapic => |regs| {
+            const icr_high = XApicIcrHigh{
+                .destination = target_lapic_id,
+            };
+            const icr_low = XApicIcrLow{
+                .vector = vector,
+                .delivery_mode = .fixed,
+                .destination_mode = .physical,
+                .level = .assert,
+                .trigger_mode = .edge,
+                .destination_shorthand = .no_shorthand,
+            };
+
             regs.interrupt_command[1].write(@bitCast(icr_high));
             regs.interrupt_command[0].write(@bitCast(icr_low));
         },
         .x2apic => |regs| {
-            regs.interrupt_command.writeIcr(@bitCast([2]u32{ @bitCast(icr_low), @bitCast(icr_high) }));
+            const icr = X2ApicIcr{
+                .vector = vector,
+                .delivery_mode = .fixed,
+                .destination_mode = .physical,
+                .level = .assert,
+                .trigger_mode = .edge,
+                .destination_shorthand = .no_shorthand,
+                .destination = target_lapic_id,
+            };
+
+            regs.interrupt_command.writeIcr(@bitCast(icr));
         },
         .none => unreachable,
     }
@@ -441,17 +451,38 @@ pub const IoApicRedirect = packed struct {
 
 // LAPIC register structs
 
-pub const IcrHigh = packed struct {
+pub const XApicIcrHigh = packed struct {
     reserved: u24 = 0,
     destination: u8,
 };
 
-pub const IcrLow = packed struct {
+pub const XApicIcrLow = packed struct {
     vector: u8,
     delivery_mode: DeliveryMode,
     destination_mode: DestinationMode,
     delivery_status: DeliveryStatus = .idle,
-    reserved0: u1 = 0,
+    _reserved0: u1 = 0,
+    level: enum(u1) {
+        deassert,
+        assert,
+    },
+    trigger_mode: TriggerMode,
+    _reserved1: u2 = 0,
+    destination_shorthand: enum(u2) {
+        no_shorthand,
+        self,
+        all_including_self,
+        all_excluding_self,
+    },
+    _reserved2: u12 = 0,
+};
+
+pub const X2ApicIcr = packed struct {
+    vector: u8,
+    delivery_mode: DeliveryMode,
+    destination_mode: DestinationMode,
+    _reserved0: u1 = 0,
+    _reserved1: u1 = 0,
     level: enum(u1) {
         deassert,
         assert,
@@ -465,6 +496,7 @@ pub const IcrLow = packed struct {
         all_excluding_self,
     },
     reserved2: u12 = 0,
+    destination: u32,
 };
 
 // Common stuff
