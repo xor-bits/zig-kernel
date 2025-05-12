@@ -87,6 +87,7 @@ fn acpiv2(rsdp: *const Rsdp) !void {
 fn walkTables(comptime T: type, pointers: []align(1) const T) !void {
     var maybe_apic: ?*const SdtHeader = null;
     var maybe_hpet: ?*const SdtHeader = null;
+    var maybe_mcfg: ?*const SdtHeader = null;
 
     if (arch.cpuId() == 0)
         log.info("SDT Headers:", .{});
@@ -104,6 +105,7 @@ fn walkTables(comptime T: type, pointers: []align(1) const T) !void {
         switch (SdtType.fromSignature(sdt.signature)) {
             .APIC => maybe_apic = sdt,
             .HPET => maybe_hpet = sdt,
+            .MCFG => maybe_mcfg = sdt,
             else => {},
         }
     }
@@ -114,9 +116,17 @@ fn walkTables(comptime T: type, pointers: []align(1) const T) !void {
     const hpet_table = maybe_hpet orelse {
         return error.HpetTableMissing;
     };
+    const mcfg_table = maybe_mcfg orelse {
+        return error.McfgTableMissing;
+    };
 
     try apic.init(@ptrCast(apic_table));
     try hpet.init(@ptrCast(hpet_table));
+
+    var it = @as(*const Mcfg, @ptrCast(mcfg_table)).iterator();
+    while (it.next()) |entry| {
+        log.info("entry={}", .{entry});
+    }
 
     try apic.enable();
 }
@@ -313,6 +323,38 @@ pub const Madt = extern struct {
 pub const Mcfg = extern struct {
     header: SdtHeader align(1),
     _reserved: u64 align(1),
+
+    pub fn iterator(self: *const @This()) Iterator {
+        return .{
+            .header = &self.header,
+            .ext_len = 0,
+        };
+    }
+
+    pub const Iterator = struct {
+        header: *const SdtHeader,
+        ext_len: usize,
+
+        pub fn next(self: *@This()) ?*const Entry {
+            while (true) {
+                if (self.ext_len >= self.header.length - @sizeOf(Mcfg))
+                    return null;
+
+                const entry: *const Entry = @ptrFromInt(@intFromPtr(self.header) + self.ext_len + @sizeOf(Mcfg));
+                self.ext_len += 16;
+
+                return entry;
+            }
+        }
+    };
+
+    pub const Entry = extern struct {
+        base_addr: u64 align(1),
+        pci_segment_group: u16 align(1),
+        start_pci_bus: u8 align(1),
+        end_pci_bus: u8 align(1),
+        _reserved: u32 align(1),
+    };
 };
 
 //
