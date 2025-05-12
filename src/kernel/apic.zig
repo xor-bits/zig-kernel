@@ -85,19 +85,11 @@ pub fn init(madt: *const acpi.Madt) !void {
 
     var lapic_addr: u64 = madt.lapic_addr;
 
-    var ext_len: usize = 0;
-    while (ext_len < madt.header.length - @sizeOf(acpi.Madt)) {
-        const entry_base: *const acpi.Madt.Entry = @ptrFromInt(@intFromPtr(madt) + ext_len + @sizeOf(acpi.Madt));
-        ext_len += entry_base.record_len;
-
-        switch (entry_base.entry_type) {
-            0 => {
-                const entry: *const acpi.Madt.ProcessorLocalApic = @ptrCast(entry_base);
-                _ = entry;
-                // INFO: this is not important
-            },
-            1 => {
-                const entry: *const acpi.Madt.IoApic = @ptrCast(entry_base);
+    var it = madt.iterator();
+    while (it.next()) |anyentry| {
+        switch (anyentry) {
+            .processor_local_apic => {}, // this is not important
+            .ioapic => |entry| {
                 if (arch.cpuId() != 0) continue;
 
                 log.info("found I/O APIC addr: 0x{x}", .{entry.io_apic_addr});
@@ -107,36 +99,18 @@ pub fn init(madt: *const acpi.Madt) !void {
                     .global_system_interrupt_base = entry.global_system_interrupt_base,
                 });
             },
-            2 => {
-                const entry: *const acpi.Madt.IoApicInterruptSourceOverride = @ptrCast(entry_base);
+            .ioapic_interrupt_source_override => |entry| {
                 if (arch.cpuId() != 0) continue;
 
                 // FIXME: this is prob important
                 log.err("I/O APIC interrupt source override detected but not yet handled: {}", .{entry});
             },
-            3 => {
-                const entry: *const acpi.Madt.IoApicNmiSource = @ptrCast(entry_base);
-                _ = entry;
-                // NOTE: this might be important
-            },
-            4 => {
-                const entry: *const acpi.Madt.LapicNmis = @ptrCast(entry_base);
-                _ = entry;
-                // NOTE: this could be important
-
-            },
-            5 => {
-                const entry: *const acpi.Madt.LapicAddrOverride = @ptrCast(entry_base);
+            .ioapic_nmi_source => {}, // this might be important
+            .lapic_nmis => {}, // this could be important
+            .lapic_addr_override => |entry| {
                 lapic_addr = entry.lapic_addr;
             },
-            9 => {
-                const entry: *const acpi.Madt.ProcessorLx2apic = @ptrCast(entry_base);
-                _ = entry;
-                // NOTE: this may be important
-            },
-            else => {
-                // ignore others
-            },
+            .processor_lx2apic => {}, // this may be important
         }
     }
 

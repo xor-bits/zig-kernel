@@ -206,12 +206,53 @@ pub const Xsdt = extern struct {
     }
 };
 
-// MADT SDT entries
-
 pub const Madt = extern struct {
     header: SdtHeader align(1),
     lapic_addr: u32 align(1),
     flags: u32 align(1),
+
+    pub fn iterator(self: *const @This()) Iterator {
+        return .{
+            .header = &self.header,
+            .ext_len = 0,
+        };
+    }
+
+    pub const Iterator = struct {
+        header: *const SdtHeader,
+        ext_len: usize,
+
+        pub fn next(self: *@This()) ?AnyEntry {
+            while (true) {
+                if (self.ext_len >= self.header.length - @sizeOf(Madt))
+                    return null;
+
+                const entry_base: *const Entry = @ptrFromInt(@intFromPtr(self.header) + self.ext_len + @sizeOf(Madt));
+                self.ext_len += entry_base.record_len;
+
+                switch (entry_base.entry_type) {
+                    0 => return AnyEntry{ .processor_local_apic = @ptrCast(entry_base) },
+                    1 => return AnyEntry{ .ioapic = @ptrCast(entry_base) },
+                    2 => return AnyEntry{ .ioapic_interrupt_source_override = @ptrCast(entry_base) },
+                    3 => return AnyEntry{ .ioapic_nmi_source = @ptrCast(entry_base) },
+                    4 => return AnyEntry{ .lapic_nmis = @ptrCast(entry_base) },
+                    5 => return AnyEntry{ .lapic_addr_override = @ptrCast(entry_base) },
+                    9 => return AnyEntry{ .processor_lx2apic = @ptrCast(entry_base) },
+                    else => {}, // ignore others
+                }
+            }
+        }
+    };
+
+    pub const AnyEntry = union(enum) {
+        processor_local_apic: *const ProcessorLocalApic,
+        ioapic: *const IoApic,
+        ioapic_interrupt_source_override: *const IoApicInterruptSourceOverride,
+        ioapic_nmi_source: *const IoApicNmiSource,
+        lapic_nmis: *const LapicNmis,
+        lapic_addr_override: *const LapicAddrOverride,
+        processor_lx2apic: *const ProcessorLx2apic,
+    };
 
     pub const Entry = extern struct {
         entry_type: u8,
@@ -267,6 +308,11 @@ pub const Madt = extern struct {
         flags: u32 align(1),
         acpi_id: u32 align(1),
     };
+};
+
+pub const Mcfg = extern struct {
+    header: SdtHeader align(1),
+    _reserved: u64 align(1),
 };
 
 //
