@@ -68,9 +68,9 @@ pub fn initCpu(id: u32, smpinfo: ?*limine.SmpInfo) !void {
     wrmsr(KERNELGS_BASE, 0);
 
     // the PAT MSR value is set so that the old modes stay the same
-    log.info("default PAT = 0x{x}", .{rdmsr(IA32_PAT_MSR)});
+    // log.info("default PAT = 0x{x}", .{rdmsr(IA32_PAT_MSR)});
     wrmsr(IA32_PAT_MSR, abi.sys.CacheType.patMsr());
-    log.info("PAT = 0x{x}", .{abi.sys.CacheType.patMsr()});
+    // log.info("PAT = 0x{x}", .{abi.sys.CacheType.patMsr()});
 }
 
 // launch 2 next processors (snowball)
