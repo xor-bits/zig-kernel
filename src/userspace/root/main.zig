@@ -65,6 +65,10 @@ pub fn main() !void {
         .mmio_frame = boot_info.framebuffer,
         .info_frame = boot_info.framebuffer_info,
     });
+    system.devices.set(.mcfg, .{
+        .mmio_frame = boot_info.mcfg,
+        .info_frame = boot_info.mcfg_info,
+    });
 
     const vm_sender = try recv.subscribe();
 

@@ -49,12 +49,39 @@ pub fn main() !void {
     try res;
     devices.set(.framebuffer, .{ .mmio_frame = mmio_frame, .info_frame = info_frame });
 
+    log.debug("requesting MCFG", .{});
+    res, mmio_frame, info_frame = try root.call(.device, .{abi.DeviceKind.mcfg});
+    try res;
+    devices.set(.mcfg, .{ .mmio_frame = mmio_frame, .info_frame = info_frame });
+
     // endpoint for rm server <-> unix app communication
     log.debug("allocating rm endpoint", .{});
     const rm_recv = try memory.alloc(caps.Receiver);
     const rm_send = try rm_recv.subscribe();
 
     const vm_client = abi.VmProtocol.Client().init(vm_sender);
+
+    // log.debug("mapping PCI cfg space", .{});
+    // res, const pci_cfg_addr: usize, _ = try vm_client.call(.mapDeviceFrame, .{
+    //     vmem_handle,
+    //     mmio_frame,
+    //     abi.sys.Rights{ .writable = true },
+    //     abi.sys.MapFlags{ .cache = .uncacheable },
+    // });
+    // try res;
+
+    // log.debug("mapping MCFG info", .{});
+    // res, const mcfg_addr: usize, _ = try vm_client.call(.mapFrame, .{
+    //     vmem_handle,
+    //     info_frame,
+    //     abi.sys.Rights{},
+    //     abi.sys.MapFlags{},
+    // });
+    // try res;
+
+    // const mcfg_info: *const abi.McfgInfoFrame = @ptrFromInt(mcfg_addr);
+    // log.info("MCFG={}", .{mcfg_info});
+    // _ = pci_cfg_addr;
 
     var system = System{
         .recv = rm_recv,
@@ -76,6 +103,7 @@ pub fn main() !void {
         .requestPs2 = requestPs2Handler,
         .requestHpet = requestHpetHandler,
         .requestFramebuffer = requestFramebufferHandler,
+        .requestPci = requestPciHandler,
         .requestInterruptHandler = requestInterruptHandlerHandler,
         .requestNotify = requestNotifyHandler,
         .newSender = newSenderHandler,
@@ -131,6 +159,14 @@ fn requestFramebufferHandler(ctx: *System, _: u32, _: void) struct { Error!void,
 
     ctx.devices.set(.framebuffer, .{});
     return .{ {}, framebuffer.mmio_frame, framebuffer.info_frame };
+}
+
+fn requestPciHandler(ctx: *System, _: u32, _: void) struct { Error!void, caps.DeviceFrame, caps.Frame } {
+    const mcfg = ctx.devices.get(.mcfg);
+    if (mcfg.mmio_frame.cap == 0) return .{ Error.PermissionDenied, .{}, .{} };
+
+    ctx.devices.set(.mcfg, .{});
+    return .{ {}, mcfg.mmio_frame, mcfg.info_frame };
 }
 
 fn requestInterruptHandlerHandler(ctx: *System, _: u32, req: struct { u8, caps.Notify }) struct { Error!void, caps.Notify } {

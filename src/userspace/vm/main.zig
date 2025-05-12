@@ -227,12 +227,15 @@ fn mapDeviceFrameHandler(
     const flags = req.@"3";
 
     if (handle >= 256) {
+        log.debug("handle out of bounds", .{});
         return .{ abi.sys.Error.InvalidArgument, 0, .{} };
     }
     const addr_spc = &(ctx.address_spaces[handle] orelse {
+        log.debug("handle points to null", .{});
         return .{ abi.sys.Error.InvalidArgument, 0, .{} };
     });
     if (addr_spc.owner != sender) {
+        log.debug("handle not owned {}", .{handle});
         return .{ Error.InvalidArgument, 0, .{} };
     }
     const size = frame.sizeOf() catch |err| {

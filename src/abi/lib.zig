@@ -188,6 +188,7 @@ pub const SysLog = struct {
 pub const DeviceKind = enum(u8) {
     hpet,
     framebuffer,
+    mcfg,
 };
 
 pub const ServerKind = enum(u8) {
@@ -310,6 +311,9 @@ pub const RmProtocol = util.Protocol(struct {
 
     /// request framebuffer device memory and its info frame
     requestFramebuffer: fn () struct { sys.Error!void, caps.DeviceFrame, caps.Frame },
+
+    /// request pci configuration space device memory and its info frame
+    requestPci: fn () struct { sys.Error!void, caps.DeviceFrame, caps.Frame },
 
     /// request an interrupt handler for a driver
     requestInterruptHandler: fn (irq: u8, notify: caps.Notify) struct { sys.Error!void, caps.Notify },
