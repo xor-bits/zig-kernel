@@ -82,6 +82,7 @@ pub fn main() !void {
             const dev = PcieDevice.get(pci_cfg_addr, @truncate(bus), @truncate(device), 0);
             if (dev.vendor_id.read() == 0xFFFF) continue;
 
+            log.info("", .{});
             log.info("vendor={s}", .{dev.vendor_name()});
             log.info("device={s}", .{dev.device_name()});
             log.info("class={s}", .{dev.class_name()});

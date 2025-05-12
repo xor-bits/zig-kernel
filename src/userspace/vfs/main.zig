@@ -38,6 +38,112 @@ pub fn main() !void {
     // try server.run();
 }
 
+//
+
+const FileNode = struct {
+    refcnt: RefCnt = .{},
+
+    /// inode of the file in the correct device
+    inode: u128 = 0,
+
+    cache_lock: abi.lock.YieldMutex = .{},
+
+    /// all cached pages
+    pages: []const caps.Frame,
+
+    pub fn create() !*@This() {
+        file_node_allocator_lock.lock();
+        defer file_node_allocator_lock.unlock();
+        const node = try file_node_allocator.create();
+        node.* = .{};
+        return node;
+    }
+
+    pub fn clone(self: *@This()) void {
+        self.refcnt.inc();
+    }
+
+    pub fn destroy(self: *@This()) void {
+        if (self.refcnt.dec()) {
+            @branchHint(.cold);
+
+            file_node_allocator_lock.lock();
+            defer file_node_allocator_lock.unlock();
+            file_node_allocator.destroy(self);
+        }
+    }
+};
+
+const DirNode = struct {
+    refcnt: RefCnt = .{},
+
+    /// inode of the directory in the correct device
+    inode: u128 = 0,
+
+    cache_lock: abi.lock.YieldMutex = .{},
+
+    dir_entries: usize = 0,
+    file_entries: usize = 0,
+    /// all cached entries
+    /// first `dir_entries` subdirectories (*DirNode)
+    /// then `file_entries` files in this directory (*FileNode)
+    entries: []const *anyopaque = &.{},
+
+    pub fn create() !*@This() {
+        dir_node_allocator_lock.lock();
+        defer dir_node_allocator_lock.unlock();
+        const node = try dir_node_allocator.create();
+        node.* = .{};
+        return node;
+    }
+
+    pub fn clone(self: *@This()) void {
+        self.refcnt.inc();
+    }
+
+    pub fn destroy(self: *@This()) void {
+        if (self.refcnt.dec()) {
+            @branchHint(.cold);
+
+            dir_node_allocator_lock.lock();
+            defer dir_node_allocator_lock.unlock();
+            dir_node_allocator.destroy(self);
+        }
+    }
+};
+
+const RefCnt = struct {
+    refcnt: std.atomic.Value(usize) = .init(1),
+
+    pub fn inc(self: *@This()) void {
+        const old = self.refcnt.fetchAdd(1, .monotonic);
+        if (old >= std.math.maxInt(isize)) @panic("too many ref counts");
+    }
+
+    pub fn dec(self: *@This()) bool {
+        const old_cnt = self.refcnt.fetchSub(1, .release);
+        std.debug.assert(old_cnt < std.math.maxInt(isize));
+
+        if (old_cnt == 1) {
+            @branchHint(.cold);
+        } else {
+            return false;
+        }
+
+        // fence
+        _ = self.refcnt.load(.acquire);
+
+        return true;
+    }
+};
+
+var file_node_allocator: std.heap.MemoryPool(FileNode) = std.heap.MemoryPool(FileNode).init(abi.mem.server_page_allocator);
+var file_node_allocator_lock: abi.lock.YieldMutex = .{};
+var dir_node_allocator: std.heap.MemoryPool(DirNode) = std.heap.MemoryPool(DirNode).init(abi.mem.server_page_allocator);
+var dir_node_allocator_lock: abi.lock.YieldMutex = .{};
+
+//
+
 comptime {
     abi.rt.installRuntime();
 }
