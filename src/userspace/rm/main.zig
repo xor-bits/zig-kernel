@@ -56,27 +56,27 @@ pub fn main() !void {
     const rm_recv = try memory.alloc(caps.Receiver);
     const rm_send = try rm_recv.subscribe();
 
-    // log.debug("mapping PCI cfg space", .{});
-    // res, const pci_cfg_addr: usize, _ = try vm_client.call(.mapDeviceFrame, .{
-    //     vmem_handle,
-    //     mmio_frame,
-    //     abi.sys.Rights{ .writable = true },
-    //     abi.sys.MapFlags{ .cache = .uncacheable },
-    // });
-    // try res;
+    log.debug("mapping PCI cfg space", .{});
+    res, const pci_cfg_addr: usize, _ = try vm_client.call(.mapDeviceFrame, .{
+        vmem_handle,
+        mmio_frame,
+        abi.sys.Rights{ .writable = true },
+        abi.sys.MapFlags{ .cache = .uncacheable },
+    });
+    try res;
 
-    // log.debug("mapping MCFG info", .{});
-    // res, const mcfg_addr: usize, _ = try vm_client.call(.mapFrame, .{
-    //     vmem_handle,
-    //     info_frame,
-    //     abi.sys.Rights{},
-    //     abi.sys.MapFlags{},
-    // });
-    // try res;
+    log.debug("mapping MCFG info", .{});
+    res, const mcfg_addr: usize, _ = try vm_client.call(.mapFrame, .{
+        vmem_handle,
+        info_frame,
+        abi.sys.Rights{},
+        abi.sys.MapFlags{},
+    });
+    try res;
 
-    // const mcfg_info: *const abi.McfgInfoFrame = @ptrFromInt(mcfg_addr);
-    // log.info("MCFG={}", .{mcfg_info});
-    // _ = pci_cfg_addr;
+    const mcfg_info: *const abi.McfgInfoFrame = @ptrFromInt(mcfg_addr);
+    log.info("MCFG={}", .{mcfg_info});
+    _ = pci_cfg_addr;
 
     var system = System{
         .recv = rm_recv,
