@@ -1,16 +1,22 @@
+const abi = @import("abi");
 const std = @import("std");
 const limine = @import("limine");
 
+const addr = @import("addr.zig");
 const apic = @import("apic.zig");
 const arch = @import("arch.zig");
-const addr = @import("addr.zig");
+const caps = @import("caps.zig");
 const hpet = @import("hpet.zig");
+const util = @import("util.zig");
 
 const log = std.log.scoped(.acpi);
+const volat = util.volat;
 
 //
 
 pub export var rsdp_req: limine.RsdpRequest = .{};
+
+var maybe_mcfg: ?*const SdtHeader = null;
 
 //
 
@@ -41,6 +47,38 @@ pub fn init() !void {
         try acpiv1(rsdp);
     } else {
         try acpiv2(rsdp);
+    }
+}
+
+pub fn bootInfoInstallMcfg(boot_info: *volatile abi.BootInfo, thread: *caps.Thread) !void {
+    const mcfg_table = maybe_mcfg orelse return;
+
+    var it = @as(*const Mcfg, @ptrCast(mcfg_table)).iterator();
+    if (it.next()) |entry| {
+        const mcfg_size = comptime abi.ChunkSize.of(0x10000000) orelse unreachable;
+        const mcfg_info_size = comptime abi.ChunkSize.of(@sizeOf(abi.McfgInfoFrame)) orelse unreachable;
+
+        const paddr = addr.Phys.fromInt(entry.base_addr);
+
+        const mcfg_obj: caps.Ref(caps.DeviceFrame) = .{ .paddr = caps.DeviceFrame.new(paddr, mcfg_size) };
+        const mcfg_info_obj: caps.Ref(caps.Frame) = try caps.Ref(caps.Frame).alloc(mcfg_info_size);
+
+        const mcfg_info = @as(*volatile abi.McfgInfoFrame, @ptrCast(mcfg_info_obj.ptr()));
+        mcfg_info.* = .{
+            .pci_segment_group = entry.pci_segment_group,
+            .start_pci_bus = entry.start_pci_bus,
+            .end_pci_bus = entry.end_pci_bus,
+        };
+
+        var id: u32 = undefined;
+        id = caps.pushCapability(mcfg_obj.object(thread));
+        volat(&boot_info.mcfg).* = .{ .cap = id };
+        id = caps.pushCapability(mcfg_info_obj.object(thread));
+        volat(&boot_info.mcfg_info).* = .{ .cap = id };
+    }
+
+    if (it.next()) |_| {
+        log.warn("TODO: MCFG entry discarded", .{});
     }
 }
 
@@ -87,7 +125,6 @@ fn acpiv2(rsdp: *const Rsdp) !void {
 fn walkTables(comptime T: type, pointers: []align(1) const T) !void {
     var maybe_apic: ?*const SdtHeader = null;
     var maybe_hpet: ?*const SdtHeader = null;
-    var maybe_mcfg: ?*const SdtHeader = null;
 
     if (arch.cpuId() == 0)
         log.info("SDT Headers:", .{});
@@ -116,17 +153,9 @@ fn walkTables(comptime T: type, pointers: []align(1) const T) !void {
     const hpet_table = maybe_hpet orelse {
         return error.HpetTableMissing;
     };
-    const mcfg_table = maybe_mcfg orelse {
-        return error.McfgTableMissing;
-    };
 
     try apic.init(@ptrCast(apic_table));
     try hpet.init(@ptrCast(hpet_table));
-
-    var it = @as(*const Mcfg, @ptrCast(mcfg_table)).iterator();
-    while (it.next()) |entry| {
-        log.info("entry={}", .{entry});
-    }
 
     try apic.enable();
 }

@@ -2,15 +2,16 @@ const std = @import("std");
 const abi = @import("abi");
 const limine = @import("limine");
 
+const acpi = @import("acpi.zig");
 const addr = @import("addr.zig");
 const arch = @import("arch.zig");
 const args = @import("args.zig");
 const caps = @import("caps.zig");
+const fb = @import("fb.zig");
 const hpet = @import("hpet.zig");
 const pmem = @import("pmem.zig");
 const proc = @import("proc.zig");
 const util = @import("util.zig");
-const fb = @import("fb.zig");
 
 const log = std.log.scoped(.init);
 const Error = abi.sys.Error;
@@ -88,6 +89,8 @@ fn mapRoot(thread: *caps.Thread, vmem: *caps.Vmem, boot_info: *caps.Frame, a: ar
     };
 
     try fb.bootInfoInstallFramebuffer(boot_info_ptr, thread);
+
+    try acpi.bootInfoInstallMcfg(boot_info_ptr, thread);
 
     const hpet_cap_id = caps.pushCapability(hpet.hpetFrame().object(thread));
     volat(&boot_info_ptr.hpet).* = .{ .cap = hpet_cap_id };

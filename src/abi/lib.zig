@@ -148,6 +148,9 @@ pub const BootInfo = extern struct {
     framebuffer_info: caps.Frame = .{},
     hpet: caps.DeviceFrame = .{},
     hpet_info: caps.Frame = .{},
+    // TODO: parse ACPI tables in rm server
+    mcfg: caps.DeviceFrame = .{},
+    mcfg_info: caps.Frame = .{},
 
     pub fn rootData(self: @This()) []u8 {
         return self.root_data[0..self.root_data_len];
@@ -374,4 +377,10 @@ pub const FramebufferInfoFrame = struct {
     green_mask_shift: u8,
     blue_mask_size: u8,
     blue_mask_shift: u8,
+};
+
+pub const McfgInfoFrame = struct {
+    pci_segment_group: u16,
+    start_pci_bus: u8,
+    end_pci_bus: u8,
 };
