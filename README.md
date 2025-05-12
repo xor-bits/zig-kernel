@@ -74,6 +74,7 @@ zig build run --prominent-compile-errors --summary none -freference-trace \
     - [x] send capabilities
     - [x] disallow mapping a frame twice without cloning the cap
     - [x] disallow overlapping maps
+    - [ ] restrict capability rights, ex: read-only frame can only create read-only frames
     - [ ] objects
       - [x] Memory
       - [x] Thread
