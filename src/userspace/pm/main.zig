@@ -17,6 +17,7 @@ pub fn main() !void {
     log.info("hello from pm", .{});
 
     const root = abi.RootProtocol.Client().init(abi.rt.root_ipc);
+    const vm_client = abi.VmProtocol.Client().init(abi.rt.vm_ipc);
     const vmem_handle = abi.rt.vmem_handle;
 
     log.debug("requesting memory", .{});
@@ -27,11 +28,6 @@ pub fn main() !void {
     log.debug("allocating pm endpoint", .{});
     const pm_recv = try memory.alloc(caps.Receiver);
     const pm_send = try pm_recv.subscribe();
-
-    log.debug("requesting vm sender", .{});
-    res, const vm_sender: caps.Sender = try root.call(.serverSender, .{abi.ServerKind.vm});
-    try res;
-    const vm_client = abi.VmProtocol.Client().init(vm_sender);
 
     log.debug("requesting initfs sender", .{});
     res, const initfs_sender: caps.Sender = try root.call(.initfs, {});
@@ -71,7 +67,7 @@ pub fn main() !void {
     try init_thread.setPrio(0);
     try init_thread.readRegs(&regs);
     regs.arg0 = init_root_sender.cap;
-    regs.arg1 = init_send.cap;
+    regs.arg2 = init_send.cap;
     try init_thread.writeRegs(&regs);
     try init_thread.start();
 

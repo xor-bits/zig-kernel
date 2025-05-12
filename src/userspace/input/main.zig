@@ -17,6 +17,7 @@ pub fn main() !void {
     log.info("hello from input", .{});
 
     const root = abi.RootProtocol.Client().init(abi.rt.root_ipc);
+    const vm_client = abi.VmProtocol.Client().init(abi.rt.vm_ipc);
 
     log.debug("requesting memory", .{});
     var res: Error!void, const memory: caps.Memory = try root.call(.memory, {});
@@ -26,12 +27,6 @@ pub fn main() !void {
     log.debug("allocating input endpoint", .{});
     const input_recv = try memory.alloc(caps.Receiver);
     const input_send = try input_recv.subscribe();
-
-    log.debug("requesting vm sender", .{});
-    res, const vm_sender = try root.call(.serverSender, .{abi.ServerKind.vm});
-    try res;
-
-    const vm_client = abi.VmProtocol.Client().init(vm_sender);
 
     // log.debug("requesting rm sender", .{});
     // res, const rm_sender = try root.call(.rm, {});

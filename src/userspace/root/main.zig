@@ -400,8 +400,8 @@ fn execWithVm(ctx: *System, bin: []const u8) !u32 {
     );
 
     const vm_sender = abi.VmProtocol.Client().init(ctx.servers.get(.vm).sender);
-    const res0, const vmem_handle = try vm_sender.call(.newVmem, {});
-    _ = try res0;
+    var res, const vmem_handle = try vm_sender.call(.newVmem, {});
+    try res;
 
     const res1 = try vm_sender.call(.loadElf, .{
         vmem_handle,
@@ -411,17 +411,25 @@ fn execWithVm(ctx: *System, bin: []const u8) !u32 {
     });
     _ = try res1.@"0";
 
-    const res2, const thread = try vm_sender.call(.newThread, .{ vmem_handle, 0, 0 });
-    _ = try res2;
+    res, const thread = try vm_sender.call(.newThread, .{ vmem_handle, 0, 0 });
+    try res;
+
+    res, const vm_sender_dupe: caps.Sender = try vm_sender.call(.newSender, {});
+    try res;
+
+    res, _ = try vm_sender.call(.moveOwner, .{ vmem_handle, vm_sender_dupe.cap });
+    try res;
 
     const sender = try ctx.recv.subscribe();
 
     try thread.setPrio(0);
     try thread.transferCap(sender.cap);
+    try thread.transferCap(vm_sender_dupe.cap);
     var regs: abi.sys.ThreadRegs = undefined;
     try thread.readRegs(&regs);
     regs.arg0 = sender.cap; // set RDI to the root client (sender cap)
-    regs.arg1 = vmem_handle; // set RSI to the server's own vmem handle
+    regs.arg1 = vm_sender_dupe.cap; // set RSI to the vm server client (sender cap)
+    regs.arg2 = vmem_handle; // set RDX to the server's own vmem handle
     try thread.writeRegs(&regs);
     try thread.start();
 
@@ -552,7 +560,7 @@ fn execVm(elf_bytes: []const u8, sender: abi.caps.Sender) !caps.Thread {
     try new_thread.setPrio(0);
     try new_thread.writeRegs(&.{
         .arg0 = sender.cap, // set RDI to
-        .arg1 = new_vmem.cap, // set RSI to the self Vmem cap
+        .arg2 = new_vmem.cap, // set RSI to the self Vmem cap
         .user_instr_ptr = header.entry,
         .user_stack_ptr = 0x7FFF_FFF4_0000 - 0x100,
     });

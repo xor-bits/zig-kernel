@@ -17,14 +17,11 @@ pub fn main() !void {
     log.info("hello from rm", .{});
 
     const root = abi.RootProtocol.Client().init(abi.rt.root_ipc);
+    const vm_client = abi.VmProtocol.Client().init(abi.rt.vm_ipc);
     const vmem_handle = abi.rt.vmem_handle;
 
     log.debug("requesting memory", .{});
     var res: Error!void, const memory = try root.call(.memory, {});
-    try res;
-
-    log.debug("requesting vm sender", .{});
-    res, const vm_sender = try root.call(.serverSender, .{abi.ServerKind.vm});
     try res;
 
     log.debug("requesting ioport allocator", .{});
@@ -58,8 +55,6 @@ pub fn main() !void {
     log.debug("allocating rm endpoint", .{});
     const rm_recv = try memory.alloc(caps.Receiver);
     const rm_send = try rm_recv.subscribe();
-
-    const vm_client = abi.VmProtocol.Client().init(vm_sender);
 
     // log.debug("mapping PCI cfg space", .{});
     // res, const pci_cfg_addr: usize, _ = try vm_client.call(.mapDeviceFrame, .{
