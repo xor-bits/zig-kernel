@@ -70,7 +70,7 @@ const IoApicLapic = struct {
 //
 
 /// parse Multiple APIC Description Table
-pub fn init(madt: *const Madt) !void {
+pub fn init(madt: *const acpi.Madt) !void {
     log.info("init APIC-{}", .{arch.cpuId()});
 
     if (builtin.target.cpu.arch == .x86_64) {
@@ -86,18 +86,18 @@ pub fn init(madt: *const Madt) !void {
     var lapic_addr: u64 = madt.lapic_addr;
 
     var ext_len: usize = 0;
-    while (ext_len < madt.header.length - @sizeOf(Madt)) {
-        const entry_base: *const Entry = @ptrFromInt(@intFromPtr(madt) + ext_len + @sizeOf(Madt));
+    while (ext_len < madt.header.length - @sizeOf(acpi.Madt)) {
+        const entry_base: *const acpi.Madt.Entry = @ptrFromInt(@intFromPtr(madt) + ext_len + @sizeOf(acpi.Madt));
         ext_len += entry_base.record_len;
 
         switch (entry_base.entry_type) {
             0 => {
-                const entry: *const ProcessorLocalApic = @ptrCast(entry_base);
+                const entry: *const acpi.Madt.ProcessorLocalApic = @ptrCast(entry_base);
                 _ = entry;
                 // INFO: this is not important
             },
             1 => {
-                const entry: *const IoApic = @ptrCast(entry_base);
+                const entry: *const acpi.Madt.IoApic = @ptrCast(entry_base);
                 if (arch.cpuId() != 0) continue;
 
                 log.info("found I/O APIC addr: 0x{x}", .{entry.io_apic_addr});
@@ -108,29 +108,29 @@ pub fn init(madt: *const Madt) !void {
                 });
             },
             2 => {
-                const entry: *const IoApicInterruptSourceOverride = @ptrCast(entry_base);
+                const entry: *const acpi.Madt.IoApicInterruptSourceOverride = @ptrCast(entry_base);
                 if (arch.cpuId() != 0) continue;
 
                 // FIXME: this is prob important
                 log.err("I/O APIC interrupt source override detected but not yet handled: {}", .{entry});
             },
             3 => {
-                const entry: *const IoApicNmiSource = @ptrCast(entry_base);
+                const entry: *const acpi.Madt.IoApicNmiSource = @ptrCast(entry_base);
                 _ = entry;
                 // NOTE: this might be important
             },
             4 => {
-                const entry: *const LapicNmis = @ptrCast(entry_base);
+                const entry: *const acpi.Madt.LapicNmis = @ptrCast(entry_base);
                 _ = entry;
                 // NOTE: this could be important
 
             },
             5 => {
-                const entry: *const LapicAddrOverride = @ptrCast(entry_base);
+                const entry: *const acpi.Madt.LapicAddrOverride = @ptrCast(entry_base);
                 lapic_addr = entry.lapic_addr;
             },
             9 => {
-                const entry: *const ProcessorLx2apic = @ptrCast(entry_base);
+                const entry: *const acpi.Madt.ProcessorLx2apic = @ptrCast(entry_base);
                 _ = entry;
                 // NOTE: this may be important
             },
@@ -669,69 +669,6 @@ pub const LocalXApicRegs = extern struct {
     _reserved3: [4]XApicReg(.none),
     divide_configuration: XApicReg(.rw),
     _reserved4: [4]XApicReg(.none),
-};
-
-// MADT SDT entries
-
-pub const Madt = extern struct {
-    header: acpi.SdtHeader align(1),
-    lapic_addr: u32 align(1),
-    flags: u32 align(1),
-};
-
-const Entry = extern struct {
-    entry_type: u8,
-    record_len: u8,
-};
-
-const ProcessorLocalApic = extern struct {
-    entry: Entry align(1),
-    acpi_processor_id: u8,
-    apic_id: u8,
-    flags: u32 align(1),
-};
-
-const IoApic = extern struct {
-    entry: Entry align(1),
-    io_apic_id: u8,
-    reserved: u8,
-    io_apic_addr: u32 align(1),
-    global_system_interrupt_base: u32 align(1),
-};
-
-const IoApicInterruptSourceOverride = extern struct {
-    entry: Entry align(1),
-    bus_source: u8,
-    irq_source: u8,
-    global_system_interrupt: u32 align(1),
-    flags: u16 align(1),
-};
-
-const IoApicNmiSource = extern struct {
-    entry: Entry align(1),
-    nmi_source: u8,
-    reserved: u8,
-    flags: u16 align(1),
-    global_system_interrupt: u32 align(1),
-};
-
-const LapicNmis = extern struct {
-    entry: Entry align(1),
-    acpi_processor_id: u8,
-    flags: u16 align(1),
-    lint: u8,
-};
-
-const LapicAddrOverride = extern struct {
-    entry: Entry align(1),
-    lapic_addr: u64 align(1),
-};
-
-const ProcessorLx2apic = extern struct {
-    entry: Entry align(1),
-    local_x2apic_id: u32 align(1),
-    flags: u32 align(1),
-    acpi_id: u32 align(1),
 };
 
 //

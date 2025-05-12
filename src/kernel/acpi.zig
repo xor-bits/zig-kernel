@@ -206,6 +206,69 @@ pub const Xsdt = extern struct {
     }
 };
 
+// MADT SDT entries
+
+pub const Madt = extern struct {
+    header: SdtHeader align(1),
+    lapic_addr: u32 align(1),
+    flags: u32 align(1),
+
+    pub const Entry = extern struct {
+        entry_type: u8,
+        record_len: u8,
+    };
+
+    pub const ProcessorLocalApic = extern struct {
+        entry: Entry align(1),
+        acpi_processor_id: u8,
+        apic_id: u8,
+        flags: u32 align(1),
+    };
+
+    pub const IoApic = extern struct {
+        entry: Entry align(1),
+        io_apic_id: u8,
+        reserved: u8,
+        io_apic_addr: u32 align(1),
+        global_system_interrupt_base: u32 align(1),
+    };
+
+    pub const IoApicInterruptSourceOverride = extern struct {
+        entry: Entry align(1),
+        bus_source: u8,
+        irq_source: u8,
+        global_system_interrupt: u32 align(1),
+        flags: u16 align(1),
+    };
+
+    pub const IoApicNmiSource = extern struct {
+        entry: Entry align(1),
+        nmi_source: u8,
+        reserved: u8,
+        flags: u16 align(1),
+        global_system_interrupt: u32 align(1),
+    };
+
+    pub const LapicNmis = extern struct {
+        entry: Entry align(1),
+        acpi_processor_id: u8,
+        flags: u16 align(1),
+        lint: u8,
+    };
+
+    pub const LapicAddrOverride = extern struct {
+        entry: Entry align(1),
+        lapic_addr: u64 align(1),
+    };
+
+    pub const ProcessorLx2apic = extern struct {
+        entry: Entry align(1),
+        local_x2apic_id: u32 align(1),
+        flags: u32 align(1),
+        acpi_id: u32 align(1),
+    };
+};
+
 //
 
 pub fn isChecksumValid(comptime T: type, val: *const T) bool {
