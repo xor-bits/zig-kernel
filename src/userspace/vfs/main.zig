@@ -17,6 +17,7 @@ pub fn main() !void {
     log.info("hello from vfs", .{});
 
     const root = abi.RootProtocol.Client().init(abi.rt.root_ipc);
+    const vm_client = abi.VmProtocol.Client().init(abi.rt.vm_ipc);
 
     log.debug("requesting memory", .{});
     var res: Error!void, const memory: caps.Memory = try root.call(.memory, {});
@@ -27,12 +28,34 @@ pub fn main() !void {
     const vfs_recv = try memory.alloc(caps.Receiver);
     const vfs_send = try vfs_recv.subscribe();
 
-    // inform the root that vfs is ready
-    log.debug("vfs ready", .{});
-    res, const vm_sender = try root.call(.serverReady, .{ abi.ServerKind.vfs, vfs_send });
+    log.debug("requesting initfs sender", .{});
+    res, const initfs_sender: caps.Sender = try root.call(.initfs, {});
+    try res;
+    const initfs_client = abi.InitfsProtocol.Client().init(initfs_sender);
+
+    res, const entries_frame: caps.Frame, const entries = try initfs_client.call(.list, {});
     try res;
 
-    _ = vm_sender;
+    res, const addr, _ = try vm_client.call(.mapFrame, .{ abi.rt.vmem_handle, entries_frame, abi.sys.Rights{}, abi.sys.MapFlags{} });
+    try res;
+
+    var byte: usize = 0;
+    for (0..entries) |i| {
+        const stat = @as(*const volatile abi.Stat, @ptrFromInt(addr + i * @sizeOf(abi.Stat))).*;
+        const path = @as([*:0]const u8, @ptrFromInt(addr + entries * @sizeOf(abi.Stat) + byte));
+        const path_name = std.mem.span(path);
+        byte += 1 + path_name.len;
+
+        log.info("{s}: {}", .{ path_name, stat });
+    }
+
+    // inform the root that vfs is ready
+    log.debug("vfs ready", .{});
+    res, _ = try root.call(.serverReady, .{ abi.ServerKind.vfs, vfs_send });
+    try res;
+
+    // const root_node = try DirNode.create();
+    // root_node.inode;
 
     // const server = abi.vfsProtocol.Server(.{}).init(vfs_recv);
     // try server.run();
@@ -49,7 +72,7 @@ const FileNode = struct {
     cache_lock: abi.lock.YieldMutex = .{},
 
     /// all cached pages
-    pages: []const caps.Frame,
+    pages: []const caps.Frame = &.{},
 
     pub fn create() !*@This() {
         file_node_allocator_lock.lock();
@@ -109,6 +132,14 @@ const DirNode = struct {
             defer dir_node_allocator_lock.unlock();
             dir_node_allocator.destroy(self);
         }
+    }
+
+    pub fn subdirs(self: *@This()) []const *DirNode {
+        return @ptrCast(self.entries[0..self.dir_entries]);
+    }
+
+    pub fn files(self: *@This()) []const *FileNode {
+        return @ptrCast(self.entries[self.dir_entries..][0..self.file_entries]);
     }
 };
 

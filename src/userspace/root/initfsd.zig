@@ -133,6 +133,7 @@ fn runMain() !void {
     }, .{
         .openFile = openFileHandler,
         .fileSize = fileSizeHandler,
+        .list = listHandler,
     }).init({}, initfs_recv);
     try server.run();
 }
@@ -177,27 +178,85 @@ fn fileSizeHandler(_: void, _: u32, req: struct { [32:0]u8 }) struct { Error!voi
     return .{ {}, file.len };
 }
 
+fn listHandler(_: void, _: u32, _: void) struct { Error!void, caps.Frame, usize } {
+    var entries: usize = 0;
+    var size: usize = 0;
+
+    // if (true) @compileError("");
+
+    var it = iterator();
+    while (it.next()) |blocks| {
+        const header: *const TarEntryHeader = @ptrCast(&blocks[0]);
+        if (header.ty != 0 and header.ty != '0' and header.ty != 5 and header.ty != '5') continue;
+
+        entries += 1;
+        size += std.mem.sliceTo(header.name[0..100], 0).len + 1;
+
+        // size += 1; // file/dir
+        // size += 1; // path len
+        // size += header.name;
+
+        log.info("'{s}': {}", .{ header.name, header.ty });
+
+        // const is_file = header.ty == 0 or header.ty == '0';
+        // const is_dir = header.ty == 5 or header.ty == '5';
+
+        // header;
+    }
+
+    const text_size = size;
+    size += @sizeOf(abi.Stat) * entries;
+
+    const frame = main.allocSized(caps.Frame, abi.ChunkSize.of(size).?) catch unreachable;
+    const frame_entries = @as([*]abi.Stat, @ptrFromInt(main.INITFS_LIST))[0..entries];
+    const frame_names = @as([*]u8, @ptrFromInt(main.INITFS_LIST + @sizeOf(abi.Stat) * entries))[0..text_size];
+
+    main.map(
+        frame,
+        main.INITFS_LIST,
+        abi.sys.Rights{ .writable = true },
+        abi.sys.MapFlags{},
+    ) catch unreachable;
+
+    entries = 0;
+    size = 0;
+
+    it = iterator();
+    while (it.next()) |blocks| {
+        const header: *const TarEntryHeader = @ptrCast(&blocks[0]);
+        if (header.ty != 0 and header.ty != '0' and header.ty != 5 and header.ty != '5') continue;
+
+        const file_size = std.fmt.parseInt(usize, std.mem.sliceTo(header.size[0..12], 0), 8) catch 0;
+        const mtime = std.fmt.parseInt(usize, std.mem.sliceTo(header.modified[0..12], 0), 8) catch 0;
+
+        @as(*volatile abi.Stat, &frame_entries[entries]).* = .{
+            .atime = mtime,
+            .mtime = mtime,
+            .uid = header.uid,
+            .gid = header.gid,
+            .size = file_size,
+            .mode = @bitCast(@as(u32, @truncate(header.mode))),
+        };
+        abi.util.copyForwardsVolatile(u8, frame_names[size..], std.mem.sliceTo(header.name[0..100], 0));
+
+        entries += 1;
+        size += std.mem.sliceTo(header.name[0..100], 0).len + 1;
+
+        @as(*volatile u8, &frame_names[size - 1]).* = 0; // null terminator, should already be there but just making sure
+    }
+
+    main.unmap(
+        frame,
+        main.INITFS_LIST,
+    ) catch unreachable;
+
+    return .{ {}, frame, entries };
+}
+
 pub fn openFile(path: []const u8) ?usize {
-    const Block = [512]u8;
-    const len = initfs_tar.items.len / 512;
-    const blocks_ptr: [*]const Block = @ptrCast(initfs_tar.items.ptr);
-    const blocks = blocks_ptr[0..len];
-
-    var i: usize = 0;
-    while (i < len) {
-        const header_i = i;
-        const header: *const TarEntryHeader = @ptrCast(&blocks[header_i]);
-        const size = std.fmt.parseInt(usize, std.mem.sliceTo(header.size[0..12], 0), 8) catch 0;
-        const size_blocks = if (size % 512 == 0) size / 512 else size / 512 + 1;
-
-        i += 1; // skip the header
-        if (i + size_blocks > len) {
-            log.err("invalid tar file: unexpected EOF", .{});
-            // broken tar file
-            return null;
-        }
-
-        i += size_blocks; // skip the file data
+    var it = iterator();
+    while (it.next()) |blocks| {
+        const header: *const TarEntryHeader = @ptrCast(&blocks[0]);
         if (header.ty != 0 and header.ty != '0') {
             // skip non files
             continue;
@@ -207,7 +266,13 @@ pub fn openFile(path: []const u8) ?usize {
             continue;
         }
 
-        return header_i;
+        const header_ptr = @intFromPtr(header);
+        const blocks_ptr = @intFromPtr(initfs_tar.items.ptr);
+        std.debug.assert(blocks_ptr <= header_ptr);
+        std.debug.assert(header_ptr + @sizeOf(TarEntryHeader) <= blocks_ptr + initfs_tar.items.len);
+        std.debug.assert((header_ptr - blocks_ptr) % 512 == 0);
+
+        return (header_ptr - blocks_ptr) / 512;
     }
 
     return null;
@@ -228,6 +293,45 @@ pub fn readFile(header_i: usize) []const u8 {
     const bytes = first_byte[0..size];
 
     return bytes;
+}
+
+const Iterator = struct {
+    blocks: []const [512]u8,
+    i: usize,
+
+    pub fn next(self: *@This()) ?[]const [512]u8 {
+        while (self.i < self.blocks.len) {
+            const header_i = self.i;
+            const header: *const TarEntryHeader = @ptrCast(&self.blocks[header_i]);
+            const size = std.fmt.parseInt(usize, std.mem.sliceTo(header.size[0..12], 0), 8) catch 0;
+            const size_blocks = if (size % 512 == 0) size / 512 else size / 512 + 1;
+
+            self.i += 1; // skip the header
+            if (self.i + size_blocks > self.blocks.len) {
+                log.err("invalid tar file: unexpected EOF", .{});
+                // broken tar file
+                return null;
+            }
+
+            // skip the file data
+            self.i += size_blocks;
+
+            if (header.ty == 0) continue;
+
+            return self.blocks[header_i..][0 .. size_blocks + 1];
+        }
+        return null;
+    }
+};
+
+fn iterator() Iterator {
+    const len = initfs_tar.items.len / 512;
+    const blocks_ptr: [*]const [512]u8 = @ptrCast(initfs_tar.items.ptr);
+
+    return .{
+        .blocks = blocks_ptr[0..len],
+        .i = 0,
+    };
 }
 
 fn pathEql(a: []const u8, b: []const u8) bool {

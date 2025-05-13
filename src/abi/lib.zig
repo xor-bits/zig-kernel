@@ -247,6 +247,9 @@ pub const InitfsProtocol = util.Protocol(struct {
 
     /// open a file from initfs and return its length
     fileSize: fn (path: [32:0]u8) struct { sys.Error!void, usize },
+
+    /// returns the paths of every file and directory in initfs and the entry count
+    list: fn () struct { sys.Error!void, caps.Frame, usize },
 });
 
 pub const VmProtocol = util.Protocol(struct {
@@ -371,7 +374,7 @@ pub const Ps2Protocol = util.Protocol(struct {
     nextKey: fn (reply: caps.Reply) void,
 });
 
-pub const FramebufferInfoFrame = struct {
+pub const FramebufferInfoFrame = extern struct {
     width: usize = 0,
     height: usize = 0,
     pitch: usize = 0,
@@ -384,8 +387,44 @@ pub const FramebufferInfoFrame = struct {
     blue_mask_shift: u8,
 };
 
-pub const McfgInfoFrame = struct {
+pub const McfgInfoFrame = extern struct {
     pci_segment_group: u16,
     start_pci_bus: u8,
     end_pci_bus: u8,
+};
+
+pub const Stat = extern struct {
+    atime: u128,
+    mtime: u128,
+    uid: u64,
+    gid: u64,
+    size: u64,
+    mode: Mode,
+};
+
+pub const Mode = packed struct {
+    other_x: bool,
+    other_w: bool,
+    other_r: bool,
+
+    group_x: bool,
+    group_w: bool,
+    group_r: bool,
+
+    owner_x: bool,
+    owner_w: bool,
+    owner_r: bool,
+
+    set_gid: bool,
+    set_uid: bool,
+
+    type: enum(u2) {
+        file,
+        dir,
+        file_link,
+        dir_link,
+    },
+
+    _reserved0: u3 = 0,
+    _reserved1: u16 = 0,
 };
