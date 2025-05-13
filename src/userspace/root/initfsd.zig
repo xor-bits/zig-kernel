@@ -191,17 +191,6 @@ fn listHandler(_: void, _: u32, _: void) struct { Error!void, caps.Frame, usize 
 
         entries += 1;
         size += std.mem.sliceTo(header.name[0..100], 0).len + 1;
-
-        // size += 1; // file/dir
-        // size += 1; // path len
-        // size += header.name;
-
-        log.info("'{s}': {}", .{ header.name, header.ty });
-
-        // const is_file = header.ty == 0 or header.ty == '0';
-        // const is_dir = header.ty == 5 or header.ty == '5';
-
-        // header;
     }
 
     const text_size = size;
@@ -224,18 +213,28 @@ fn listHandler(_: void, _: u32, _: void) struct { Error!void, caps.Frame, usize 
     it = iterator();
     while (it.next()) |blocks| {
         const header: *const TarEntryHeader = @ptrCast(&blocks[0]);
-        if (header.ty != 0 and header.ty != '0' and header.ty != 5 and header.ty != '5') continue;
+        if (header.ty != 0 and header.ty != '0' and header.ty != '5') continue;
 
         const file_size = std.fmt.parseInt(usize, std.mem.sliceTo(header.size[0..12], 0), 8) catch 0;
-        const mtime = std.fmt.parseInt(usize, std.mem.sliceTo(header.modified[0..12], 0), 8) catch 0;
+        const file_mtime = std.fmt.parseInt(usize, std.mem.sliceTo(header.modified[0..12], 0), 8) catch 0;
+        const file_mode = std.fmt.parseInt(usize, std.mem.sliceTo(header.mode[0..8], 0), 8) catch 0;
+        const file_uid = std.fmt.parseInt(usize, std.mem.sliceTo(header.uid[0..8], 0), 8) catch 0;
+        const file_gid = std.fmt.parseInt(usize, std.mem.sliceTo(header.gid[0..8], 0), 8) catch 0;
+
+        var mode: abi.Mode = @bitCast(@as(u32, @truncate(file_mode)));
+        mode.set_uid = false;
+        mode.set_gid = false;
+        mode.type = if (header.ty == '5') .dir else .file;
+        mode._reserved0 = 0;
+        mode._reserved1 = 0;
 
         @as(*volatile abi.Stat, &frame_entries[entries]).* = .{
-            .atime = mtime,
-            .mtime = mtime,
-            .uid = header.uid,
-            .gid = header.gid,
+            .atime = file_mtime,
+            .mtime = file_mtime,
+            .uid = file_uid,
+            .gid = file_gid,
             .size = file_size,
-            .mode = @bitCast(@as(u32, @truncate(header.mode))),
+            .mode = mode,
         };
         abi.util.copyForwardsVolatile(u8, frame_names[size..], std.mem.sliceTo(header.name[0..100], 0));
 
@@ -368,9 +367,9 @@ fn pathPartIsNothing(s: []const u8) bool {
 
 const TarEntryHeader = extern struct {
     name: [100]u8 align(1),
-    mode: u64 align(1),
-    uid: u64 align(1),
-    gid: u64 align(1),
+    mode: [8]u8 align(1),
+    uid: [8]u8 align(1),
+    gid: [8]u8 align(1),
     size: [12]u8 align(1),
     modified: [12]u8 align(1),
     checksum: u64 align(1),
