@@ -231,6 +231,7 @@ fn listHandler(_: void, _: u32, _: void) struct { Error!void, caps.Frame, usize 
         @as(*volatile abi.Stat, &frame_entries[entries]).* = .{
             .atime = file_mtime,
             .mtime = file_mtime,
+            .inode = inodeOf(header),
             .uid = file_uid,
             .gid = file_gid,
             .size = file_size,
@@ -265,16 +266,19 @@ pub fn openFile(path: []const u8) ?usize {
             continue;
         }
 
-        const header_ptr = @intFromPtr(header);
-        const blocks_ptr = @intFromPtr(initfs_tar.items.ptr);
-        std.debug.assert(blocks_ptr <= header_ptr);
-        std.debug.assert(header_ptr + @sizeOf(TarEntryHeader) <= blocks_ptr + initfs_tar.items.len);
-        std.debug.assert((header_ptr - blocks_ptr) % 512 == 0);
-
-        return (header_ptr - blocks_ptr) / 512;
+        return inodeOf(header);
     }
 
     return null;
+}
+
+pub fn inodeOf(header: *const TarEntryHeader) usize {
+    const header_ptr = @intFromPtr(header);
+    const blocks_ptr = @intFromPtr(initfs_tar.items.ptr);
+    std.debug.assert(blocks_ptr <= header_ptr);
+    std.debug.assert(header_ptr + @sizeOf(TarEntryHeader) <= blocks_ptr + initfs_tar.items.len);
+    std.debug.assert((header_ptr - blocks_ptr) % 512 == 0);
+    return (header_ptr - blocks_ptr) / 512;
 }
 
 pub fn readFile(header_i: usize) []const u8 {

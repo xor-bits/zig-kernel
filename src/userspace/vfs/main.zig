@@ -13,6 +13,12 @@ const Error = abi.sys.Error;
 
 //
 
+var global_root: *DirNode = undefined;
+var fs_root: *DirNode = undefined;
+var initfs_root: *DirNode = undefined;
+
+//
+
 pub fn main() !void {
     log.info("hello from vfs", .{});
 
@@ -39,15 +45,48 @@ pub fn main() !void {
     res, const addr, _ = try vm_client.call(.mapFrame, .{ abi.rt.vmem_handle, entries_frame, abi.sys.Rights{}, abi.sys.MapFlags{} });
     try res;
 
+    global_root = try DirNode.create();
+
+    fs_root = try DirNode.create();
+    initfs_root = try DirNode.create();
+
+    try putDir(global_root, "initfs://", initfs_root);
+    try putDir(global_root, "fs://", fs_root);
+
+    log.info("mounting initfs to initfs:///", .{});
+
     var byte: usize = 0;
     for (0..entries) |i| {
         const stat = @as(*const volatile abi.Stat, @ptrFromInt(addr + i * @sizeOf(abi.Stat))).*;
         const path = @as([*:0]const u8, @ptrFromInt(addr + entries * @sizeOf(abi.Stat) + byte));
-        const path_name = std.mem.span(path);
+        const path_name: []const u8 = std.mem.span(path);
         byte += 1 + path_name.len;
 
-        log.info("{s}: {}", .{ path_name, stat });
+        if (stat.mode.type != .dir) continue;
+
+        // FIXME: sort directories
+
+        initfs_root.clone();
+        try createDir(initfs_root, path_name, try DirNode.create());
     }
+
+    byte = 0;
+    for (0..entries) |i| {
+        const stat = @as(*const volatile abi.Stat, @ptrFromInt(addr + i * @sizeOf(abi.Stat))).*;
+        const path = @as([*:0]const u8, @ptrFromInt(addr + entries * @sizeOf(abi.Stat) + byte));
+        const path_name: []const u8 = std.mem.span(path);
+        byte += 1 + path_name.len;
+
+        if (stat.mode.type != .file) continue;
+
+        const new_file = try FileNode.create();
+        new_file.inode = stat.inode;
+
+        initfs_root.clone();
+        try createFile(initfs_root, path_name, new_file);
+    }
+
+    try printTreeRec(global_root);
 
     // inform the root that vfs is ready
     log.debug("vfs ready", .{});
@@ -63,6 +102,138 @@ pub fn main() !void {
 
 //
 
+// will take ownership of `namespace` and `new_file`
+fn createFile(namespace: *DirNode, relative_path: []const u8, new_file: *FileNode) !void {
+    return createAny(
+        namespace,
+        relative_path,
+        .{ .file = new_file },
+    );
+}
+
+// will take ownership of `namespace` and `new_dir`
+fn createDir(namespace: *DirNode, relative_path: []const u8, new_dir: *DirNode) !void {
+    return createAny(
+        namespace,
+        relative_path,
+        .{ .dir = new_dir },
+    );
+}
+
+// will take ownership of `namespace` and `new`
+fn createAny(namespace: *DirNode, relative_path: []const u8, new: DirEntry) !void {
+    var parent = namespace;
+    defer parent.destroy();
+
+    // TODO: give real errors
+    const basename = std.fs.path.basename(relative_path);
+    // log.info("basename({s}) = {s}", .{ relative_path, basename });
+    if (std.fs.path.dirname(relative_path)) |parent_path| {
+        // log.info("dirname({s}) = {s}", .{ relative_path, parent_path });
+        parent = try getDir(parent, parent_path);
+    } else if (std.mem.eql(u8, basename, ".")) {
+        new.destroy();
+        return;
+    }
+
+    return putAny(parent, basename, new);
+}
+
+// will take ownership of `new` but not `dir`
+fn putFile(dir: *DirNode, basename: []const u8, new_file: *FileNode) !void {
+    return putAny(dir, basename, .{ .file = new_file });
+}
+
+// will take ownership of `new` but not `dir`
+fn putDir(dir: *DirNode, basename: []const u8, new_dir: *DirNode) !void {
+    return putAny(dir, basename, .{ .dir = new_dir });
+}
+
+// will take ownership of `new` but not `dir`
+fn putAny(dir: *DirNode, basename: []const u8, new: DirEntry) !void {
+    const get_or_put = try dir.entries.getOrPut(basename);
+    if (get_or_put.found_existing) return Error.AlreadyMapped; // TODO: real error
+
+    const basename_copy = try abi.mem.slab_allocator.alloc(u8, basename.len);
+    std.mem.copyForwards(u8, basename_copy, basename);
+
+    // `key_ptr` isn't supposed to be written,
+    // but I just replace it with the same data in a new pointer,
+    // because `relative_path` is temporary data
+    get_or_put.key_ptr.* = basename_copy;
+    get_or_put.value_ptr.* = new;
+}
+
+// will take ownership of `namespace` and returns an owned `*DirNode`
+fn getDir(namespace: *DirNode, relative_path: []const u8) !*DirNode {
+    var current = namespace;
+
+    var it = try std.fs.path.componentIterator(relative_path);
+    while (it.next()) |part| {
+        // TODO: '..' parts
+        if (std.mem.eql(u8, part.name, ".")) continue;
+        // log.debug("looking up part '{s}'", .{part.name});
+
+        var next: DirEntry = undefined;
+        {
+            defer current.destroy();
+            current.cache_lock.lock();
+            defer current.cache_lock.unlock();
+
+            next = current.entries.get(part.name) orelse return Error.NotFound;
+            if (next == .file) return Error.NotFound;
+
+            next.dir.clone();
+        }
+
+        current = next.dir;
+    }
+
+    return current;
+}
+
+fn printTreeRec(dir: *DirNode) !void {
+    log.info("\n{}", .{
+        PrintTreeRec{ .dir = dir, .depth = 0 },
+    });
+}
+
+const PrintTreeRec = struct {
+    dir: *DirNode,
+    depth: usize,
+
+    pub fn format(
+        self: @This(),
+        comptime _: []const u8,
+        _: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        self.dir.cache_lock.lock();
+        defer self.dir.cache_lock.unlock();
+
+        var it = self.dir.entries.iterator();
+        while (it.next()) |entry| {
+            for (0..self.depth) |_| {
+                try std.fmt.format(writer, "  ", .{});
+            }
+
+            try std.fmt.format(writer, "- '{s}': {s}\n", .{
+                entry.key_ptr.*,
+                @tagName(entry.value_ptr.*),
+            });
+
+            switch (entry.value_ptr.*) {
+                .dir => |dir| try std.fmt.format(writer, "{}", .{
+                    PrintTreeRec{ .dir = dir, .depth = self.depth + 1 },
+                }),
+                else => {},
+            }
+        }
+    }
+};
+
+//
+
 const FileNode = struct {
     refcnt: RefCnt = .{},
 
@@ -72,7 +243,7 @@ const FileNode = struct {
     cache_lock: abi.lock.YieldMutex = .{},
 
     /// all cached pages
-    pages: []const caps.Frame = &.{},
+    pages: []caps.Frame = &.{},
 
     pub fn create() !*@This() {
         file_node_allocator_lock.lock();
@@ -97,6 +268,21 @@ const FileNode = struct {
     }
 };
 
+const DirEntry = union(enum) {
+    // TODO: could be packed into a single pointer,
+    // and its lower bit (because of alignment) can
+    // be used to tell if it is a file or a dir
+    file: *FileNode,
+    dir: *DirNode,
+
+    fn destroy(self: @This()) void {
+        switch (self) {
+            .dir => |dir| dir.destroy(),
+            .file => |file| file.destroy(),
+        }
+    }
+};
+
 const DirNode = struct {
     refcnt: RefCnt = .{},
 
@@ -105,18 +291,16 @@ const DirNode = struct {
 
     cache_lock: abi.lock.YieldMutex = .{},
 
-    dir_entries: usize = 0,
-    file_entries: usize = 0,
-    /// all cached entries
-    /// first `dir_entries` subdirectories (*DirNode)
-    /// then `file_entries` files in this directory (*FileNode)
-    entries: []const *anyopaque = &.{},
+    /// all cached subdirectories and files in this directory
+    entries: std.StringHashMap(DirEntry),
 
     pub fn create() !*@This() {
         dir_node_allocator_lock.lock();
         defer dir_node_allocator_lock.unlock();
         const node = try dir_node_allocator.create();
-        node.* = .{};
+        node.* = .{
+            .entries = .init(abi.mem.slab_allocator),
+        };
         return node;
     }
 
@@ -134,26 +318,37 @@ const DirNode = struct {
         }
     }
 
-    pub fn subdirs(self: *@This()) []const *DirNode {
-        return @ptrCast(self.entries[0..self.dir_entries]);
-    }
+    pub const GetResult = union(enum) {
+        none: void,
+        file: *FileNode,
+        dir: *DirNode,
+    };
 
-    pub fn files(self: *@This()) []const *FileNode {
-        return @ptrCast(self.entries[self.dir_entries..][0..self.file_entries]);
-    }
+    // pub fn get(self: *@This(), entry_name: []const u8) GetResult {}
+
+    // pub fn subdirs(self: *@This()) []const *DirNode {
+    //     return @ptrCast(self.entries[0..self.dir_entries]);
+    // }
+
+    // pub fn files(self: *@This()) []const *FileNode {
+    //     return @ptrCast(self.entries[self.dir_entries..][0..self.file_entries]);
+    // }
 };
 
 const RefCnt = struct {
     refcnt: std.atomic.Value(usize) = .init(1),
 
     pub fn inc(self: *@This()) void {
+        // log.info("inc refcnt", .{});
         const old = self.refcnt.fetchAdd(1, .monotonic);
         if (old >= std.math.maxInt(isize)) @panic("too many ref counts");
     }
 
     pub fn dec(self: *@This()) bool {
+        // log.info("dec refcnt", .{});
         const old_cnt = self.refcnt.fetchSub(1, .release);
         std.debug.assert(old_cnt < std.math.maxInt(isize));
+        std.debug.assert(old_cnt != 0);
 
         if (old_cnt == 1) {
             @branchHint(.cold);

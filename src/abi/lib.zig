@@ -396,6 +396,7 @@ pub const McfgInfoFrame = extern struct {
 pub const Stat = extern struct {
     atime: u128,
     mtime: u128,
+    inode: u128,
     uid: u64,
     gid: u64,
     size: u64,
