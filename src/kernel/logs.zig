@@ -87,7 +87,7 @@ pub fn panic(msg: []const u8, _: ?*std.builtin.StackTrace, _: ?usize) noreturn {
 
     // TODO: maybe `std.debug.Dwarf.ElfModule` contains everything?
 
-    log.err("KERNEL PANIC STACK TRACE:", .{});
+    log.err("kernel panic: {s}", .{msg});
 
     var iter = std.debug.StackIterator.init(@returnAddress(), @frameAddress());
     if (getSelfDwarf()) |_dwarf| {
@@ -107,8 +107,6 @@ pub fn panic(msg: []const u8, _: ?*std.builtin.StackTrace, _: ?usize) noreturn {
 
     std.fmt.format(panic_printer, "\n", .{}) catch {};
 
-    log.err("CPU panicked: {s}", .{msg});
-
     arch.hcf();
 }
 
@@ -127,23 +125,116 @@ pub const Addr2Line = struct {
 };
 
 fn printSourceAtAddress(writer: anytype, debug_info: *std.debug.Dwarf, address: usize) !void {
-    const sym = debug_info.getSymbolName(address) orelse {
-        try std.fmt.format(writer, "  \x1B[90m?? @ 0x{x:0>16}\x1B[0m\n", .{address});
+    const sym = debug_info.getSymbol(pmem.page_allocator, address) catch {
+        try std.fmt.format(writer, "\x1B[90m0x{x}\x1B[0m\n", .{address});
         return;
     };
+    defer if (sym.source_location) |loc| pmem.page_allocator.free(loc.file_name);
 
-    const cu = debug_info.findCompileUnit(address) catch {
-        try std.fmt.format(writer, "  \x1B[90m{s}\x1B[0m\n", .{sym});
-        return;
-    };
+    try std.fmt.format(writer, "\x1B[1m", .{});
 
-    const source = debug_info.getLineNumberInfo(pmem.page_allocator, cu, address) catch {
-        try std.fmt.format(writer, "  \x1B[90m{s}\x1B[0m\n", .{sym});
-        return;
-    };
+    if (sym.source_location) |*sl| {
+        try std.fmt.format(
+            writer,
+            "{s}:{d}:{d}",
+            .{ sl.file_name, sl.line, sl.column },
+        );
+    } else {
+        try std.fmt.format(writer, "???:?:?", .{});
+    }
 
-    try std.fmt.format(writer, "  \x1B[90m{s}: {s}:{}:{}\x1B[0m\n", .{ sym, source.file_name, source.line, source.column });
+    try std.fmt.format(
+        writer,
+        "\x1B[0m: \x1B[90m0x{x} in {s} ({s})\x1B[0m\n",
+        .{ address, sym.name, sym.compile_unit_name },
+    );
+
+    // std.debug.printSourceAtAddress(debug_info: *SelfInfo, out_stream: anytype, address: usize, tty_config: io.tty.Config)
+
+    const loc = sym.source_location orelse return;
+    const source_file = findSourceFile(loc.file_name) orelse return;
+
+    var source_line: []const u8 = "<out-of-bounds>";
+    var lines_iter = std.mem.splitScalar(u8, source_file.contents, '\n');
+    for (0..loc.line) |_| {
+        source_line = lines_iter.next() orelse "<out-of-bounds>";
+    }
+
+    try std.fmt.format(writer, "{s}\n", .{source_line});
+
+    const space_needed = @as(usize, @intCast(loc.column - 1));
+
+    try writer.writeBytesNTimes(" ", space_needed);
+    try writer.writeAll("\x1B[92m^\x1B[0m\n");
 }
+
+fn findSourceFile(path: []const u8) ?SourceFile {
+    if (!conf.KERNEL_PANIC_SOURCE_INFO)
+        return null;
+
+    for_loop: for (source_files) |s| {
+        // b path is a full absolute path,
+        // while a is relative to the git repo
+
+        var a = std.fs.path.componentIterator(s.path) catch
+            continue;
+        var b = std.fs.path.componentIterator(path) catch
+            continue;
+
+        const a_last = a.last() orelse continue;
+        const b_last = b.last() orelse continue;
+
+        if (!std.mem.eql(u8, a_last.name, b_last.name)) continue;
+
+        while (a.previous()) |a_part| {
+            const b_part = b.previous() orelse continue :for_loop;
+            if (!std.mem.eql(u8, a_part.name, b_part.name)) continue :for_loop;
+        }
+
+        return s;
+    }
+
+    return null;
+}
+
+const SourceFile = struct {
+    path: []const u8,
+    contents: []const u8,
+
+    fn open(comptime path: []const u8) SourceFile {
+        return .{
+            .path = path,
+            .contents = @embedFile(path),
+        };
+    }
+};
+
+const source_files: []const SourceFile = &.{
+    .open("acpi.zig"),
+    .open("addr.zig"),
+    .open("apic.zig"),
+    .open("arch/x86_64.zig"),
+    .open("arch.zig"),
+    .open("args.zig"),
+    .open("caps/ipc.zig"),
+    .open("caps/pmem.zig"),
+    .open("caps/thread.zig"),
+    .open("caps/vmem.zig"),
+    .open("caps/x86.zig"),
+    .open("caps.zig"),
+    .open("fb.zig"),
+    .open("hpet.zig"),
+    .open("init.zig"),
+    .open("lazy.zig"),
+    .open("logs.zig"),
+    .open("main.zig"),
+    .open("pmem.zig"),
+    .open("proc.zig"),
+    .open("spin.zig"),
+    .open("test.zig"),
+    .open("uart.zig"),
+    .open("util.zig"),
+};
 
 fn getSelfDwarf() !std.debug.Dwarf {
     if (!conf.STACK_TRACE) return error.StackTracesDisabled;
