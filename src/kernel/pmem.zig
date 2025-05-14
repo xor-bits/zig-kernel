@@ -9,6 +9,7 @@ const addr = @import("addr.zig");
 const util = @import("util.zig");
 
 const log = std.log.scoped(.pmem);
+const conf = abi.conf;
 
 //
 
@@ -116,7 +117,7 @@ pub fn totalPages() usize {
 //
 
 /// tells if the frame allocator can be used already (debugging)
-var initialized = if (IS_DEBUG) false else {};
+var initialized = if (conf.IS_DEBUG) false else {};
 
 /// approximately 2 bits for each 4KiB page to track
 /// 4KiB, 8KiB, 16KiB, 32KiB, .. 2MiB, 4MiB, .., 512MiB and 1GiB chunks
@@ -163,7 +164,7 @@ pub fn allocChunk(size: abi.ChunkSize) ?addr.Phys {
         if (now2 & lowest != 0) {
             // success: bit set to 0 from 1 before anyone else
             const result = addr.Phys.fromInt((std.math.log2_int(u64, lowest) + 64 * i) * size.sizeBytes());
-            if (IS_DEBUG) {
+            if (conf.IS_DEBUG) {
                 std.debug.assert(isInUsable(result, size.sizeBytes()));
                 std.crypto.secureZero(u64, result.toHhdm().toPtr([*]volatile u64)[0..512]);
             }
@@ -183,7 +184,7 @@ pub fn allocChunk(size: abi.ChunkSize) ?addr.Phys {
     _ = bucket.fetchOr(@as(usize, 1) << bit_id, .monotonic); // maybe monotonic instead of release, because nothing is written into it
 
     const result = addr.Phys.fromInt(parent_chunk.raw + size.sizeBytes());
-    if (IS_DEBUG) {
+    if (conf.IS_DEBUG) {
         std.debug.assert(isInUsable(result, size.sizeBytes()));
         std.crypto.secureZero(u64, result.toHhdm().toPtr([*]volatile u64)[0..512]);
     }
@@ -251,7 +252,7 @@ pub fn deallocChunk(ptr: addr.Phys, size: abi.ChunkSize) void {
 //
 
 pub fn init() !void {
-    if (IS_DEBUG and initialized) {
+    if (conf.IS_DEBUG and initialized) {
         return error.PmmAlreadyInitialized;
     }
 
@@ -312,7 +313,7 @@ pub fn init() !void {
         };
     }
 
-    initialized = if (comptime IS_DEBUG) true else {};
+    initialized = if (conf.IS_DEBUG) true else {};
 
     log.info("freeing usable memory", .{});
     for (memory_response.entries()) |memory_map_entry| {
@@ -416,10 +417,8 @@ fn _remap(_: *anyopaque, buf: []u8, _: std.mem.Alignment, new_len: usize, _: usi
     return null;
 }
 
-const IS_DEBUG = builtin.mode == .Debug or builtin.mode == .ReleaseSafe;
-
 fn debugAssertInitialized() bool {
-    if (IS_DEBUG and !initialized) {
+    if (conf.IS_DEBUG and !initialized) {
         log.err("physical memory manager not initialized", .{});
         return true;
     } else {

@@ -1,9 +1,11 @@
+const abi = @import("abi");
 const std = @import("std");
 const builtin = @import("builtin");
 
 const logs = @import("logs.zig");
 
 const log = std.log.scoped(.spin);
+const conf = abi.conf;
 
 //
 
@@ -51,10 +53,10 @@ pub const Mutex = struct {
     }
 
     pub fn lock(self: *Self) void {
-        var counter = if (IS_DEBUG) @as(usize, 0) else {};
+        var counter = if (conf.IS_DEBUG) @as(usize, 0) else {};
         while (null != self.lock_state.cmpxchgWeak(0, 1, .acquire, .monotonic)) {
             while (self.isLocked()) {
-                if (IS_DEBUG) {
+                if (conf.IS_DEBUG) {
                     counter += 1;
                     if (counter % 10_000 == 0) {
                         // log.warn("possible deadlock {}", .{logs.Addr2Line{ .addr = @returnAddress() }});
@@ -74,10 +76,8 @@ pub const Mutex = struct {
     }
 
     pub fn unlock(self: *Self) void {
-        if (IS_DEBUG)
+        if (conf.IS_DEBUG)
             std.debug.assert(self.lock_state.load(.seq_cst) == 1);
         self.lock_state.store(0, .release);
     }
 };
-
-const IS_DEBUG = builtin.mode == .Debug or builtin.mode == .ReleaseSafe;

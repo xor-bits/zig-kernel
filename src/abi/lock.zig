@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 const caps = @import("caps.zig");
+const conf = @import("conf.zig");
 const sys = @import("sys.zig");
 
 const log = std.log.scoped(.lock);
@@ -34,9 +35,9 @@ pub const CapMutex = struct {
             @branchHint(.cold);
         }
 
-        var counter = if (IS_DEBUG) @as(usize, 0) else {};
+        var counter = if (conf.IS_DEBUG) @as(usize, 0) else {};
         while (true) {
-            if (IS_DEBUG) {
+            if (conf.IS_DEBUG) {
                 counter += 1;
                 if (counter % 2_000 == 0) {
                     log.warn("possible deadlock", .{});
@@ -79,9 +80,9 @@ pub const YieldMutex = struct {
     pub fn lock(self: *Self) void {
         if (self.tryLock()) return;
 
-        var counter = if (IS_DEBUG) @as(usize, 0) else {};
+        var counter = if (conf.IS_DEBUG) @as(usize, 0) else {};
         while (true) {
-            if (IS_DEBUG) {
+            if (conf.IS_DEBUG) {
                 counter += 1;
                 if (counter % 2_000 == 0) {
                     log.warn("possible deadlock", .{});
@@ -116,10 +117,10 @@ pub const SpinMutex = struct {
     }
 
     pub fn lock(self: *Self) void {
-        var counter = if (IS_DEBUG) @as(usize, 0) else {};
+        var counter = if (conf.IS_DEBUG) @as(usize, 0) else {};
         while (null != self.lock_state.cmpxchgWeak(0, 1, .acquire, .monotonic)) {
             while (self.isLocked()) {
-                if (IS_DEBUG) {
+                if (conf.IS_DEBUG) {
                     counter += 1;
                     if (counter % 10_000 == 0) {
                         log.warn("possible deadlock", .{});
@@ -148,5 +149,3 @@ pub const SpinMutex = struct {
         self.lock_state.store(0, .release);
     }
 };
-
-const IS_DEBUG = builtin.mode == .Debug or builtin.mode == .ReleaseSafe;
