@@ -330,6 +330,36 @@ pub const RmProtocol = util.Protocol(struct {
     newSender: fn () struct { sys.Error!void, caps.Sender },
 });
 
+pub const VfsProtocol = util.Protocol(struct {
+    /// open a namespace, like fs://, initfs:// or fs:///app/1
+    namespaceShort: fn (path: [32:0]u8) struct { sys.Error!void, usize },
+
+    // /// open a namespace, like fs://, initfs:// or fs:///app/1
+    // namespace: fn (path: [128:0]u8) struct { sys.Error!void, usize },
+
+    // /// open a sub-namespace, /app/1 in fs://
+    // subnamespaceShort: fn (ns_handle: usize, path: [24:0]u8) struct { sys.Error!void, usize },
+
+    /// close a namespace handle
+    closeNamespace: fn (handle: usize) struct { sys.Error!void, void },
+
+    /// open a file within a namespace
+    openShort: fn (ns_handle: usize, path: [24:0]u8) struct { sys.Error!void, usize },
+
+    // /// open a file within a namespace
+    // open: fn (ns_handle: usize, path: [120:0]u8) struct { sys.Error!void, usize },
+
+    /// close a file handle
+    close: fn (handle: usize) struct { sys.Error!void, void },
+
+    /// gets a shared 4K page in a file
+    getPage: fn (handle: usize, index: usize) struct { sys.Error!void, caps.Frame },
+
+    /// create a new sender to the rm server
+    /// only root can call this
+    newSender: fn () struct { sys.Error!void, caps.Sender },
+});
+
 /// root,unix app <-> timer communication
 pub const TimerProtocol = util.Protocol(struct {
     /// get the current timestamp
