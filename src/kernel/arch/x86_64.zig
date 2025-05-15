@@ -624,6 +624,10 @@ pub const Entry = packed struct {
     pub fn generate(comptime handler: anytype) Self {
         const handler_wrapper = struct {
             fn interrupt(interrupt_stack_frame: *const InterruptStackFrame) callconv(.Interrupt) void {
+                const is_user = interrupt_stack_frame.code_segment == @as(u16, GdtDescriptor.user_code_selector);
+                if (is_user) swapgs();
+                defer if (is_user) swapgs();
+
                 handler.handler(interrupt_stack_frame);
             }
         };
@@ -634,6 +638,10 @@ pub const Entry = packed struct {
     pub fn generateWithEc(comptime handler: anytype) Self {
         const handler_wrapper = struct {
             fn interrupt(interrupt_stack_frame: *const InterruptStackFrame, ec: u64) callconv(.Interrupt) void {
+                const is_user = interrupt_stack_frame.code_segment == @as(u16, GdtDescriptor.user_code_selector);
+                if (is_user) swapgs();
+                defer if (is_user) swapgs();
+
                 handler.handler(interrupt_stack_frame, ec);
             }
         };
@@ -691,9 +699,6 @@ pub const Idt = extern struct {
         // division error
         entries[0] = Entry.generate(struct {
             fn handler(interrupt_stack_frame: *const InterruptStackFrame) void {
-                const is_user = interrupt_stack_frame.code_segment == @as(u16, GdtDescriptor.user_code_selector);
-                if (is_user) swapgs();
-                defer if (is_user) swapgs();
                 if (conf.LOG_EVERYTHING) log.debug("division error interrupt", .{});
 
                 log.err("division error\nframe: {any}", .{interrupt_stack_frame});
@@ -703,9 +708,6 @@ pub const Idt = extern struct {
         // debug
         entries[1] = Entry.generate(struct {
             fn handler(interrupt_stack_frame: *const InterruptStackFrame) void {
-                const is_user = interrupt_stack_frame.code_segment == @as(u16, GdtDescriptor.user_code_selector);
-                if (is_user) swapgs();
-                defer if (is_user) swapgs();
                 if (conf.LOG_EVERYTHING) log.debug("debug interrupt", .{});
 
                 log.err("debug\nframe: {any}", .{interrupt_stack_frame});
@@ -715,9 +717,6 @@ pub const Idt = extern struct {
         // non-maskable interrupt
         entries[2] = Entry.generate(struct {
             fn handler(interrupt_stack_frame: *const InterruptStackFrame) void {
-                const is_user = interrupt_stack_frame.code_segment == @as(u16, GdtDescriptor.user_code_selector);
-                if (is_user) swapgs();
-                defer if (is_user) swapgs();
                 if (conf.LOG_EVERYTHING) log.debug("non-maskable interrupt", .{});
 
                 log.info("non-maskable interrupt\nframe: {any}", .{interrupt_stack_frame});
@@ -726,9 +725,6 @@ pub const Idt = extern struct {
         // breakpoint
         entries[3] = Entry.generate(struct {
             fn handler(interrupt_stack_frame: *const InterruptStackFrame) void {
-                const is_user = interrupt_stack_frame.code_segment == @as(u16, GdtDescriptor.user_code_selector);
-                if (is_user) swapgs();
-                defer if (is_user) swapgs();
                 if (conf.LOG_EVERYTHING) log.debug("breakpoint interrupt", .{});
 
                 log.info("breakpoint\nframe: {any}", .{interrupt_stack_frame});
@@ -737,9 +733,6 @@ pub const Idt = extern struct {
         // overflow
         entries[4] = Entry.generate(struct {
             fn handler(interrupt_stack_frame: *const InterruptStackFrame) void {
-                const is_user = interrupt_stack_frame.code_segment == @as(u16, GdtDescriptor.user_code_selector);
-                if (is_user) swapgs();
-                defer if (is_user) swapgs();
                 if (conf.LOG_EVERYTHING) log.debug("overflow interrupt", .{});
 
                 log.err("overflow\nframe: {any}", .{interrupt_stack_frame});
@@ -749,9 +742,6 @@ pub const Idt = extern struct {
         // bound range exceeded
         entries[5] = Entry.generate(struct {
             fn handler(interrupt_stack_frame: *const InterruptStackFrame) void {
-                const is_user = interrupt_stack_frame.code_segment == @as(u16, GdtDescriptor.user_code_selector);
-                if (is_user) swapgs();
-                defer if (is_user) swapgs();
                 if (conf.LOG_EVERYTHING) log.debug("bound range exceeded interrupt", .{});
 
                 log.err("bound range exceeded\nframe: {any}", .{interrupt_stack_frame});
@@ -761,9 +751,6 @@ pub const Idt = extern struct {
         // invalid opcode
         entries[6] = Entry.generate(struct {
             fn handler(interrupt_stack_frame: *const InterruptStackFrame) void {
-                const is_user = interrupt_stack_frame.code_segment == @as(u16, GdtDescriptor.user_code_selector);
-                if (is_user) swapgs();
-                defer if (is_user) swapgs();
                 if (conf.LOG_EVERYTHING) log.debug("invalid opcode interrupt", .{});
 
                 log.err("invalid opcode\nframe: {any}", .{interrupt_stack_frame});
@@ -773,9 +760,6 @@ pub const Idt = extern struct {
         // device not available
         entries[7] = Entry.generate(struct {
             fn handler(interrupt_stack_frame: *const InterruptStackFrame) void {
-                const is_user = interrupt_stack_frame.code_segment == @as(u16, GdtDescriptor.user_code_selector);
-                if (is_user) swapgs();
-                defer if (is_user) swapgs();
                 if (conf.LOG_EVERYTHING) log.debug("device not available interrupt", .{});
 
                 log.err("device not available\nframe: {any}", .{interrupt_stack_frame});
@@ -785,9 +769,6 @@ pub const Idt = extern struct {
         // double fault
         entries[8] = Entry.generateWithEc(struct {
             fn handler(interrupt_stack_frame: *const InterruptStackFrame, ec: u64) void {
-                const is_user = interrupt_stack_frame.code_segment == @as(u16, GdtDescriptor.user_code_selector);
-                if (is_user) swapgs();
-                defer if (is_user) swapgs();
                 if (conf.LOG_EVERYTHING) log.debug("double fault interrupt", .{});
 
                 log.err("double fault (0x{x})\nframe: {any}", .{ ec, interrupt_stack_frame });
@@ -799,9 +780,6 @@ pub const Idt = extern struct {
         // invalid tss
         entries[10] = Entry.generateWithEc(struct {
             fn handler(interrupt_stack_frame: *const InterruptStackFrame, ec: u64) void {
-                const is_user = interrupt_stack_frame.code_segment == @as(u16, GdtDescriptor.user_code_selector);
-                if (is_user) swapgs();
-                defer if (is_user) swapgs();
                 if (conf.LOG_EVERYTHING) log.debug("invalid TSS interrupt", .{});
 
                 log.err("invalid tss (0x{x})\nframe: {any}", .{ ec, interrupt_stack_frame });
@@ -811,9 +789,6 @@ pub const Idt = extern struct {
         // segment not present
         entries[11] = Entry.generateWithEc(struct {
             fn handler(interrupt_stack_frame: *const InterruptStackFrame, ec: u64) void {
-                const is_user = interrupt_stack_frame.code_segment == @as(u16, GdtDescriptor.user_code_selector);
-                if (is_user) swapgs();
-                defer if (is_user) swapgs();
                 if (conf.LOG_EVERYTHING) log.debug("segment not present interrupt", .{});
 
                 log.err("segment not present (0x{x})\nframe: {any}", .{ ec, interrupt_stack_frame });
@@ -823,9 +798,6 @@ pub const Idt = extern struct {
         // stack-segment fault
         entries[12] = Entry.generateWithEc(struct {
             fn handler(interrupt_stack_frame: *const InterruptStackFrame, ec: u64) void {
-                const is_user = interrupt_stack_frame.code_segment == @as(u16, GdtDescriptor.user_code_selector);
-                if (is_user) swapgs();
-                defer if (is_user) swapgs();
                 if (conf.LOG_EVERYTHING) log.debug("stack-segment fault interrupt", .{});
 
                 log.err("stack-segment fault (0x{x})\nframe: {any}", .{ ec, interrupt_stack_frame });
@@ -836,8 +808,6 @@ pub const Idt = extern struct {
         entries[13] = Entry.generateWithEc(struct {
             fn handler(interrupt_stack_frame: *const InterruptStackFrame, ec: u64) void {
                 const is_user = interrupt_stack_frame.code_segment == @as(u16, GdtDescriptor.user_code_selector);
-                if (is_user) swapgs();
-                defer if (is_user) swapgs();
                 if (conf.LOG_EVERYTHING) log.debug("general protection fault interrupt", .{});
 
                 log.warn(
@@ -879,8 +849,6 @@ pub const Idt = extern struct {
                 const pfec: PageFaultError = @bitCast(ec);
                 const target_addr = Cr2.read().page_fault_addr;
 
-                if (pfec.user_mode) swapgs();
-                defer if (pfec.user_mode) swapgs();
                 if (conf.LOG_EVERYTHING) log.debug("general protection fault interrupt", .{});
 
                 log.warn(
@@ -929,9 +897,6 @@ pub const Idt = extern struct {
         // x87 fp exception
         entries[16] = Entry.generate(struct {
             fn handler(interrupt_stack_frame: *const InterruptStackFrame) void {
-                const is_user = interrupt_stack_frame.code_segment == @as(u16, GdtDescriptor.user_code_selector);
-                if (is_user) swapgs();
-                defer if (is_user) swapgs();
                 if (conf.LOG_INTERRUPTS) log.debug("x87 fp exception interrupt", .{});
 
                 log.err("x87 fp exception\nframe: {any}", .{interrupt_stack_frame});
@@ -941,9 +906,6 @@ pub const Idt = extern struct {
         // alignment check
         entries[17] = Entry.generateWithEc(struct {
             fn handler(interrupt_stack_frame: *const InterruptStackFrame, ec: u64) void {
-                const is_user = interrupt_stack_frame.code_segment == @as(u16, GdtDescriptor.user_code_selector);
-                if (is_user) swapgs();
-                defer if (is_user) swapgs();
                 if (conf.LOG_INTERRUPTS) log.debug("alignment check interrupt", .{});
 
                 log.err("alignment check (0x{x})\nframe: {any}", .{ ec, interrupt_stack_frame });
@@ -953,9 +915,6 @@ pub const Idt = extern struct {
         // machine check
         entries[18] = Entry.generate(struct {
             fn handler(interrupt_stack_frame: *const InterruptStackFrame) void {
-                const is_user = interrupt_stack_frame.code_segment == @as(u16, GdtDescriptor.user_code_selector);
-                if (is_user) swapgs();
-                defer if (is_user) swapgs();
                 if (conf.LOG_INTERRUPTS) log.debug("machine check interrupt", .{});
 
                 log.err("machine check\nframe: {any}", .{interrupt_stack_frame});
@@ -965,9 +924,6 @@ pub const Idt = extern struct {
         // simd fp exception
         entries[19] = Entry.generate(struct {
             fn handler(interrupt_stack_frame: *const InterruptStackFrame) void {
-                const is_user = interrupt_stack_frame.code_segment == @as(u16, GdtDescriptor.user_code_selector);
-                if (is_user) swapgs();
-                defer if (is_user) swapgs();
                 if (conf.LOG_INTERRUPTS) log.debug("simd fp exception interrupt", .{});
 
                 log.err("simd fp exception\nframe: {any}", .{interrupt_stack_frame});
@@ -977,9 +933,6 @@ pub const Idt = extern struct {
         // virtualization exception
         entries[20] = Entry.generate(struct {
             fn handler(interrupt_stack_frame: *const InterruptStackFrame) void {
-                const is_user = interrupt_stack_frame.code_segment == @as(u16, GdtDescriptor.user_code_selector);
-                if (is_user) swapgs();
-                defer if (is_user) swapgs();
                 if (conf.LOG_INTERRUPTS) log.debug("virtualization exception interrupt", .{});
 
                 log.err("virtualization exception\nframe: {any}", .{interrupt_stack_frame});
@@ -989,9 +942,6 @@ pub const Idt = extern struct {
         // control protection exception
         entries[21] = Entry.generateWithEc(struct {
             fn handler(interrupt_stack_frame: *const InterruptStackFrame, ec: u64) void {
-                const is_user = interrupt_stack_frame.code_segment == @as(u16, GdtDescriptor.user_code_selector);
-                if (is_user) swapgs();
-                defer if (is_user) swapgs();
                 if (conf.LOG_INTERRUPTS) log.debug("control protection exception interrupt", .{});
 
                 log.err("control protection exce (0x{x})\nframe: {any}", .{ ec, interrupt_stack_frame });
@@ -1005,9 +955,6 @@ pub const Idt = extern struct {
         // hypervisor injection exception
         entries[28] = Entry.generate(struct {
             fn handler(interrupt_stack_frame: *const InterruptStackFrame) void {
-                const is_user = interrupt_stack_frame.code_segment == @as(u16, GdtDescriptor.user_code_selector);
-                if (is_user) swapgs();
-                defer if (is_user) swapgs();
                 if (conf.LOG_INTERRUPTS) log.debug("hypervisor injection exception interrupt", .{});
 
                 log.err("hypervisor injection exception\nframe: {any}", .{interrupt_stack_frame});
@@ -1017,9 +964,6 @@ pub const Idt = extern struct {
         // vmm communication exception
         entries[29] = Entry.generateWithEc(struct {
             fn handler(interrupt_stack_frame: *const InterruptStackFrame, ec: u64) void {
-                const is_user = interrupt_stack_frame.code_segment == @as(u16, GdtDescriptor.user_code_selector);
-                if (is_user) swapgs();
-                defer if (is_user) swapgs();
                 if (conf.LOG_INTERRUPTS) log.debug("vmm communication exception interrupt", .{});
 
                 log.err("vmm communication excep (0x{x})\nframe: {any}", .{ ec, interrupt_stack_frame });
@@ -1029,9 +973,6 @@ pub const Idt = extern struct {
         // security exception
         entries[30] = Entry.generateWithEc(struct {
             fn handler(interrupt_stack_frame: *const InterruptStackFrame, ec: u64) void {
-                const is_user = interrupt_stack_frame.code_segment == @as(u16, GdtDescriptor.user_code_selector);
-                if (is_user) swapgs();
-                defer if (is_user) swapgs();
                 if (conf.LOG_INTERRUPTS) log.debug("security exception interrupt", .{});
 
                 log.err("security exception (0x{x})\nframe: {any}", .{ ec, interrupt_stack_frame });
@@ -1050,40 +991,28 @@ pub const Idt = extern struct {
         }
 
         entries[apic.IRQ_SPURIOUS] = Entry.generate(struct {
-            fn handler(interrupt_stack_frame: *const InterruptStackFrame) void {
-                const is_user = interrupt_stack_frame.code_segment == @as(u16, GdtDescriptor.user_code_selector);
-                if (is_user) swapgs();
-                defer if (is_user) swapgs();
+            fn handler(_: *const InterruptStackFrame) void {
                 if (conf.LOG_INTERRUPTS) log.debug("APIC spurious interrupt", .{});
 
                 apic.eoi();
             }
         }).asInt();
         entries[apic.IRQ_TIMER] = Entry.generate(struct {
-            fn handler(interrupt_stack_frame: *const InterruptStackFrame) void {
-                const is_user = interrupt_stack_frame.code_segment == @as(u16, GdtDescriptor.user_code_selector);
-                if (is_user) swapgs();
-                defer if (is_user) swapgs();
+            fn handler(_: *const InterruptStackFrame) void {
                 if (conf.LOG_INTERRUPTS) log.debug("APIC timer interrupt", .{});
 
                 apic.eoi();
             }
         }).asInt();
         entries[apic.IRQ_IPI] = Entry.generate(struct {
-            fn handler(interrupt_stack_frame: *const InterruptStackFrame) void {
-                const is_user = interrupt_stack_frame.code_segment == @as(u16, GdtDescriptor.user_code_selector);
-                if (is_user) swapgs();
-                defer if (is_user) swapgs();
+            fn handler(_: *const InterruptStackFrame) void {
                 if (conf.LOG_INTERRUPTS) log.debug("APIC IPI interrupt", .{});
 
                 apic.eoi();
             }
         }).asInt();
         entries[apic.IRQ_IPI_PANIC] = Entry.generate(struct {
-            fn handler(interrupt_stack_frame: *const InterruptStackFrame) void {
-                const is_user = interrupt_stack_frame.code_segment == @as(u16, GdtDescriptor.user_code_selector);
-                if (is_user) swapgs();
-                defer if (is_user) swapgs();
+            fn handler(_: *const InterruptStackFrame) void {
                 if (conf.LOG_INTERRUPTS) log.debug("kernel panic interrupt", .{});
 
                 // log.err("CPU-{} done", .{cpuLocal().id});
@@ -1093,10 +1022,7 @@ pub const Idt = extern struct {
 
         inline for (0..apic.IRQ_AVAIL_COUNT) |i| {
             entries[i + apic.IRQ_AVAIL_LOW] = Entry.generate(struct {
-                pub fn handler(interrupt_stack_frame: *const InterruptStackFrame) void {
-                    const is_user = interrupt_stack_frame.code_segment == @as(u16, GdtDescriptor.user_code_selector);
-                    if (is_user) swapgs();
-                    defer if (is_user) swapgs();
+                pub fn handler(_: *const InterruptStackFrame) void {
                     if (conf.LOG_INTERRUPTS) log.debug("user-space {} interrupt", .{i});
 
                     // log.info("extra interrupt i=0x{x}", .{i + IRQ_AVAIL_LOW});
