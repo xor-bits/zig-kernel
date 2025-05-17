@@ -42,6 +42,21 @@ pub fn init() !void {
 
     // push the null capability
     _ = pushCapability(.{});
+
+    // debugType(Object);
+    // debugType(Memory);
+    // debugType(Frame);
+    // debugType(DeviceFrame);
+    // debugType(Thread);
+    // debugType(Vmem);
+    // debugType(Receiver);
+    // debugType(Sender);
+    // debugType(Reply);
+    // debugType(Notify);
+    // debugType(X86IoPortAllocator);
+    // debugType(X86IoPort);
+    // debugType(X86IrqAllocator);
+    // debugType(X86Irq);
 }
 
 /// create a capability out of an object
@@ -240,8 +255,12 @@ pub const Object = struct {
     /// the object is just quickly copied while the lock is held
     lock: spin.Mutex = .new(),
 
+    flags: u16 = 0,
+
     /// a linked list of Objects that are derived from this one
     children: u32 = 0,
+    /// the next element or the parent in the linked list derived from the parent
+    prev: u32 = 0,
     /// the next element in the linked list derived from the parent
     next: u32 = 0,
 
