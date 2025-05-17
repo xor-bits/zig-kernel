@@ -90,7 +90,7 @@ pub fn build(b: *std.Build) !void {
 
     const abi = createAbi(b, &opts);
     const root_bin = createRootBin(b, &opts, abi);
-    const kernel_elf = createKernelElf(b, &opts, abi);
+    const kernel_elf = try createKernelElf(b, &opts, abi);
     const initfs_tar_gz = createInitfsTarGz(b, &opts, abi);
     const os_iso = createIso(b, kernel_elf, initfs_tar_gz, root_bin);
 
@@ -182,19 +182,17 @@ fn createIso(
 
     // clone & configure limine (WARNING: this runs a Makefile from a dependency at compile time)
     const limine_bootloader_pkg = b.dependency("limine_bootloader", .{});
-    // const limine_step = b.addSystemCommand(&.{
-    //     "make", "-C",
-    // });
-    // limine_step.addDirectoryArg(limine_bootloader_pkg.path("."));
-    // // limine_step.addPrefixedFileArg("_IGNORED=", limine_bootloader_pkg.path(".").path(b, "limine.c"));
-    // limine_step.has_side_effects = false;
 
-    // tool that generates the ISO file with everything
-    const wrapper = b.addExecutable(.{
-        .name = "xorriso_limine_wrapper",
-        .root_source_file = b.path("src/tools/xorriso_limine_wrapper.zig"),
+    const limine_step = b.addExecutable(.{
+        .name = "limine",
         .target = b.graph.host,
+        .optimize = .ReleaseSafe,
     });
+    limine_step.addCSourceFile(.{
+        .file = limine_bootloader_pkg.path("limine.c"),
+        .flags = &.{"-std=c99"},
+    });
+    limine_step.linkLibC();
 
     // create virtual iso root
     const wf = b.addNamedWriteFiles("create virtual iso root");
@@ -208,12 +206,32 @@ fn createIso(
     _ = wf.addCopyFile(limine_bootloader_pkg.path("BOOTX64.EFI"), "EFI/BOOT/BOOTX64.EFI");
     _ = wf.addCopyFile(limine_bootloader_pkg.path("BOOTIA32.EFI"), "EFI/BOOT/BOOTIA32.EFI");
 
+    const xorriso_run = b.addSystemCommand(&.{
+        "xorriso",
+        "-as",
+        "mkisofs",
+        "-b",
+        "boot/limine/limine-bios-cd.bin",
+        "-no-emul-boot",
+        "-boot-load-size",
+        "4",
+        "-boot-info-table",
+        "--efi-boot",
+        "boot/limine/limine-uefi-cd.bin",
+        "-efi-boot-part",
+        "--efi-boot-image",
+        "--protective-msdos-label",
+    });
+    xorriso_run.addDirectoryArg(wf.getDirectory());
+    xorriso_run.addArg("-o");
+    const os_iso = xorriso_run.addOutputFileArg("os.iso");
+    xorriso_run.has_side_effects = false;
+
     // create the ISO file (WARNING: this runs a binary from a dependency (limine_bootloader) at compile time)
-    const wrapper_run = b.addRunArtifact(wrapper);
-    wrapper_run.addDirectoryArg(limine_bootloader_pkg.path("."));
-    wrapper_run.addDirectoryArg(wf.getDirectory());
-    const os_iso = wrapper_run.addOutputFileArg("os.iso");
-    // wrapper_run.step.dependOn(&limine_step.step);
+    const run_limine = b.addRunArtifact(limine_step);
+    run_limine.addArg("bios-install");
+    run_limine.addFileArg(os_iso);
+    run_limine.has_side_effects = false;
 
     const install_iso = b.addInstallFile(os_iso, "os.iso");
     b.getInstallStep().dependOn(&install_iso.step);
@@ -276,8 +294,53 @@ fn createKernelElf(
     b: *std.Build,
     opts: *const Opts,
     abi: *std.Build.Module,
-) std.Build.LazyPath {
+) !std.Build.LazyPath {
+    // collect all kernel source files for the stack tracer
+    var sources_zig_contents = std.ArrayList(u8).init(b.allocator);
+    errdefer sources_zig_contents.deinit();
+    const sources_zig_writer = sources_zig_contents.writer();
+    try sources_zig_writer.writeAll(
+        \\pub const SourceFile = struct {
+        \\    path: []const u8,
+        \\    contents: []const u8,
+        \\  
+        \\    fn open(comptime path: []const u8) SourceFile {
+        \\        return .{
+        \\            .path = path,
+        \\            .contents = @embedFile(path),
+        \\        };
+        \\    }
+        \\};
+        \\
+        \\pub const sources: []const SourceFile = &.{
+    );
+    var dir = try std.fs.cwd().openDir("src/kernel", .{ .iterate = true });
+    defer dir.close();
+    var walker = try dir.walk(b.allocator);
+    defer walker.deinit();
+    while (try walker.next()) |entry| {
+        if (entry.kind != .file) continue;
+        if (!std.mem.endsWith(u8, entry.path, ".zig")) continue;
+
+        const file = try entry.dir.openFile(entry.basename, .{});
+        defer file.close();
+
+        const contents = try file.readToEndAlloc(b.allocator, 100_000_000);
+        defer b.allocator.free(contents);
+
+        try std.fmt.format(sources_zig_writer,
+            \\    .open("{s}"),
+        , .{entry.path});
+    }
+    try sources_zig_writer.writeAll(
+        \\};
+    );
+
+    const kernel_source = b.addWriteFiles();
+    const sources_zig = kernel_source.add("sources.zig", sources_zig_contents.items);
+
     const git_rev_run = b.addSystemCommand(&.{ "git", "rev-parse", "HEAD" });
+    git_rev_run.has_side_effects = false;
     const git_rev = git_rev_run.captureStdOut();
     const git_rev_mod = b.createModule(.{
         .root_source_file = git_rev,
@@ -295,6 +358,7 @@ fn createKernelElf(
     kernel_module.addImport("abi", abi);
     kernel_module.addImport("font", createFont(b));
     kernel_module.addImport("git-rev", git_rev_mod);
+    kernel_module.addAnonymousImport("sources", .{ .root_source_file = sources_zig });
 
     if (opts.testing) {
         const testkernel_elf_step = b.addTest(.{
