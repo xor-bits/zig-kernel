@@ -65,6 +65,8 @@ pub fn spinnerMain() !void {
 var dir: std.atomic.Value(i32) = .init(1);
 
 fn tickKey() callconv(.SysV) noreturn {
+    var local_dir: i32 = 1;
+
     while (true) {
         const res, _, const state: abi.input.KeyState = main.input.call(
             .nextKey,
@@ -73,7 +75,9 @@ fn tickKey() callconv(.SysV) noreturn {
         res catch break;
 
         if (state == .release) continue;
-        _ = dir.fetchXor(1, .seq_cst);
+
+        local_dir = -local_dir;
+        dir.store(local_dir, .monotonic);
     }
 
     abi.sys.stop();
@@ -123,7 +127,7 @@ fn framebufferSplash(
             @floatCast(@as(f64, @floatFromInt(phase)) / 1_000_000.0),
         );
 
-        phase += (dir.load(.monotonic) * 2 - 1) * frametime_ns;
+        phase += dir.load(.monotonic) * frametime_ns;
         nanos += frametime_ns;
         _ = main.timer.call(.sleepDeadline, .{nanos}) catch break;
     }
