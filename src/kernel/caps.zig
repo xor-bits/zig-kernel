@@ -59,6 +59,7 @@ pub fn init() !void {
     // debugType(X86Irq);
 }
 
+// FIXME: keep the capability locked
 /// create a capability out of an object
 pub fn pushCapability(obj: Object) u32 {
     const cap_id = allocate();
@@ -98,6 +99,30 @@ pub fn getCapability(thread: *Thread, cap_id: u32) Error!*Object {
 
     if (obj.owner.load(.acquire) != current)
         return Error.InvalidCapability;
+
+    if (conf.LOG_OBJ_ACCESS_STATS) {
+        _ = obj_accesses.getPtr(obj.type).fetchAdd(1, .monotonic);
+
+        log.debug("obj accesses:", .{});
+        var it = obj_accesses.iterator();
+        while (it.next()) |e| {
+            log.debug(" - {}: {}", .{ e.key, e.value.load(.monotonic) });
+        }
+    }
+
+    return obj;
+}
+
+pub fn getCapabilityDerivation(cap_id: u32) *Object {
+    std.debug.assert(cap_id != 0);
+
+    const caps = capabilityArray();
+    std.debug.assert(cap_id < caps.len);
+
+    const obj = &caps[cap_id];
+
+    errdefer if (conf.LOG_OBJ_CALLS)
+        log.debug("obj was cap={} type={}", .{ cap_id, obj.type });
 
     if (conf.LOG_OBJ_ACCESS_STATS) {
         _ = obj_accesses.getPtr(obj.type).fetchAdd(1, .monotonic);
@@ -266,6 +291,19 @@ pub const Object = struct {
 
     const Self = @This();
 
+    pub fn capOf(obj: *@This()) ?u32 {
+        if (@intFromPtr(obj) < CAPABILITY_ARRAY_POINTER)
+            return null;
+
+        const relative_addr: usize = @intFromPtr(obj) - CAPABILITY_ARRAY_POINTER;
+        const index: usize = relative_addr / @sizeOf(@This());
+
+        if (index > std.math.maxInt(u32))
+            return null;
+
+        return @truncate(index);
+    }
+
     pub fn objectTypeOf(comptime T: type) abi.ObjectType {
         return switch (T) {
             Memory => .memory,
@@ -320,14 +358,14 @@ pub const Object = struct {
         };
     }
 
-    pub fn call(self: Self, thread: *Thread, trap: *arch.SyscallRegs) Error!void {
+    pub fn call(self: *Self, thread: *Thread, trap: *arch.SyscallRegs) Error!void {
         // log.debug("call {}", .{self.type});
         return switch (self.type) {
             .null => Error.InvalidCapability,
             .memory => Memory.call(self.paddr, thread, trap),
             .thread => Thread.call(self.paddr, thread, trap),
             .vmem => Vmem.call(self.paddr, thread, trap),
-            .frame => Frame.call(self.paddr, thread, trap),
+            .frame => Frame.call(self, thread, trap),
             .device_frame => DeviceFrame.call(self.paddr, thread, trap),
             .receiver => Receiver.call(self.paddr, thread, trap),
             .sender => Sender.call(self.paddr, thread, trap),

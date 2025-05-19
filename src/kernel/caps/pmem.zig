@@ -5,6 +5,7 @@ const addr = @import("../addr.zig");
 const arch = @import("../arch.zig");
 const caps = @import("../caps.zig");
 const pmem = @import("../pmem.zig");
+const spin = @import("../spin.zig");
 
 const conf = abi.conf;
 const log = std.log.scoped(.caps);
@@ -84,7 +85,7 @@ pub const Frame = struct {
         return @enumFromInt(self.paddr.toParts().offset);
     }
 
-    pub fn call(paddr: addr.Phys, _: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
+    pub fn call(self: *caps.Object, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
         const call_id = std.meta.intToEnum(abi.sys.FrameCallId, trap.arg1) catch {
             return Error.InvalidArgument;
         };
@@ -92,16 +93,92 @@ pub const Frame = struct {
         if (conf.LOG_OBJ_CALLS)
             log.debug("frame call \"{s}\"", .{@tagName(call_id)});
 
-        const self = caps.Ref(Frame){ .paddr = paddr };
+        const self_ref = self.as(@This()) catch unreachable;
 
         switch (call_id) {
             .size_of => {
-                trap.arg1 = @intFromEnum(Frame.sizeOf(self));
+                trap.arg1 = @intFromEnum(Frame.sizeOf(self_ref));
             },
+            .subframe => {
+                const size = std.meta.intToEnum(abi.ChunkSize, trap.arg3) catch return Error.InvalidArgument;
+                const paddr = trap.arg2;
+
+                var child_obj = try createSubframe(self_ref, thread, paddr, size);
+                child_obj.prev = self.capOf() orelse unreachable;
+
+                if (self.children == 0) {
+                    const child = caps.pushCapability(child_obj);
+                    self.children = child;
+                    trap.arg1 = child;
+                } else {
+                    frame_linked_list_lock.lock();
+                    defer frame_linked_list_lock.unlock();
+
+                    // only called with frame_linked_list_lock held
+                    // so the derived frame cannot be deleted or its tree modified
+                    const first_obj = caps.getCapabilityDerivation(self.children);
+                    const child = caps.pushCapability(child_obj);
+
+                    first_obj.prev = child;
+                    child_obj.next = self.children;
+
+                    self.children = child;
+                    trap.arg1 = child;
+                }
+            },
+            .revoke => {
+                frame_linked_list_lock.lock();
+                defer frame_linked_list_lock.unlock();
+
+                // FIXME: data race if revoking while mapping/unmapping
+                revokeRecurse(self.capOf() orelse unreachable);
+            },
+        }
+    }
+
+    fn createSubframe(
+        self: caps.Ref(@This()),
+        owner: ?*caps.Thread,
+        _sub_paddr: usize,
+        new_chunksize: abi.ChunkSize,
+    ) !caps.Object {
+        const paddr = @This().addrOf(self);
+        const fsize = @This().sizeOf(self).sizeBytes();
+
+        const sub_paddr = if (_sub_paddr == 0) paddr else _sub_paddr;
+
+        const sub_fsize = new_chunksize.sizeBytes();
+
+        const end = std.math.add(usize, paddr, fsize) catch return Error.OutOfBounds;
+        const sub_end = std.math.add(usize, sub_paddr, sub_fsize) catch return Error.OutOfBounds;
+
+        if (sub_paddr < paddr) return Error.OutOfBounds;
+        if (sub_fsize > fsize) return Error.OutOfBounds;
+        if (sub_end > end) return Error.OutOfBounds;
+
+        const subframe: caps.Ref(DeviceFrame) = .{ .paddr = DeviceFrame.new(addr.Phys.fromInt(sub_paddr), new_chunksize) };
+        return subframe.object(owner);
+    }
+
+    fn revokeRecurse(cap_id: u32) void {
+        var next_id = cap_id;
+        while (next_id != 0) {
+            const next = caps.getCapabilityDerivation(next_id);
+
+            revokeRecurse(next.children);
+            next_id = next.next;
+        }
+
+        if (cap_id != 0) {
+            caps.getCapabilityLocked(cap_id).owner.store(null, .release);
+            caps.deallocate(cap_id);
         }
     }
 };
 
+var frame_linked_list_lock: spin.Mutex = .{};
+
+// TODO: DeviceFrame doesn't have to be separate
 /// a `PageTableLevel1` points to multiple of these
 ///
 /// raw physical memory again, but now mappable

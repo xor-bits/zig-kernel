@@ -366,6 +366,8 @@ pub fn vmemUnmap(vmem_cap: u32, frame_cap: u32, vaddr: usize) !void {
 
 pub const FrameCallId = enum(u8) {
     size_of,
+    subframe,
+    revoke,
 };
 
 pub fn frameSizeOf(frame_cap: u32) !abi.ChunkSize {
@@ -374,6 +376,23 @@ pub fn frameSizeOf(frame_cap: u32) !abi.ChunkSize {
     };
     try call(frame_cap, &msg);
     return std.meta.intToEnum(abi.ChunkSize, msg.arg0) catch unreachable;
+}
+
+pub fn frameSubframe(frame_cap: u32, paddr: usize, size: abi.ChunkSize) !u32 {
+    var msg: Message = .{
+        .arg0 = @intFromEnum(FrameCallId.subframe),
+        .arg1 = paddr,
+        .arg2 = @intFromEnum(size),
+    };
+    try call(frame_cap, &msg);
+    return @truncate(msg.arg0);
+}
+
+pub fn frameRevoke(frame_cap: u32) !void {
+    var msg: Message = .{
+        .arg0 = @intFromEnum(FrameCallId.revoke),
+    };
+    try call(frame_cap, &msg);
 }
 
 // DEVICE FRAME CAPABILITY CALLS

@@ -96,6 +96,14 @@ pub const Frame = extern struct {
     pub fn sizeOf(self: @This()) !abi.ChunkSize {
         return sys.frameSizeOf(self.cap);
     }
+
+    pub fn subframe(self: @This(), paddr: usize, size: abi.ChunkSize) !@This() {
+        return .{ .cap = try sys.frameSubframe(self.cap, paddr, size) };
+    }
+
+    pub fn revoke(self: @This()) !void {
+        try sys.frameRevoke(self.cap);
+    }
 };
 
 /// capability to a MMIO physical memory region
