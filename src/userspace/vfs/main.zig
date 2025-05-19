@@ -11,6 +11,11 @@ pub const panic = abi.panic;
 pub const name = "vfs";
 const Error = abi.sys.Error;
 
+var main_thread_locals: abi.epoch.Locals = .{};
+pub fn epoch_locals() *abi.epoch.Locals {
+    return &main_thread_locals;
+}
+
 //
 
 var global_root: *DirNode = undefined;

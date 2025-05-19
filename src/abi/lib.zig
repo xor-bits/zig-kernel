@@ -4,6 +4,7 @@ const root = @import("root");
 pub const btree = @import("btree.zig");
 pub const caps = @import("caps.zig");
 pub const conf = @import("conf.zig");
+pub const epoch = @import("epoch.zig");
 pub const input = @import("input.zig");
 pub const lock = @import("lock.zig");
 pub const mem = @import("mem.zig");
