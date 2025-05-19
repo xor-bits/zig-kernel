@@ -50,6 +50,22 @@ pub fn main() !void {
     res, const addr, _ = try vm_client.call(.mapFrame, .{ abi.rt.vmem_handle, entries_frame, abi.sys.Rights{}, abi.sys.MapFlags{} });
     try res;
 
+    for (0..20) |i| {
+        log.info("pin", .{});
+        const guard = abi.epoch.pin();
+        defer {
+            log.info("unpin", .{});
+            abi.epoch.unpin(guard);
+        }
+
+        log.info("defer", .{});
+        try abi.epoch.deferFunc(guard, &struct {
+            fn inner(data: *[3]usize) void {
+                log.info("cleanup {}", .{data[0]});
+            }
+        }.inner, .{ i, 0, 0 });
+    }
+
     global_root = try DirNode.create();
 
     fs_root = try DirNode.create();
