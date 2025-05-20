@@ -156,7 +156,7 @@ pub const Frame = struct {
         if (sub_fsize > fsize) return Error.OutOfBounds;
         if (sub_end > end) return Error.OutOfBounds;
 
-        const subframe: caps.Ref(DeviceFrame) = .{ .paddr = DeviceFrame.new(addr.Phys.fromInt(sub_paddr), new_chunksize) };
+        const subframe: caps.Ref(Frame) = .{ .paddr = Frame.new(addr.Phys.fromInt(sub_paddr), new_chunksize) };
         return subframe.object(owner);
     }
 
