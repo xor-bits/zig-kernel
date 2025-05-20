@@ -197,11 +197,11 @@ fn mapFrameHandler(
     addr_spc.bottom += size.sizeBytes();
     addr_spc.bottom += 0x10000;
 
-    log.debug("mapping to [ 0x{x:0>16}..0x{x:0>16} ] in {*}", .{
-        vaddr,
-        vaddr + size.sizeBytes(),
-        addr_spc,
-    });
+    // log.debug("mapping to [ 0x{x:0>16}..0x{x:0>16} ] in {*}", .{
+    //     vaddr,
+    //     vaddr + size.sizeBytes(),
+    //     addr_spc,
+    // });
 
     addr_spc.vmem.map(
         frame,
@@ -248,11 +248,11 @@ fn mapDeviceFrameHandler(
     addr_spc.bottom += size.sizeBytes();
     addr_spc.bottom += 0x10000;
 
-    log.debug("mapping to [ 0x{x:0>16}..0x{x:0>16} ] in {*}", .{
-        vaddr,
-        vaddr + size.sizeBytes(),
-        addr_spc,
-    });
+    // log.debug("mapping to [ 0x{x:0>16}..0x{x:0>16} ] in {*}", .{
+    //     vaddr,
+    //     vaddr + size.sizeBytes(),
+    //     addr_spc,
+    // });
 
     addr_spc.vmem.mapDevice(
         frame,
@@ -300,11 +300,11 @@ fn mapAnonHandler(
     addr_spc.bottom += size.sizeBytes();
     addr_spc.bottom += 0x10000;
 
-    log.debug("mapping to [ 0x{x:0>16}..0x{x:0>16} ] in {*}", .{
-        vaddr,
-        vaddr + size.sizeBytes(),
-        addr_spc,
-    });
+    // log.debug("mapping to [ 0x{x:0>16}..0x{x:0>16} ] in {*}", .{
+    //     vaddr,
+    //     vaddr + size.sizeBytes(),
+    //     addr_spc,
+    // });
 
     addr_spc.vmem.map(
         frame,
@@ -437,11 +437,11 @@ fn loadElf(system: *System, elf_bytes: []const u8, as: *AddressSpace) !usize {
             LOADER_TMP,
         );
 
-        log.debug("mapping to [ 0x{x:0>16}..0x{x:0>16} ] in {*}", .{
-            segment_vaddr_bottom,
-            segment_vaddr_top,
-            as,
-        });
+        // log.debug("mapping to [ 0x{x:0>16}..0x{x:0>16} ] in {*}", .{
+        //     segment_vaddr_bottom,
+        //     segment_vaddr_top,
+        //     as,
+        // });
         try abi.util.mapVector(
             &frames,
             as.vmem,
@@ -459,11 +459,11 @@ fn newThread(system: *System, as: *AddressSpace, ip_override: usize, sp_override
         // map a stack
         // TODO: lazy
         const stack = try system.memory.allocSized(abi.caps.Frame, .@"256KiB");
-        log.debug("mapping to [ 0x{x:0>16}..0x{x:0>16} ] in {*}", .{
-            as.bottom + 0x10000,
-            as.bottom + 0x10000 + abi.ChunkSize.@"256KiB".sizeBytes(),
-            as,
-        });
+        // log.debug("mapping to [ 0x{x:0>16}..0x{x:0>16} ] in {*}", .{
+        //     as.bottom + 0x10000,
+        //     as.bottom + 0x10000 + abi.ChunkSize.@"256KiB".sizeBytes(),
+        //     as,
+        // });
         try as.vmem.map(
             stack,
             as.bottom + 0x10000, // 0x10000 guard(s)
