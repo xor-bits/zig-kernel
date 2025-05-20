@@ -536,10 +536,8 @@ fn execVm(elf_bytes: []const u8, sender: abi.caps.Sender) !caps.Thread {
     // map a stack
     // log.info("mapping a stack", .{});
     const stack = try allocSized(caps.Frame, .@"256KiB");
-    const stack_copy = try stack.subframe(0, .@"256KiB");
-    try stack_copy.revoke();
     try new_vmem.map(
-        stack_copy,
+        stack,
         0x7FFF_FFF0_0000,
         .{ .writable = true },
         .{},

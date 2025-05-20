@@ -170,7 +170,7 @@ pub const Frame = struct {
         }
 
         if (cap_id != 0) {
-            caps.getCapabilityLocked(cap_id).owner.store(null, .release);
+            caps.getCapabilityDerivation(cap_id).owner.store(null, .release);
             caps.deallocate(cap_id);
         }
     }
