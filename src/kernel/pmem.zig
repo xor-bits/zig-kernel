@@ -60,8 +60,9 @@ pub fn printInfo() void {
     }
 
     var overhead: usize = 0;
-    for (bitmaps) |level| {
-        overhead += level.bitmap.len * @sizeOf(u64);
+    var it = bitmaps.iterator();
+    while (it.next()) |level| {
+        overhead += level.value.bitmap.len * @sizeOf(u64);
     }
 
     log.info("usable memory: {0any}B ({0any:.1024}B)", .{
@@ -80,16 +81,18 @@ pub fn printInfo() void {
 
 pub fn printBits(comptime print: bool) usize {
     var total_unused: usize = 0;
-    for (bitmaps, 0..) |level, i| {
+
+    var it = bitmaps.iterator();
+    while (it.next()) |level| {
         var unused: usize = 0;
-        for (level.bitmap) |*bucket| {
+        for (level.value.bitmap) |*bucket| {
             unused += @popCount(bucket.load(.unordered));
         }
-        total_unused += unused * (@as(usize, 0x1000) << @truncate(i));
+        total_unused += unused * level.key.sizeBytes();
 
         if (print)
             log.info("free {}B chunks: {}", .{
-                util.NumberPrefix(usize, .binary).new(@as(usize, 0x1000) << @truncate(i)),
+                util.NumberPrefix(usize, .binary).new(level.key.sizeBytes()),
                 unused,
             });
     }
@@ -124,7 +127,7 @@ var initialized = if (conf.IS_DEBUG) false else {};
 ///
 /// 1 bit to tell if the chunk is free or allocated
 /// and each chunk (except 4KiB) has 2 chunks 'under' it
-var bitmaps: [18]Level = .{Level{}} ** 18;
+var bitmaps: std.EnumArray(abi.ChunkSize, Level) = .initFill(.{});
 
 const Level = struct {
     bitmap: []std.atomic.Value(u64) = &.{},
@@ -145,7 +148,7 @@ var usable = std.atomic.Value(u32).init(0);
 pub fn allocChunk(size: abi.ChunkSize) ?addr.Phys {
     if (debugAssertInitialized()) return null;
 
-    const bitmap: []std.atomic.Value(u64) = bitmaps[@intFromEnum(size)].bitmap;
+    const bitmap: []std.atomic.Value(u64) = bitmaps.get(size).bitmap;
     for (bitmap, 0..) |*bucket, i| {
         // bucket contains 64 bits, each controlling one chunk
 
@@ -200,7 +203,7 @@ pub fn deallocChunk(ptr: addr.Phys, size: abi.ChunkSize) void {
     const bucket_id = chunk_id / 64;
     const bit_id: u6 = @truncate(chunk_id % 64);
 
-    const bitmap: []std.atomic.Value(u64) = bitmaps[@intFromEnum(size)].bitmap;
+    const bitmap: []std.atomic.Value(u64) = bitmaps.get(size).bitmap;
     const bucket = &bitmap[bucket_id];
 
     std.debug.assert((bucket.load(.acquire) & (@as(usize, 1) << bit_id)) == 0);
@@ -277,8 +280,9 @@ pub fn init() !void {
     }
 
     log.info("allocating bitmaps", .{});
-    for (&bitmaps, 0..) |*level, i| {
-        const bits = memory_top >> @truncate(12 + i);
+    var it = bitmaps.iterator();
+    while (it.next()) |level| {
+        const bits = memory_top / level.key.sizeBytes();
         if (bits == 0) continue;
 
         // log.debug("bits for {}B chunks: {}", .{
@@ -302,7 +306,7 @@ pub fn init() !void {
         // fill with zeroes, so that everything is allocated
         std.crypto.secureZero(u64, @ptrCast(bitmap));
 
-        level.* = .{
+        level.value.* = .{
             .bitmap = bitmap,
         };
     }
