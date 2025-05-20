@@ -90,7 +90,7 @@ pub fn build(b: *std.Build) !void {
 
     const abi = createAbi(b, &opts);
     const root_bin = createRootBin(b, &opts, abi);
-    const kernel_elf = createKernelElf(b, &opts, abi);
+    const kernel_elf = try createKernelElf(b, &opts, abi);
     const initfs_tar_gz = createInitfsTarGz(b, &opts, abi);
     const os_iso = createIso(b, kernel_elf, initfs_tar_gz, root_bin);
 
@@ -272,11 +272,65 @@ fn createInitfsTarGz(
     return initfs_tar_gz_file;
 }
 
+fn appendSources(b: *std.Build, writer: anytype, sub_path: []const u8) !void {
+    var dir = try std.fs.cwd().openDir(sub_path, .{ .iterate = true });
+    defer dir.close();
+
+    var walker = try dir.walk(b.allocator);
+    defer walker.deinit();
+
+    while (try walker.next()) |entry| {
+        if (entry.kind != .file) continue;
+        if (!std.mem.endsWith(u8, entry.path, ".zig")) continue;
+
+        const file = try entry.dir.openFile(entry.basename, .{});
+        defer file.close();
+
+        try std.fmt.format(writer,
+            \\    "{s}",
+            \\
+        , .{entry.path});
+    }
+}
+
+fn generateSourcesZig(
+    b: *std.Build,
+    opts: *const Opts,
+) !*std.Build.Module {
+    // collect all kernel source files for the stack tracer
+
+    var sources_zig_contents = std.ArrayList(u8).init(b.allocator);
+    errdefer sources_zig_contents.deinit();
+
+    const sources_zig_writer = sources_zig_contents.writer();
+    try sources_zig_writer.writeAll(
+        \\pub const sources: []const []const u8 = &.{
+        \\
+    );
+    try appendSources(b, sources_zig_writer, "src/kernel");
+    try sources_zig_writer.writeAll(
+        \\};
+        \\
+    );
+
+    const kernel_source = b.addWriteFiles();
+    const sources_zig = kernel_source.add(
+        "sources.zig",
+        sources_zig_contents.items,
+    );
+
+    return b.addModule("sources", .{
+        .target = opts.target,
+        .optimize = opts.optimize,
+        .root_source_file = sources_zig,
+    });
+}
+
 fn createKernelElf(
     b: *std.Build,
     opts: *const Opts,
     abi: *std.Build.Module,
-) std.Build.LazyPath {
+) !std.Build.LazyPath {
     const git_rev_run = b.addSystemCommand(&.{ "git", "rev-parse", "HEAD" });
     const git_rev = git_rev_run.captureStdOut();
     const git_rev_mod = b.createModule(.{
@@ -295,6 +349,7 @@ fn createKernelElf(
     kernel_module.addImport("abi", abi);
     kernel_module.addImport("font", createFont(b));
     kernel_module.addImport("git-rev", git_rev_mod);
+    kernel_module.addImport("sources", try generateSourcesZig(b, opts));
 
     if (opts.testing) {
         const testkernel_elf_step = b.addTest(.{

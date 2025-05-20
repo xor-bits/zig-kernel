@@ -313,12 +313,12 @@ pub const Vmem = struct {
 
         // first check if mapping would fail (dry-run)
         for (0..count) |_| {
-            if (conf.LOG_OBJ_CALLS)
+            if (conf.LOG_VMEM)
                 log.info("canMap(0x{x})", .{vaddr.raw});
             try canMap(self, vaddr);
             vaddr.raw += page_size;
         }
-        if (conf.LOG_OBJ_CALLS)
+        if (conf.LOG_VMEM)
             log.info("canUnmap pass", .{});
 
         paddr = _paddr;
@@ -351,13 +351,13 @@ pub const Vmem = struct {
 
         // first check if unmapping would fail (dry-run)
         for (0..count) |_| {
-            if (conf.LOG_OBJ_CALLS)
+            if (conf.LOG_VMEM)
                 log.info("canUnmap(0x{x}, 0x{x})", .{ paddr.raw, vaddr.raw });
             try canUnmap(self, paddr, vaddr);
             paddr.raw += page_size;
             vaddr.raw += page_size;
         }
-        if (conf.LOG_OBJ_CALLS)
+        if (conf.LOG_VMEM)
             log.info("canUnmap pass", .{});
 
         paddr = _paddr;
