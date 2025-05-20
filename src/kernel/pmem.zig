@@ -61,7 +61,7 @@ pub fn printInfo() void {
 
     var overhead: usize = 0;
     for (bitmaps) |level| {
-        overhead = level.bitmap.len * @sizeOf(u64);
+        overhead += level.bitmap.len * @sizeOf(u64);
     }
 
     log.info("usable memory: {0any}B ({0any:.1024}B)", .{
@@ -124,11 +124,7 @@ var initialized = if (conf.IS_DEBUG) false else {};
 ///
 /// 1 bit to tell if the chunk is free or allocated
 /// and each chunk (except 4KiB) has 2 chunks 'under' it
-var bitmaps: [18]Level = b: {
-    var tmp: [18]Level = undefined;
-    @memset(&tmp, .{});
-    break :b tmp;
-};
+var bitmaps: [18]Level = .{Level{}} ** 18;
 
 const Level = struct {
     bitmap: []std.atomic.Value(u64) = &.{},
@@ -256,8 +252,6 @@ pub fn init() !void {
         return error.PmmAlreadyInitialized;
     }
 
-    printInfo();
-
     var usable_memory: usize = 0;
     var memory_top: usize = 0;
     const memory_response: *limine.MemoryMapResponse = memory.response orelse {
@@ -337,6 +331,8 @@ pub fn init() !void {
             _ = usable.fetchAdd(n_pages, .monotonic);
         }
     }
+
+    printInfo();
 }
 
 fn initAlloc(entries: []*limine.MemoryMapEntry, size: usize, alignment: usize) ?[*]u8 {
