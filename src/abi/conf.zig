@@ -16,6 +16,8 @@ pub const LOG_APIC: bool = LOG_GENERIC or false;
 pub const LOG_INTERRUPTS: bool = LOG_GENERIC or false;
 pub const LOG_SERVERS: bool = LOG_USER or false;
 
+/// parse DWARF info early, to make it functional in a OOM panic
+pub const DWARF_INFO_EARLY_INIT: bool = true;
 pub const KERNEL_PANIC_SYSCALL: bool = true;
 pub const STACK_TRACE: bool = true;
 pub const KERNEL_PANIC_RSOD: bool = true;

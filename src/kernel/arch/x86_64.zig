@@ -573,6 +573,8 @@ pub const Tss = extern struct {
         var stack: *Stack = try pmem.page_allocator.create(Stack);
         res.privilege_stacks[0] = @sizeOf(Stack) + @intFromPtr(stack);
         stack = try pmem.page_allocator.create(Stack);
+        res.privilege_stacks[1] = @sizeOf(Stack) + @intFromPtr(stack);
+        stack = try pmem.page_allocator.create(Stack);
         res.interrupt_stacks[0] = @sizeOf(Stack) + @intFromPtr(stack);
 
         return res;
@@ -823,9 +825,11 @@ pub const Idt = extern struct {
                 });
 
                 if (is_user and !conf.KERNEL_PANIC_ON_USER_FAULT) {
+                    log.warn("user", .{});
                     cpuLocal().current_thread.?.status = .stopped;
                     proc.enter();
                 } else {
+                    log.warn("kernel", .{});
                     std.debug.panic(
                         \\unhandled general protection fault (0x{x})
                         \\ - user: {}
@@ -842,7 +846,7 @@ pub const Idt = extern struct {
                     });
                 }
             }
-        }).asInt();
+        }).withStack(2).asInt();
         // page fault
         entries[14] = Entry.generateWithEc(struct {
             fn handler(interrupt_stack_frame: *const InterruptStackFrame, ec: u64) void {

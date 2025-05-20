@@ -55,6 +55,14 @@ pub const Memory = struct {
 pub const Frame = struct {
     data: [512]u64 align(0x1000),
 
+    pub const Flags = packed struct {
+        /// is this frame cap mapped to some vmem
+        is_mapped: bool = false,
+        /// is this frame cap a derivation, revoking which doesn't free the physical memory
+        is_derived: bool = false,
+        _: u14 = 0,
+    };
+
     pub fn init(self: caps.Ref(@This())) void {
         const ptr = addr.Phys.fromParts(.{ .page = self.paddr.toParts().page });
         const size = @This().sizeOf(self).sizeBytes() / 8;
@@ -106,32 +114,35 @@ pub const Frame = struct {
                 var child_obj = try createSubframe(self_ref, thread, paddr, size);
                 child_obj.prev = self.capOf() orelse unreachable;
 
+                // log.info("subframe={}", .{child});
+
                 if (self.children == 0) {
                     const child = caps.pushCapability(child_obj);
+
                     self.children = child;
                     trap.arg1 = child;
                 } else {
-                    frame_linked_list_lock.lock();
-                    defer frame_linked_list_lock.unlock();
+                    child_obj.next = self.children;
 
-                    // only called with frame_linked_list_lock held
-                    // so the derived frame cannot be deleted or its tree modified
-                    const first_obj = caps.getCapabilityDerivation(self.children);
                     const child = caps.pushCapability(child_obj);
 
+                    const first_obj = caps.getCapabilityDerivation(self.children);
+                    first_obj.lock.lock(); // FIXME: lockless, at least spinlockless
                     first_obj.prev = child;
-                    child_obj.next = self.children;
+                    first_obj.lock.unlock();
 
                     self.children = child;
                     trap.arg1 = child;
                 }
             },
             .revoke => {
-                frame_linked_list_lock.lock();
-                defer frame_linked_list_lock.unlock();
+                revokeRecurse(self.children);
 
-                // FIXME: data race if revoking while mapping/unmapping
-                revokeRecurse(self.capOf() orelse unreachable);
+                caps.deallocate(self.capOf() orelse unreachable);
+
+                if (!@as(Flags, @bitCast(self.flags)).is_derived) {
+                    pmem.deallocChunk(addr.Phys.fromInt(Frame.addrOf(self_ref)), Frame.sizeOf(self_ref));
+                }
             },
         }
     }
@@ -157,21 +168,26 @@ pub const Frame = struct {
         if (sub_end > end) return Error.OutOfBounds;
 
         const subframe: caps.Ref(Frame) = .{ .paddr = Frame.new(addr.Phys.fromInt(sub_paddr), new_chunksize) };
-        return subframe.object(owner);
+        var subframe_obj = subframe.object(owner);
+        subframe_obj.flags = @bitCast(Flags{
+            .is_derived = true,
+        });
+        return subframe_obj;
     }
 
     fn revokeRecurse(cap_id: u32) void {
-        var next_id = cap_id;
-        while (next_id != 0) {
-            const next = caps.getCapabilityDerivation(next_id);
+        var cur_id = cap_id;
+        while (cur_id != 0) {
+            const cur = caps.getCapabilityDerivation(cur_id);
+            cur.lock.lock(); // FIXME: lockless, at least spinlockless
+            defer cur.lock.unlock();
+            cur.owner.store(null, .release);
+            const next_id = cur.next;
+            const children = cur.children;
+            caps.deallocate(cur_id);
 
-            revokeRecurse(next.children);
-            next_id = next.next;
-        }
-
-        if (cap_id != 0) {
-            caps.getCapabilityDerivation(cap_id).owner.store(null, .release);
-            caps.deallocate(cap_id);
+            cur_id = next_id;
+            revokeRecurse(children);
         }
     }
 };

@@ -10,29 +10,34 @@ const lock = @import("lock.zig");
 
 //
 
-pub fn pin() Guard {
+pub fn init_thread() void {
     const l = locals();
+    l.* = .{
+        .hazard = .{std.ArrayList(DeferFunc).init(root.epoch_allocator)} ** 3,
+    };
 
-    if (!l.added) {
-        @branchHint(.cold);
-        l.added = true;
+    var all_locals_now = all_locals.load(.monotonic);
 
-        var all_locals_now = all_locals.load(.monotonic);
-
-        while (true) {
-            l.next = all_locals_now;
-            if (all_locals.cmpxchgStrong(
-                all_locals_now,
-                l,
-                .release,
-                .monotonic,
-            )) |fail| {
-                all_locals_now = fail;
-            } else {
-                break;
-            }
+    while (true) {
+        l.next = all_locals_now;
+        if (all_locals.cmpxchgStrong(
+            all_locals_now,
+            l,
+            .release,
+            .monotonic,
+        )) |fail| {
+            all_locals_now = fail;
+        } else {
+            break;
         }
     }
+
+    l.added = true;
+}
+
+pub fn pin() Guard {
+    const l = locals();
+    std.debug.assert(l.added);
 
     var global = global_epoch.val.load(.monotonic);
     global <<= 1; // local epoch is at bits 1..
@@ -56,7 +61,7 @@ pub fn pin() Guard {
     };
 
     l.count +%= 1; // lol
-    if (conf.IS_DEBUG or l.count % 128 == 0) {
+    if (conf.IS_DEBUG or l.count % 32 == 0) {
         @branchHint(.cold);
         collect(guard);
     }
@@ -68,19 +73,17 @@ pub fn unpin(guard: Guard) void {
     guard.locals.epoch.val.store(0, .release);
 }
 
-pub fn collect(_: Guard) void {
+pub fn collect(guard: Guard) void {
     const new_epoch = tryAdvance();
     const expired = (new_epoch + 1) % 3;
 
-    // FIXME: lockless
-    hazard_lists[expired].mutex.lock();
-    defer hazard_lists[expired].mutex.unlock();
+    guard.locals.hazard[expired].items.len == 0;
 
-    for (hazard_lists[expired].arr.items) |*deferred| {
+    for (guard.locals.hazard[expired].items) |*deferred| {
         deferred.func(&deferred.data);
     }
 
-    hazard_lists[expired].arr.clearRetainingCapacity();
+    guard.locals.hazard[expired].clearRetainingCapacity();
 }
 
 fn tryAdvance() usize {
@@ -131,10 +134,10 @@ pub fn deferDeinit(guard: Guard, allocator: std.mem.Allocator, ptr: anytype) voi
 
 pub fn deferFunc(guard: Guard, func: *const fn (data: *[3]usize) void, data: [3]usize) !void {
     // FIXME: lockless
-    hazard_lists[guard.epoch].mutex.lock();
-    defer hazard_lists[guard.epoch].mutex.unlock();
+    guard.locals.hazard[guard.epoch].mutex.lock();
+    defer guard.locals.hazard[guard.epoch].mutex.unlock();
 
-    try hazard_lists[guard.epoch].arr.append(DeferFunc{
+    try guard.locals.hazard[guard.epoch].arr.append(DeferFunc{
         .func = func,
         .data = data,
     });
@@ -153,14 +156,14 @@ pub const Locals = struct {
 
     // the rest are only for the owner thread
 
-    count: usize = 0,
-
-    next: ?*Locals = null,
+    next: CachePadded(?*Locals) = null,
     added: bool = false,
+    count: usize = 0,
+    hazard: [3]std.ArrayList(DeferFunc),
 };
 
 var global_epoch: CachePadded(std.atomic.Value(usize)) = .{ .val = .init(0) };
-var hazard_lists: [3]HazardList = .{HazardList{}} ** 3;
+// var hazard_lists: [3]HazardList = .{HazardList{}} ** 3;
 var all_locals: std.atomic.Value(?*Locals) = .init(null);
 
 const DeferFunc = struct {
@@ -168,10 +171,10 @@ const DeferFunc = struct {
     data: [3]usize,
 };
 
-const HazardList = struct {
-    mutex: lock.YieldMutex = .new(),
-    arr: std.ArrayList(DeferFunc) = .init(mem.slab_allocator),
-};
+// const HazardList = struct {
+//     mutex: lock.YieldMutex = .new(),
+//     arr: std.ArrayList(DeferFunc) = .init(mem.slab_allocator),
+// };
 
 fn CachePadded(comptime T: type) type {
     return extern struct {

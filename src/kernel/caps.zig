@@ -212,6 +212,8 @@ pub fn allocate() u32 {
 }
 
 pub fn deallocate(cap: u32) void {
+    std.debug.assert(cap != 0);
+
     free_list_lock.lock();
     defer free_list_lock.unlock();
 

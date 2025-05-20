@@ -81,6 +81,11 @@ pub fn main() noreturn {
         std.debug.panic("failed to initialize PMM: {}", .{err});
     };
 
+    log.info("initializing DWARF info", .{});
+    logs.init() catch |err| {
+        std.debug.panic("failed to initialize DWARF info: {}", .{err});
+    };
+
     // boot up a few processors
     arch.smpInit();
 

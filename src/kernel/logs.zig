@@ -4,16 +4,22 @@ const sources = @import("sources");
 
 const apic = @import("apic.zig");
 const arch = @import("arch.zig");
-const init = @import("init.zig");
+const fb = @import("fb.zig");
+const lazy = @import("lazy.zig");
 const main = @import("main.zig");
 const pmem = @import("pmem.zig");
 const spin = @import("spin.zig");
 const uart = @import("uart.zig");
-const fb = @import("fb.zig");
 
 const conf = abi.conf;
 
 //
+
+pub fn init() !void {
+    if (!conf.DWARF_INFO_EARLY_INIT) return;
+
+    _ = try getSelfDwarf();
+}
 
 pub const std_options: std.Options = .{
     .logFn = logFn,
@@ -90,13 +96,13 @@ pub fn panic(msg: []const u8, _: ?*std.builtin.StackTrace, _: ?usize) noreturn {
 
     log.err("kernel panic: {s}", .{msg});
 
-    var iter = std.debug.StackIterator.init(@returnAddress(), @frameAddress());
-    if (getSelfDwarf()) |_dwarf| {
-        var dwarf = _dwarf;
-        defer dwarf.deinit(pmem.page_allocator);
+    dwarf_info_lock.lock();
+    defer dwarf_info_lock.unlock();
 
+    var iter = std.debug.StackIterator.init(@returnAddress(), @frameAddress());
+    if (getSelfDwarf()) |dwarf| {
         while (iter.next()) |r_addr| {
-            printSourceAtAddress(panic_printer, &dwarf, r_addr) catch {};
+            printSourceAtAddress(panic_printer, dwarf, r_addr) catch {};
         }
     } else |err| {
         log.err("failed to open DWARF info: {}", .{err});
@@ -115,10 +121,13 @@ pub const Addr2Line = struct {
     addr: usize,
 
     pub fn format(self: Addr2Line, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
-        if (getSelfDwarf()) |_dwarf| {
-            var dwarf = _dwarf;
-            defer dwarf.deinit(pmem.page_allocator);
-            try printSourceAtAddress(writer, &dwarf, self.addr);
+        if (!conf.DWARF_INFO_EARLY_INIT) return;
+
+        dwarf_info_lock.lock();
+        defer dwarf_info_lock.unlock();
+
+        if (getSelfDwarf()) |dwarf| {
+            try printSourceAtAddress(writer, dwarf, self.addr);
         } else |err| {
             try std.fmt.format(writer, "failed to open DWARF info: {}\n", .{err});
         }
@@ -220,10 +229,19 @@ const source_files: [sources.sources.len]SourceFile = b: {
     break :b files;
 };
 
-fn getSelfDwarf() !std.debug.Dwarf {
-    if (!conf.STACK_TRACE) return error.StackTracesDisabled;
+var dwarf_info: ?anyerror!std.debug.Dwarf = null;
+var dwarf_info_lock: spin.Mutex = .{};
 
-    // std.debug.captureStackTrace(first_address: ?usize, stack_trace: *std.builtin.StackTrace)
+/// `dwarf_info_lock` needs to be held
+fn getSelfDwarf() !*std.debug.Dwarf {
+    return &(try (dwarf_info orelse {
+        dwarf_info = openSelfDwarf();
+        return &(try (dwarf_info.?));
+    }));
+}
+
+fn openSelfDwarf() !std.debug.Dwarf {
+    if (!conf.STACK_TRACE) return error.StackTracesDisabled;
 
     const kernel_file = @import("args.zig").kernel_file.response orelse return error.NoKernelFile;
     const elf_bin = kernel_file.kernel_file.data();

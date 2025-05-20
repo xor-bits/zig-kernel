@@ -533,6 +533,19 @@ fn execVm(elf_bytes: []const u8, sender: abi.caps.Sender) !caps.Thread {
         );
     }
 
+    while (true) {
+        log.info("alloc + free 10_000 frames of size 4KiB", .{});
+
+        for (0..10_000) |_| {
+            const frame = try allocSized(caps.Frame, .@"4KiB");
+            // log.info("frame cap_id={}", .{frame.cap});
+            for (0..1_000) |_| {
+                _ = try frame.subframe(0, .@"4KiB");
+            }
+            try frame.revoke();
+        }
+    }
+
     // map a stack
     // log.info("mapping a stack", .{});
     const stack = try allocSized(caps.Frame, .@"256KiB");
