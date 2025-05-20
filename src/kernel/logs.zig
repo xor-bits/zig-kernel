@@ -1,5 +1,6 @@
 const abi = @import("abi");
 const std = @import("std");
+const sources = @import("sources");
 
 const apic = @import("apic.zig");
 const arch = @import("arch.zig");
@@ -209,31 +210,14 @@ const SourceFile = struct {
     }
 };
 
-const source_files: []const SourceFile = &.{
-    .open("acpi.zig"),
-    .open("addr.zig"),
-    .open("apic.zig"),
-    .open("arch/x86_64.zig"),
-    .open("arch.zig"),
-    .open("args.zig"),
-    .open("caps/ipc.zig"),
-    .open("caps/pmem.zig"),
-    .open("caps/thread.zig"),
-    .open("caps/vmem.zig"),
-    .open("caps/x86.zig"),
-    .open("caps.zig"),
-    .open("fb.zig"),
-    .open("hpet.zig"),
-    .open("init.zig"),
-    .open("lazy.zig"),
-    .open("logs.zig"),
-    .open("main.zig"),
-    .open("pmem.zig"),
-    .open("proc.zig"),
-    .open("spin.zig"),
-    .open("test.zig"),
-    .open("uart.zig"),
-    .open("util.zig"),
+const source_files: [sources.sources.len]SourceFile = b: {
+    var files: [sources.sources.len]SourceFile = undefined;
+    for (sources.sources, 0..) |path, i| {
+        // opening from here because @embedFile would not
+        // work in 'sources.zig', because it doesn't have access
+        files[i] = .open(path);
+    }
+    break :b files;
 };
 
 fn getSelfDwarf() !std.debug.Dwarf {
