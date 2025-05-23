@@ -61,14 +61,16 @@ pub fn init() !void {
 
 // FIXME: keep the capability locked
 /// create a capability out of an object
-pub fn pushCapability(obj: Object) u32 {
+pub fn pushCapability(_obj: Object) u32 {
+    var obj = _obj;
+    obj.lock = .newLocked();
+
     const cap_id = allocate();
     const cap = &capabilityArrayUnchecked()[cap_id];
 
     cap.lock.lock();
     cap.* = obj;
-    if (cap.lock.isLocked())
-        cap.lock.unlock();
+    cap.lock.unlock();
 
     return cap_id;
 }

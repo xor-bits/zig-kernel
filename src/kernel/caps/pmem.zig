@@ -184,7 +184,7 @@ pub const Frame = struct {
             cur.owner.store(null, .release);
             const next_id = cur.next;
             const children = cur.children;
-            caps.deallocate(cur_id);
+            caps.deallocate(cur_id); // FIXME: unmap
 
             cur_id = next_id;
             revokeRecurse(children);
