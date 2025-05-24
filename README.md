@@ -75,12 +75,15 @@ zig build run --prominent-compile-errors --summary none -freference-trace \
     - [x] disallow mapping a frame twice without cloning the cap
     - [x] disallow overlapping maps
     - [ ] restrict capability rights, ex: read-only frame can only create read-only frames
+    - [ ] scrap the derivation tree, use refcounts like Zircon
+    - [ ] per process handle tables, allowing more dynamic kernel object metadata (user handle (u32) is an index to process local table, which holds a pointer (and rights) to a kernel object)
     - [ ] objects
       - [x] Memory
       - [x] Thread
       - [x] Vmem
       - [x] Frame
         - [ ] multiple Frame caps to the same physical memory (for shared memory)
+        - [ ] lazy alloc
       - [x] DeviceFrame
       - [x] Receiver
       - [x] Sender
