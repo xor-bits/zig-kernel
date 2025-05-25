@@ -162,6 +162,41 @@ pub const Locals = struct {
     hazard: [3]std.ArrayList(DeferFunc),
 };
 
+//
+
+pub const RefCnt = struct {
+    refcnt: std.atomic.Value(usize) = .init(1),
+
+    pub const MAX: usize = std.math.maxInt(usize) >> 1;
+
+    pub fn inc(self: *@This()) void {
+        // log.info("inc refcnt", .{});
+        const old = self.refcnt.fetchAdd(1, .monotonic);
+        if (old >= MAX) @panic("too many ref counts");
+    }
+
+    /// returns true if the item should be freed
+    pub fn dec(self: *@This()) bool {
+        // log.info("dec refcnt", .{});
+        const old_cnt = self.refcnt.fetchSub(1, .release);
+        std.debug.assert(old_cnt < MAX);
+        std.debug.assert(old_cnt != 0);
+
+        if (old_cnt == 1) {
+            @branchHint(.cold);
+        } else {
+            return false;
+        }
+
+        // fence
+        _ = self.refcnt.load(.acquire);
+
+        return true;
+    }
+};
+
+//
+
 var global_epoch: CachePadded(std.atomic.Value(usize)) = .{ .val = .init(0) };
 // var hazard_lists: [3]HazardList = .{HazardList{}} ** 3;
 var all_locals: std.atomic.Value(?*Locals) = .init(null);

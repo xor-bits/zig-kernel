@@ -43,6 +43,15 @@ pub fn init() !void {
     // push the null capability
     _ = pushCapability(.{});
 
+    var cap: Capability = .{};
+    cap.object.store(.{}, .seq_cst);
+    const s = cap.object.load(.acquire);
+    // s.ptr;
+    // s.type;
+    debugType(@TypeOf(s));
+    debugType(Capability);
+    debugType(GenericObject);
+    debugType(FrameObject);
     // debugType(Object);
     // debugType(Memory);
     // debugType(Frame);
@@ -230,6 +239,8 @@ pub fn deallocate(cap: u32) void {
 
 //
 
+// TODO: make this local per process (process, not thread)
+
 /// pointer to the first capability in the global capability array (its a null capability)
 ///
 /// it is currently `0xFFFFFFBF80000000`, right before the kernel code at `0xFFFF_FFFF_8000_0000`
@@ -272,6 +283,73 @@ pub fn Ref(comptime T: type) type {
         }
     };
 }
+
+pub const Capability = struct {
+    /// the actual kernel object data, possibly shared between multiple capabilities
+    object: std.atomic.Value(ObjectPointer) = .init(.{}),
+    /// capability ownership is tied to virtual address spaces
+    owner: std.atomic.Value(?*Vmem) = .init(null), // TODO: will be removed with per-process caps
+
+    const ObjectPointer = packed struct {
+        /// object pointer's low 56 bits, the upper 8 (actually 17) bits are always 1 in kernel space
+        ptr: u56 = 0,
+        /// object type
+        type: abi.ObjectType = .null,
+
+        fn getRefcntPtr(self: *@This()) *abi.epoch.RefCnt {
+            // FIXME: prevent reordering so that the offset would be same on all objects
+            switch (self.type) {
+                .frame => &@as(*FrameObject, @ptrFromInt(self.ptr)).refcnt,
+            }
+        }
+    };
+
+    const Self = @This();
+
+    pub fn load(self: *Self) void {
+        const guard = abi.epoch.pin();
+        defer abi.epoch.unpin(guard);
+
+        const object = self.object.load(.monotonic);
+        object.getRefcntPtr().inc();
+        return object.ptr;
+    }
+
+    pub fn store(self: *Self) void {
+        const guard = abi.epoch.pin();
+        defer abi.epoch.unpin(guard);
+
+        const old_object = self.object.swap(.{}, .seq_cst);
+        if (old_object.getRefcntPtr().dec()) {
+            @branchHint(.unlikely);
+            // abi.epoch.deferFunc(guard, func: *const fn(data:*[3]usize)void, data: [3]usize)
+        }
+    }
+};
+
+pub const GenericObject = struct {
+    refcnt: abi.epoch.RefCnt,
+};
+
+// pub const ShortFrameObject = extern struct {
+//     refcnt: abi.epoch.RefCnt = .{},
+//     lock: spin.Mutex = .new(),
+//     pages: [2:0]u32, //
+// };
+
+pub const FrameObject = struct {
+    // FIXME: prevent reordering so that the offset would be same on all objects
+    refcnt: abi.epoch.RefCnt,
+
+    lock: spin.Mutex = .new(),
+    /// all `Vmem`s this `Frame` is mapped to
+    mappings: []u32 = &.{},
+    pages_len: u32,
+    /// a variable sized array of all physical pages managed by this `Frame`
+    pages: u32,
+};
+
+var slab_allocator = abi.mem.SlabAllocator.init(pmem.page_allocator);
 
 pub const Object = struct {
     /// physical address (or metadata for ZST) for the kernel object

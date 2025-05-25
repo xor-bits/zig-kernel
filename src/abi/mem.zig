@@ -15,17 +15,8 @@ pub const server_page_allocator = std.mem.Allocator{
     },
 };
 
-pub const slab_allocator = std.mem.Allocator{
-    .ptr = &slab_allocator_inst,
-    .vtable = &.{
-        .alloc = SlabAllocator.alloc,
-        .resize = SlabAllocator.resize,
-        .remap = SlabAllocator.remap,
-        .free = SlabAllocator.free,
-    },
-};
-
-var slab_allocator_inst: SlabAllocator = .{};
+pub const slab_allocator = slab_allocator_inst.allocator();
+var slab_allocator_inst: SlabAllocator = .init(server_page_allocator);
 
 const ServerPageAllocator = struct {
     fn alloc(_: *anyopaque, len: usize, _: std.mem.Alignment, _: usize) ?[*]u8 {
@@ -54,7 +45,9 @@ const ServerPageAllocator = struct {
     }
 };
 
-const SlabAllocator = struct {
+pub const SlabAllocator = struct {
+    page_allocator: std.mem.Allocator,
+
     // chunks broken into smaller pieces
     locks: [8]abi.lock.YieldMutex = .{abi.lock.YieldMutex{}} ** 8,
     slabs: [8]FreeList = .{FreeList{}} ** 8,
@@ -63,8 +56,28 @@ const SlabAllocator = struct {
     // chunk_locks: [18]abi.lock.YieldMutex = .{abi.lock.YieldMutex{}} ** 18,
     // chunks: [18]FreeList = .{FreeList{}} ** 18,
 
+    const Self = @This();
+
+    pub fn init(page_allocator: std.mem.Allocator) Self {
+        return Self{
+            .page_allocator = page_allocator,
+        };
+    }
+
+    pub fn allocator(self: *Self) std.mem.Allocator {
+        return std.mem.Allocator{
+            .ptr = @ptrCast(self),
+            .vtable = &.{
+                .alloc = Self.alloc,
+                .resize = Self.resize,
+                .remap = Self.remap,
+                .free = Self.free,
+            },
+        };
+    }
+
     fn alloc(p: *anyopaque, len: usize, _: std.mem.Alignment, _: usize) ?[*]u8 {
-        const self: *@This() = @ptrCast(@alignCast(p));
+        const self: *Self = @ptrCast(@alignCast(p));
 
         if (SlabSize.of(len)) |slab_size| {
             const i = @intFromEnum(slab_size);
@@ -82,7 +95,7 @@ const SlabAllocator = struct {
             }
 
             // 4 pages per chunk
-            const chunk: []u8 = server_page_allocator.alloc(u8, 0x4000) catch return null;
+            const chunk: []u8 = self.page_allocator.alloc(u8, 0x4000) catch return null;
 
             // form a linked list out of the items
             // but keep one of them
@@ -109,7 +122,7 @@ const SlabAllocator = struct {
     }
 
     fn resize(_: *anyopaque, mem: []u8, _: std.mem.Alignment, new_len: usize, _: usize) bool {
-        // const self: *@This() = @ptrCast(@alignCast(p));
+        // const self: *Self = @ptrCast(@alignCast(p));
 
         if (SlabSize.of(mem.len)) |slab_size| {
             return slab_size.sizeBytes() >= new_len;
@@ -119,13 +132,13 @@ const SlabAllocator = struct {
     }
 
     fn remap(_: *anyopaque, _: []u8, _: std.mem.Alignment, _: usize, _: usize) ?[*]u8 {
-        // const self: *@This() = @ptrCast(@alignCast(p));
+        // const self: *Self = @ptrCast(@alignCast(p));
 
         return null;
     }
 
     fn free(p: *anyopaque, mem: []u8, _: std.mem.Alignment, _: usize) void {
-        const self: *@This() = @ptrCast(@alignCast(p));
+        const self: *Self = @ptrCast(@alignCast(p));
 
         if (SlabSize.of(mem.len)) |slab_size| {
             const i = @intFromEnum(slab_size);
