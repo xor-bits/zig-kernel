@@ -426,6 +426,15 @@ fn createAbi(b: *std.Build, opts: *const Opts) *std.Build.Module {
         .root_source_file = b.path("build.zig.zon"),
     });
 
+    const tests = b.addTest(.{
+        .name = "abi-unit-test",
+        .root_source_file = b.path("src/abi/lib.zig"),
+        .target = b.graph.host,
+    });
+    const tests_step = b.step("test", "run unit tests");
+    const run_tests_step = b.addRunArtifact(tests);
+    tests_step.dependOn(&run_tests_step.step);
+
     return mod;
 }
 

@@ -40,6 +40,17 @@ pub fn init() !void {
     // (required for the capability array)
     try caps_vmem.init();
 
+    // initialize the dedupe lazyinit readonly zero page
+    const page = pmem.allocChunk(.@"4KiB") orelse return error.OutOfMemory;
+    readonly_zero_page.store(page.toParts().page, .release);
+
+    const frame = try FrameObject.init(0x8000);
+    const a = try frame.page_hit(4);
+    const b = try frame.page_hit(4);
+    std.debug.assert(a == b);
+    std.debug.assert(a != 0);
+    frame.deinit();
+
     // push the null capability
     _ = pushCapability(.{});
 
@@ -339,17 +350,215 @@ pub const GenericObject = struct {
 
 pub const FrameObject = struct {
     // FIXME: prevent reordering so that the offset would be same on all objects
-    refcnt: abi.epoch.RefCnt,
+    refcnt: abi.epoch.RefCnt = .{},
 
     lock: spin.Mutex = .new(),
-    /// all `Vmem`s this `Frame` is mapped to
-    mappings: []u32 = &.{},
-    pages_len: u32,
-    /// a variable sized array of all physical pages managed by this `Frame`
-    pages: u32,
+    pages: []u32,
+
+    pub fn init(size_bytes: usize) !*@This() {
+        const size_pages = std.math.divCeil(usize, size_bytes, 0x1000) catch unreachable;
+        if (size_pages > std.math.maxInt(u32)) return error.OutOfMemory;
+
+        const obj: *@This() = try slab_allocator.allocator().create(@This());
+        const pages = try slab_allocator.allocator().alloc(u32, size_pages);
+
+        @memset(pages, 0);
+
+        obj.* = .{
+            .lock = .newLocked(),
+            .pages = pages,
+        };
+        obj.lock.unlock();
+
+        return obj;
+    }
+
+    pub fn page_hit(self: *@This(), idx: u32) !u32 {
+        self.lock.lock();
+        defer self.lock.unlock();
+
+        std.debug.assert(idx < self.pages.len);
+
+        if (self.pages[idx] != 0)
+            return self.pages[idx];
+
+        const new_page = pmem.allocChunk(.@"4KiB") orelse return error.OutOfMemory;
+        self.pages[idx] = new_page.toParts().page;
+
+        return new_page.toParts().page;
+    }
+
+    pub fn deinit(self: *@This()) void {
+        if (!self.refcnt.dec()) return;
+
+        for (self.pages) |page| {
+            if (page == 0) continue;
+
+            pmem.deallocChunk(
+                addr.Phys.fromParts(.{ .page = page }),
+                .@"4KiB",
+            );
+        }
+
+        slab_allocator.allocator().free(self.pages);
+        slab_allocator.allocator().destroy(self);
+    }
+};
+
+pub const VmemObject = struct {
+    // FIXME: prevent reordering so that the offset would be same on all objects
+    refcnt: abi.epoch.RefCnt = .{},
+
+    lock: spin.Mutex = .new(),
+    cr3: u32,
+    mappings: std.ArrayList(Mapping),
+
+    const Mapping = struct {
+        /// refcounted
+        frame: *FrameObject,
+        /// page offset within the Frame object
+        frame_first_page: u32,
+        /// virtual address destination of the mapping
+        /// `mappings` is sorted by this
+        vaddr: addr.Virt,
+        /// number of bytes (rounded up to pages) mapped
+        pages: u32,
+
+        fn overlaps(self: *@This(), vaddr: addr.Virt, pages: u32) bool {
+            const a_beg: usize = self.vaddr.raw;
+            const a_end: usize = self.vaddr.raw + self.pages * 0x1000;
+            const b_beg: usize = vaddr.raw;
+            const b_end: usize = vaddr.raw + pages * 0x1000;
+
+            if (a_end <= b_beg)
+                return false;
+            if (b_end <= a_beg)
+                return false;
+            return true;
+        }
+    };
+
+    pub fn init() !*@This() {
+        const obj: *@This() = try slab_allocator.allocator().create(@This());
+        const mappings = std.ArrayList(Mapping).init(slab_allocator);
+
+        obj.* = .{
+            .lock = .newLocked(),
+            .cr3 = 0,
+            .mappings = mappings,
+        };
+        obj.lock.unlock();
+
+        return obj;
+    }
+
+    pub fn map(
+        self: *@This(),
+        frame: *FrameObject,
+        frame_first_page: u32,
+        vaddr: addr.Virt,
+        pages: u32,
+    ) !void {
+        errdefer frame.deinit();
+
+        std.debug.assert(vaddr.toParts().offset == 0);
+
+        {
+            frame.lock.lock();
+            defer frame.lock.unlock();
+            if (pages + frame_first_page >= frame.pages.len)
+                return error.OutOfBounds;
+        }
+
+        const mapping = Mapping{
+            .frame = frame,
+            .frame_first_page = frame_first_page,
+            .vaddr = vaddr,
+            .pages = pages,
+        };
+
+        self.lock.lock();
+        defer self.lock.unlock();
+
+        if (self.find(vaddr)) |idx| {
+            if (vaddr.raw == self.mappings.items[idx.?].vaddr.raw) {
+                // replace old mapping
+                self.mappings.items[idx].frame.deinit();
+                self.mappings.items[idx] = mapping;
+            } else {
+                // insert new mapping
+                self.mappings.insert(idx, mapping);
+            }
+        } else {
+            // push new mapping
+            self.mappings.append(mapping);
+        }
+    }
+
+    pub fn unmap(self: *@This(), vaddr: addr.Virt, pages: u32) void {
+        self.lock.lock();
+        defer self.lock.unlock();
+
+        const idx = self.find(vaddr) orelse return;
+
+        while (true) {
+            if (idx >= self.mappings.items.len)
+                break;
+
+            if (!self.mappings.items[idx].overlaps(vaddr, pages))
+                break;
+
+            self.mappings.items[idx].frame.deinit();
+            self.mappings.orderedRemove(idx); // TODO: batch remove
+        }
+
+        // FIXME: update hardware page tables
+    }
+
+    pub fn page_fault(self: *@This(), vaddr: addr.Virt) bool {
+        self.lock.lock();
+        defer self.lock.unlock();
+
+        const idx = self.find(vaddr) orelse return false;
+
+        self.mappings.items[idx].overlaps(vaddr, 1);
+
+        // FIXME: update hardware page tables
+        self.cr3;
+    }
+
+    pub fn deinit(self: *@This()) void {
+        if (!self.refcnt.dec()) return;
+
+        for (self.mappings.items) |mapping| {
+            mapping.frame.deinit();
+        }
+
+        self.mappings.deinit();
+        slab_allocator.allocator().destroy(self);
+    }
+
+    fn find(self: *@This(), vaddr: addr.Virt) ?usize {
+        const idx = std.sort.partitionPoint(
+            Mapping,
+            self.mappings,
+            vaddr,
+            struct {
+                fn pred(target_vaddr: addr.Virt, val: Mapping) bool {
+                    return val.vaddr.raw < target_vaddr.raw;
+                }
+            }.pred,
+        );
+
+        if (idx == self.mappings.items.len)
+            return null;
+
+        return idx;
+    }
 };
 
 var slab_allocator = abi.mem.SlabAllocator.init(pmem.page_allocator);
+var readonly_zero_page: std.atomic.Value(u32) = .init(0);
 
 pub const Object = struct {
     /// physical address (or metadata for ZST) for the kernel object

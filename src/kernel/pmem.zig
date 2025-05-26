@@ -145,6 +145,7 @@ var used = std.atomic.Value(u32).init(0);
 /// how many pages are usable
 var usable = std.atomic.Value(u32).init(0);
 
+// FIXME: return error{OutOfMemory}!addr.Phys
 pub fn allocChunk(size: abi.ChunkSize) ?addr.Phys {
     if (debugAssertInitialized()) return null;
 
@@ -191,6 +192,8 @@ pub fn allocChunk(size: abi.ChunkSize) ?addr.Phys {
 }
 
 pub fn deallocChunk(ptr: addr.Phys, size: abi.ChunkSize) void {
+    std.debug.assert(ptr.toParts().page != 0);
+
     // if the buddy chunk is also free, allocate it and free the parent chunk
     // if the buddy chunk is not free, then just free the current chunk
     //
@@ -329,6 +332,13 @@ pub fn init() !void {
             const first_page: u32 = addr.Phys.fromInt(memory_map_entry.base).toParts().page;
             const n_pages: u32 = @truncate(memory_map_entry.length >> 12);
             for (first_page..first_page + n_pages) |page| {
+                if (page == 0) {
+                    // make sure the 0 phys page is not free
+                    // phys addr values of 0 are treated as null
+                    @branchHint(.cold);
+                    continue;
+                }
+
                 deallocChunk(addr.Phys.fromParts(.{ .page = @truncate(page) }), .@"4KiB");
             }
 

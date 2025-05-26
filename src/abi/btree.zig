@@ -17,6 +17,11 @@ pub fn BTreeMap(comptime K: type, comptime V: type, comptime cfg: Config) type {
         root: usize = 0,
         depth: usize = 0,
 
+        pub const KV = struct {
+            key: K,
+            value: V,
+        };
+
         pub const LeafNode = struct {
             used: usize = 0,
             keys: [MAX]K = undefined,
@@ -229,7 +234,7 @@ pub fn BTreeMap(comptime K: type, comptime V: type, comptime cfg: Config) type {
             @panic("todo");
         }
 
-        pub fn remove(self: *@This(), key: K) ?V {
+        pub fn remove(self: *@This(), key: K) ?KV {
             _ = .{ self, key };
             @panic("todo");
         }
@@ -308,3 +313,41 @@ pub fn BTreeMap(comptime K: type, comptime V: type, comptime cfg: Config) type {
         }
     };
 }
+
+// test "fuzz" {
+//     std.testing.fuzz({}, struct {
+//         fn testOne(_: void, _input: []const u8) anyerror!void {
+//             var input = _input;
+
+//             var treemap = BTreeMap(usize, usize, .{}){};
+//             var hashmap = std.HashMap(usize, usize, {}, 80);
+
+//             while (input.len >= 24) {
+//                 const op: usize = std.mem.readInt(usize, @ptrCast(&input[0]), .little);
+//                 const key: usize = std.mem.readInt(usize, @ptrCast(&input[1]), .little);
+//                 const val: usize = std.mem.readInt(usize, @ptrCast(&input[2]), .little);
+
+//                 switch (op) {
+//                     0 => {
+//                         try treemap.insert(std.testing.allocator, key, val);
+//                         try hashmap.put(std.testing.allocator, key, val);
+//                     },
+
+//                     1 => {
+//                         const v1 = treemap.remove(key);
+//                         const v2 = hashmap.fetchRemove(key);
+//                         v2.?.value
+//                     },
+//                 }
+//             }
+
+//             if (input.len <= 1)
+//                 return;
+
+//             input[0];
+
+//             const map =
+//                 BTreeMap(usize, usize, .{ .search = .linear });
+//         }
+//     }.testOne, .{});
+// }
