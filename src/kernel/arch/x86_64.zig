@@ -689,6 +689,12 @@ pub const Entry = packed struct {
     }
 };
 
+pub const FaultCause = enum {
+    read,
+    write,
+    exec,
+};
+
 pub const Idt = extern struct {
     ptr: DescriptorTablePtr,
     entries: [256]u128,

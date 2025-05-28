@@ -413,20 +413,27 @@ pub const VmemObject = struct {
     cr3: u32,
     mappings: std.ArrayList(Mapping),
 
-    const Mapping = struct {
+    const Mapping = packed struct {
         /// refcounted
         frame: *FrameObject,
         /// page offset within the Frame object
         frame_first_page: u32,
+        /// mapping flags
+        rights: abi.sys.Rights,
+        _: u4 = 0,
         /// virtual address destination of the mapping
         /// `mappings` is sorted by this
-        vaddr: addr.Virt,
+        page: u52,
         /// number of bytes (rounded up to pages) mapped
         pages: u32,
 
+        fn getVaddr(self: *@This()) addr.Virt {
+            return addr.Virt.fromInt(self.page << 12);
+        }
+
         fn overlaps(self: *@This(), vaddr: addr.Virt, pages: u32) bool {
-            const a_beg: usize = self.vaddr.raw;
-            const a_end: usize = self.vaddr.raw + self.pages * 0x1000;
+            const a_beg: usize = self.getVaddr().raw;
+            const a_end: usize = self.getVaddr().raw + self.pages * 0x1000;
             const b_beg: usize = vaddr.raw;
             const b_end: usize = vaddr.raw + pages * 0x1000;
 
@@ -458,10 +465,13 @@ pub const VmemObject = struct {
         frame_first_page: u32,
         vaddr: addr.Virt,
         pages: u32,
+        rights: abi.sys.Rights,
     ) !void {
         errdefer frame.deinit();
 
+        if (pages == 0) return;
         std.debug.assert(vaddr.toParts().offset == 0);
+        try self.assert_userspace(vaddr, pages);
 
         {
             frame.lock.lock();
@@ -473,7 +483,8 @@ pub const VmemObject = struct {
         const mapping = Mapping{
             .frame = frame,
             .frame_first_page = frame_first_page,
-            .vaddr = vaddr,
+            .rights = rights,
+            .page = vaddr.raw >> 12,
             .pages = pages,
         };
 
@@ -481,10 +492,11 @@ pub const VmemObject = struct {
         defer self.lock.unlock();
 
         if (self.find(vaddr)) |idx| {
-            if (vaddr.raw == self.mappings.items[idx.?].vaddr.raw) {
+            const old_mapping = &self.mappings.items[idx];
+            if (vaddr.raw == old_mapping.getVaddr().raw) {
                 // replace old mapping
-                self.mappings.items[idx].frame.deinit();
-                self.mappings.items[idx] = mapping;
+                old_mapping.frame.deinit();
+                old_mapping.* = mapping;
             } else {
                 // insert new mapping
                 self.mappings.insert(idx, mapping);
@@ -496,6 +508,10 @@ pub const VmemObject = struct {
     }
 
     pub fn unmap(self: *@This(), vaddr: addr.Virt, pages: u32) void {
+        if (pages == 0) return;
+        std.debug.assert(vaddr.toParts().offset == 0);
+        try self.assert_userspace(vaddr, pages);
+
         self.lock.lock();
         defer self.lock.unlock();
 
@@ -505,26 +521,86 @@ pub const VmemObject = struct {
             if (idx >= self.mappings.items.len)
                 break;
 
-            if (!self.mappings.items[idx].overlaps(vaddr, pages))
+            const mapping = self.mappings.items[idx];
+
+            if (!mapping.overlaps(vaddr, pages))
                 break;
 
-            self.mappings.items[idx].frame.deinit();
+            mapping.frame.deinit();
             self.mappings.orderedRemove(idx); // TODO: batch remove
         }
 
-        // FIXME: update hardware page tables
+        // FIXME: track CPUs using this page map
+        // and IPI them out while unmapping
+
+        if (self.cr3 == 0)
+            return;
+
+        const vmem: *volatile Vmem = addr.Phys.fromParts(.{ .page = self.cr3 })
+            .toHhdm()
+            .toPtr(*volatile Vmem);
+
+        for (0..pages) |page_idx| {
+            // already checked to be in bounds
+            const page_vaddr = addr.Virt.fromInt(vaddr.raw + page_idx * 0x1000);
+            vmem.unmapFrame(page_vaddr) catch |err| {
+                log.warn("unmap err: {}, should be ok", .{err});
+            };
+        }
     }
 
-    pub fn page_fault(self: *@This(), vaddr: addr.Virt) bool {
+    pub fn page_fault(
+        self: *@This(),
+        caused_by: arch.FaultCause,
+        vaddr_unaligned: addr.Virt,
+    ) !void {
+        const vaddr: addr.Virt = addr.Virt.fromInt(std.mem.alignBackward(usize, vaddr_unaligned, 0x1000));
+
         self.lock.lock();
         defer self.lock.unlock();
 
-        const idx = self.find(vaddr) orelse return false;
+        // check if it was user error
+        const idx = self.find(vaddr) orelse
+            return error.NotMapped;
 
-        self.mappings.items[idx].overlaps(vaddr, 1);
+        const mapping = self.mappings.items[idx];
 
-        // FIXME: update hardware page tables
-        self.cr3;
+        // check if it was user error
+        if (!mapping.overlaps(vaddr, 1))
+            return error.NotMapped;
+
+        // check if it was user error
+        switch (caused_by) {
+            .read => {
+                if (!mapping.rights.readable)
+                    return error.ReadFault;
+            },
+            .write => {
+                if (!mapping.rights.readable)
+                    return error.WriteFault;
+            },
+            .exec => {
+                if (!mapping.rights.readable)
+                    return error.ExecFault;
+            },
+        }
+
+        // check if it is lazy mapping
+
+        std.debug.assert(self.cr3 != 0);
+
+        const vmem: *volatile Vmem = addr.Phys.fromParts(.{ .page = self.cr3 })
+            .toHhdm()
+            .toPtr(*volatile Vmem);
+
+        try vmem.entryFrame(vaddr);
+
+        const page_offs = (mapping.getVaddr().raw - vaddr.raw) / 0x1000;
+        std.debug.assert(page_offs < mapping.pages);
+        const real_page = try mapping.frame.page_hit(mapping.frame_first_page + page_offs);
+
+        // mapping has all rights and is present, the page fault should not have happened
+        unreachable;
     }
 
     pub fn deinit(self: *@This()) void {
@@ -536,6 +612,20 @@ pub const VmemObject = struct {
 
         self.mappings.deinit();
         slab_allocator.allocator().destroy(self);
+    }
+
+    fn assert_userspace(vaddr: addr.Virt, pages: u32) !void {
+        const upper_bound: usize = std.math.add(
+            usize,
+            vaddr.raw + std.math.mul(
+                usize,
+                pages,
+                0x1000,
+            ) catch return error.OutOfBounds,
+        ) catch return error.OutOfBounds;
+        if (upper_bound > 0x8000_0000_0000) {
+            return error.OutOfBounds;
+        }
     }
 
     fn find(self: *@This(), vaddr: addr.Virt) ?usize {

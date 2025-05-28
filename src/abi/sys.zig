@@ -27,11 +27,12 @@ pub const Id = enum(usize) {
     // TODO: maybe move all object call id's here to be syscall id's
 };
 
-pub const Rights = extern struct {
+pub const Rights = packed struct {
     readable: bool = true,
     writable: bool = false,
     executable: bool = false,
     user_accessible: bool = true,
+    _: u4 = 0,
 
     pub fn intersection(self: Rights, other: Rights) Rights {
         return Rights{
@@ -42,11 +43,11 @@ pub const Rights = extern struct {
         };
     }
 
-    pub fn asInt(self: Rights) u32 {
-        return @as(u32, @bitCast(self));
+    pub fn asInt(self: Rights) u8 {
+        return @as(u8, @bitCast(self));
     }
 
-    pub fn fromInt(i: u32) Rights {
+    pub fn fromInt(i: u8) Rights {
         return @as(Rights, @bitCast(i));
     }
 };

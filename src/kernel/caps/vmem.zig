@@ -386,6 +386,21 @@ pub const Vmem = struct {
         }).write();
     }
 
+    pub fn entryGiantFrame(self: *volatile @This(), vaddr: addr.Virt) Error!*volatile Entry {
+        const next = (try nextLevel(true, &self.entries, vaddr.toParts().level4)).toHhdm().toPtr(*volatile PageTableLevel3);
+        return next.entryGiantFrame(vaddr);
+    }
+
+    pub fn entryHugeFrame(self: *volatile @This(), vaddr: addr.Virt) Error!*volatile Entry {
+        const next = (try nextLevel(true, &self.entries, vaddr.toParts().level4)).toHhdm().toPtr(*volatile PageTableLevel3);
+        return next.entryHugeFrame(vaddr);
+    }
+
+    pub fn entryFrame(self: *volatile @This(), vaddr: addr.Virt) Error!*volatile Entry {
+        const next = (try nextLevel(true, &self.entries, vaddr.toParts().level4)).toHhdm().toPtr(*volatile PageTableLevel3);
+        return next.entryFrame(vaddr);
+    }
+
     pub fn mapGiantFrame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
         const next = (try nextLevel(true, &self.entries, vaddr.toParts().level4)).toHhdm().toPtr(*volatile PageTableLevel3);
         try next.mapGiantFrame(paddr, vaddr, rights, flags);
@@ -456,6 +471,20 @@ pub const Vmem = struct {
 /// a `PageTableLevel4` points to multiple of these
 pub const PageTableLevel3 = struct {
     entries: [512]Entry align(0x1000) = std.mem.zeroes([512]Entry),
+
+    pub fn entryGiantFrame(self: *volatile @This(), vaddr: addr.Virt) *volatile Entry {
+        return &self.entries[vaddr.toParts().level3];
+    }
+
+    pub fn entryHugeFrame(self: *volatile @This(), vaddr: addr.Virt) Error!*volatile Entry {
+        const next = (try nextLevel(true, &self.entries, vaddr.toParts().level3)).toHhdm().toPtr(*volatile PageTableLevel2);
+        return next.entryHugeFrame(vaddr);
+    }
+
+    pub fn entryFrame(self: *volatile @This(), vaddr: addr.Virt) Error!*volatile Entry {
+        const next = (try nextLevel(true, &self.entries, vaddr.toParts().level3)).toHhdm().toPtr(*volatile PageTableLevel2);
+        return next.entryFrame(vaddr);
+    }
 
     pub fn mapGiantFrame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
         const entry = Entry.fromParts(true, false, rights, paddr, flags);
@@ -530,6 +559,15 @@ pub const PageTableLevel3 = struct {
 pub const PageTableLevel2 = struct {
     entries: [512]Entry align(0x1000) = std.mem.zeroes([512]Entry),
 
+    pub fn entryHugeFrame(self: *volatile @This(), vaddr: addr.Virt) *volatile Entry {
+        return &self.entries[vaddr.toParts().level2];
+    }
+
+    pub fn entryFrame(self: *volatile @This(), vaddr: addr.Virt) Error!*volatile Entry {
+        const next = (try nextLevel(true, &self.entries, vaddr.toParts().level2)).toHhdm().toPtr(*volatile PageTableLevel1);
+        return next.entryFrame(vaddr);
+    }
+
     pub fn mapHugeFrame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
         const entry = Entry.fromParts(true, false, rights, paddr, flags);
         volat(&self.entries[vaddr.toParts().level2]).* = entry;
@@ -579,6 +617,10 @@ pub const PageTableLevel2 = struct {
 /// a `PageTableLevel2` points to multiple of these
 pub const PageTableLevel1 = struct {
     entries: [512]Entry align(0x1000) = std.mem.zeroes([512]Entry),
+
+    pub fn entryFrame(self: *volatile @This(), vaddr: addr.Virt) *volatile Entry {
+        return &self.entries[vaddr.toParts().level1];
+    }
 
     pub fn mapFrame(self: *volatile @This(), paddr: addr.Phys, vaddr: addr.Virt, rights: abi.sys.Rights, flags: abi.sys.MapFlags) void {
         const entry = Entry.fromParts(false, true, rights, paddr, flags);
