@@ -46,22 +46,6 @@ pub fn init() !void {
     const page = pmem.allocChunk(.@"4KiB") orelse return error.OutOfMemory;
     readonly_zero_page.store(page.toParts().page, .release);
 
-    const vmem = RefCntHandle(VmemObject).init(try VmemObject.init());
-    const frame = RefCntHandle(FrameObject).init(try FrameObject.init(0x8000));
-    frame.clone();
-    try vmem.ptr.map(frame, 1, addr.Virt.fromInt(0x1000), 6, .{
-        .readable = true,
-        .writable = true,
-        .executable = true,
-    });
-    try vmem.ptr.unmap(addr.Virt.fromInt(0x2000), 1);
-    const a = try frame.ptr.page_hit(4);
-    const b = try frame.ptr.page_hit(4);
-    std.debug.assert(a == b);
-    std.debug.assert(a != 0);
-    frame.deinit();
-    vmem.deinit();
-
     // push the null capability
     _ = pushCapability(.{});
 
@@ -73,7 +57,11 @@ pub fn init() !void {
     debugType(@TypeOf(s));
     debugType(Capability);
     debugType(GenericObject);
+    debugType(ProcessObject);
+    debugType(ThreadObject);
     debugType(FrameObject);
+    debugType(VmemObject);
+    debugType(VmemObject.Mapping);
     // debugType(Object);
     // debugType(Memory);
     // debugType(Frame);
@@ -448,19 +436,38 @@ pub const FrameObject = struct {
         slab_allocator.allocator().destroy(self);
     }
 
-    pub fn page_hit(self: *@This(), idx: u32) !u32 {
+    pub fn page_hit(self: *@This(), idx: u32, is_write: bool) !u32 {
         self.lock.lock();
         defer self.lock.unlock();
 
         std.debug.assert(idx < self.pages.len);
+        const page = &self.pages[idx];
 
-        if (self.pages[idx] != 0)
-            return self.pages[idx];
+        // const readonly_zero_page_now = readonly_zero_page.load(.monotonic);
+        _ = is_write;
 
-        const new_page = pmem.allocChunk(.@"4KiB") orelse return error.OutOfMemory;
-        self.pages[idx] = new_page.toParts().page;
+        // TODO: (page.* == readonly_zero_page_now or page.* == 0) and is_write
+        if (page.* == 0) {
+            // writing to a lazy allocated zeroed page
+            // => allocate a new exclusive page and set it be the mapping
+            // FIXME: modify existing mappings
 
-        return new_page.toParts().page;
+            const new_page = pmem.allocChunk(.@"4KiB") orelse return error.OutOfMemory;
+            page.* = new_page.toParts().page;
+            return page.*;
+        } else {
+            // already mapped AND write to a page that isnt readonly_zero_page or read from any page
+            // => use the existing page
+            return page.*;
+        }
+
+        // else { // page.* == 0
+        //     // not mapped and isnt write
+        //     // => use the shared readonly zero page
+
+        //     page.* = readonly_zero_page_now;
+        //     return page.*;
+        // }
     }
 };
 
@@ -472,26 +479,46 @@ pub const VmemObject = struct {
     cr3: u32,
     mappings: std.ArrayList(Mapping),
 
-    const Mapping = packed struct {
+    const Mapping = struct {
         /// refcounted
         frame: RefCntHandle(FrameObject),
         /// page offset within the Frame object
         frame_first_page: u32,
-        /// mapping flags
-        rights: abi.sys.Rights,
-        _: u4 = 0,
-        /// virtual address destination of the mapping
-        /// `mappings` is sorted by this
-        page: u52,
         /// number of bytes (rounded up to pages) mapped
         pages: u32,
+        target: packed struct {
+            /// mapping flags
+            rights: abi.sys.Rights,
+            _: u4 = 0,
+            /// virtual address destination of the mapping
+            /// `mappings` is sorted by this
+            page: u52,
+        },
+
+        fn init(
+            frame: RefCntHandle(FrameObject),
+            frame_first_page: u32,
+            vaddr: addr.Virt,
+            pages: u32,
+            rights: abi.sys.Rights,
+        ) @This() {
+            return .{
+                .frame = frame,
+                .frame_first_page = frame_first_page,
+                .pages = pages,
+                .target = .{
+                    .rights = rights,
+                    .page = @truncate(vaddr.raw >> 12),
+                },
+            };
+        }
 
         fn setVaddr(self: *@This(), vaddr: addr.Virt) void {
-            self.page = @truncate(vaddr.raw >> 12);
+            self.target.page = @truncate(vaddr.raw >> 12);
         }
 
         fn getVaddr(self: *const @This()) addr.Virt {
-            return addr.Virt.fromInt(self.page << 12);
+            return addr.Virt.fromInt(self.target.page << 12);
         }
 
         /// this is a `any(self AND other)`
@@ -506,38 +533,6 @@ pub const VmemObject = struct {
             if (b_end <= a_beg)
                 return false;
             return true;
-        }
-
-        /// this is a `self = self AND !other` operation
-        fn cut(self: *@This(), vaddr: addr.Virt, pages: u32) void {
-            const a_beg: usize = self.getVaddr().raw;
-            const a_end: usize = self.getVaddr().raw + self.pages * 0x1000;
-            const b_beg: usize = vaddr.raw;
-            const b_end: usize = vaddr.raw + pages * 0x1000;
-
-            // case 0: no overlaps
-            if (a_end <= b_beg or b_end <= a_beg) return;
-
-            if (b_beg <= a_beg and b_end <= a_end) {
-                // case 1:
-                // b: |---------|
-                // a:      |=====-----|
-
-                self.setVaddr(addr.Virt.fromInt(b_end));
-                self.pages -= @intCast((b_end - a_beg) / 0x1000);
-            } else if (a_beg >= b_beg and a_end <= a_end) {
-                // case 2:
-                // b: |---------------------|
-                // a:      |==========|
-
-                self.pages = 0;
-            } else if (b_beg >= a_beg and b_end >= a_end) {
-                // case 3:
-                // b:            |---------|
-                // a:      |-----=====|
-
-                self.pages -= @intCast((a_end - b_beg) / 0x1000);
-            }
         }
 
         fn isEmpty(self: *const @This()) bool {
@@ -568,6 +563,20 @@ pub const VmemObject = struct {
         slab_allocator.allocator().destroy(self);
     }
 
+    pub fn switchTo(self: *@This()) !void {
+        if (self.cr3 == 0) {
+            @branchHint(.cold);
+
+            const new_cr3 = try Ref(Vmem).alloc(null);
+            self.cr3 = new_cr3.paddr.toParts().page;
+        }
+
+        const vmem = Ref(Vmem){ .paddr = addr.Phys.fromParts(
+            .{ .page = self.cr3 },
+        ) };
+        Vmem.switchTo(vmem);
+    }
+
     pub fn map(
         self: *@This(),
         frame: RefCntHandle(FrameObject),
@@ -591,13 +600,13 @@ pub const VmemObject = struct {
                 return error.OutOfBounds;
         }
 
-        const mapping = Mapping{
-            .frame = frame,
-            .frame_first_page = frame_first_page,
-            .rights = rights,
-            .page = @truncate(vaddr.raw >> 12),
-            .pages = pages,
-        };
+        const mapping = Mapping.init(
+            frame,
+            frame_first_page,
+            vaddr,
+            pages,
+            rights,
+        );
 
         self.lock.lock();
         defer self.lock.unlock();
@@ -626,21 +635,76 @@ pub const VmemObject = struct {
         self.lock.lock();
         defer self.lock.unlock();
 
-        const idx = self.find(vaddr) orelse return;
+        var idx = self.find(vaddr) orelse return;
+        log.info("found idx={}", .{idx});
 
         while (true) {
             if (idx >= self.mappings.items.len)
                 break;
-
             const mapping = &self.mappings.items[idx];
 
-            if (!mapping.overlaps(vaddr, pages))
-                break;
+            // cut the mapping into 0, 1 or 2 mappings
 
-            mapping.cut(vaddr, pages);
-            if (mapping.isEmpty()) {
+            const a_beg: usize = mapping.getVaddr().raw;
+            const a_end: usize = mapping.getVaddr().raw + mapping.pages * 0x1000;
+            const b_beg: usize = vaddr.raw;
+            const b_end: usize = vaddr.raw + pages * 0x1000;
+
+            if (a_end <= b_beg or b_end <= a_beg) {
+                // case 0: no overlaps
+
+                break;
+            } else if (b_beg <= a_beg and b_end <= a_end) {
+                // case 1:
+                // b: |---------|
+                // a:      |=====-----|
+
+                const shift: u32 = @intCast((b_end - a_beg) / 0x1000);
+                mapping.setVaddr(addr.Virt.fromInt(b_end));
+                mapping.pages -= shift;
+                mapping.frame_first_page += shift;
+                break;
+            } else if (a_beg >= b_beg and a_end <= a_end) {
+                // case 2:
+                // b: |---------------------|
+                // a:      |==========|
+
+                mapping.pages = 0;
+            } else if (b_beg >= a_beg and b_end >= a_end) {
+                // case 3:
+                // b:            |---------|
+                // a:      |-----=====|
+
+                const trunc: u32 = @intCast((a_end - b_beg) / 0x1000);
+                mapping.pages -= trunc;
+            } else {
+                std.debug.assert(a_beg < b_beg);
+                std.debug.assert(a_end > b_end);
+                // case 4:
+                // b:      |----------|
+                // a: |----============-----|
+                // cases 1,2,3 already cover equal start/end bounds
+
+                mapping.frame.clone();
+                var clone = mapping.*;
+
+                const trunc: u32 = @intCast((a_end - b_beg) / 0x1000);
+                mapping.pages -= trunc;
+
+                const shift: u32 = @intCast((b_end - a_beg) / 0x1000);
+                clone.setVaddr(addr.Virt.fromInt(b_end));
+                clone.pages -= shift;
+                clone.frame_first_page += shift;
+
+                _ = try self.mappings.insert(idx + 1, clone);
+                break;
+            }
+
+            if (mapping.pages == 0) {
                 mapping.frame.deinit();
                 _ = self.mappings.orderedRemove(idx); // TODO: batch remove
+            } else {
+                idx += 1;
             }
         }
 
@@ -668,14 +732,29 @@ pub const VmemObject = struct {
         caused_by: arch.FaultCause,
         vaddr_unaligned: addr.Virt,
     ) !void {
-        const vaddr: addr.Virt = addr.Virt.fromInt(std.mem.alignBackward(usize, vaddr_unaligned, 0x1000));
+        const vaddr: addr.Virt = addr.Virt.fromInt(std.mem.alignBackward(
+            usize,
+            vaddr_unaligned.raw,
+            0x1000,
+        ));
 
         self.lock.lock();
         defer self.lock.unlock();
 
+        for (self.mappings.items) |mapping| {
+            const va = mapping.getVaddr().raw;
+
+            log.info("mapping [ 0x{x:0>16}..0x{x:0>16} ]", .{
+                va,
+                va + 0x1000 * mapping.pages,
+            });
+        }
+
         // check if it was user error
         const idx = self.find(vaddr) orelse
             return error.NotMapped;
+
+        log.info("found idx={}", .{idx});
 
         const mapping = self.mappings.items[idx];
 
@@ -686,22 +765,22 @@ pub const VmemObject = struct {
         // check if it was user error
         switch (caused_by) {
             .read => {
-                if (!mapping.rights.readable)
+                if (!mapping.target.rights.readable)
                     return error.ReadFault;
             },
             .write => {
-                if (!mapping.rights.readable)
+                if (!mapping.target.rights.readable)
                     return error.WriteFault;
             },
             .exec => {
-                if (!mapping.rights.readable)
+                if (!mapping.target.rights.readable)
                     return error.ExecFault;
             },
         }
 
         // check if it is lazy mapping
 
-        const page_offs = (mapping.getVaddr().raw - vaddr.raw) / 0x1000;
+        const page_offs: u32 = @intCast((vaddr.raw - mapping.getVaddr().raw) / 0x1000);
         std.debug.assert(page_offs < mapping.pages);
         std.debug.assert(self.cr3 != 0);
 
@@ -713,25 +792,42 @@ pub const VmemObject = struct {
 
         switch (caused_by) {
             .read, .exec => {
-                // shouldn't happen
-                unreachable;
+                // was mapped but only now accessed using a read/exec
+                std.debug.assert(entry.present == 0);
+
+                const wanted_page_index = try mapping.frame.ptr.page_hit(
+                    mapping.frame_first_page + page_offs,
+                    false,
+                );
+                std.debug.assert(entry.page_index != wanted_page_index); // mapping error from a previous fault
+
+                try vmem.mapFrame(
+                    addr.Phys.fromParts(.{ .page = wanted_page_index }),
+                    vaddr,
+                    mapping.target.rights,
+                    .{},
+                );
+
+                return;
             },
             .write => {
-                const current_page_index = entry.*.page_index;
-                if (current_page_index == readonly_zero_page.load(.monotonic)) {
-                    // a read from a lazy
-                    const wanted_page_index = try mapping.frame.page_hit(mapping.frame_first_page + page_offs);
-                    std.debug.assert(current_page_index != wanted_page_index); // mapping error from a previous fault
+                // was mapped but only now accessed using a write
 
-                    try vmem.mapFrame(
-                        addr.Phys.fromParts(.{ .page = wanted_page_index }),
-                        vaddr,
-                        mapping.rights,
-                        .{},
-                    );
+                // a read from a lazy
+                const wanted_page_index = try mapping.frame.ptr.page_hit(
+                    mapping.frame_first_page + page_offs,
+                    true,
+                );
+                std.debug.assert(entry.page_index != wanted_page_index); // mapping error from a previous fault
 
-                    return;
-                }
+                try vmem.mapFrame(
+                    addr.Phys.fromParts(.{ .page = wanted_page_index }),
+                    vaddr,
+                    mapping.target.rights,
+                    .{},
+                );
+
+                return;
 
                 // TODO: copy on write maps
             },
@@ -757,13 +853,15 @@ pub const VmemObject = struct {
     }
 
     fn find(self: *@This(), vaddr: addr.Virt) ?usize {
+        log.info("finding=0x{x}", .{vaddr.raw});
+
         const idx = std.sort.partitionPoint(
             Mapping,
             self.mappings.items,
             vaddr,
             struct {
                 fn pred(target_vaddr: addr.Virt, val: Mapping) bool {
-                    return val.getVaddr().raw < target_vaddr.raw;
+                    return (val.getVaddr().raw + 0x1000 * val.pages) < target_vaddr.raw;
                 }
             }.pred,
         );
@@ -949,4 +1047,44 @@ pub const Object = struct {
 
 fn debugType(comptime T: type) void {
     std.log.debug("{s}: size={} align={}", .{ @typeName(T), @sizeOf(T), @alignOf(T) });
+}
+
+test "new VmemObject and FrameObject" {
+    const vmem = RefCntHandle(VmemObject).init(try VmemObject.init());
+    const frame = RefCntHandle(FrameObject).init(try FrameObject.init(0x8000));
+    frame.clone();
+    try vmem.ptr.map(frame, 1, addr.Virt.fromInt(0x1000), 6, .{
+        .readable = true,
+        .writable = true,
+        .executable = true,
+    });
+    try vmem.ptr.switchTo();
+    log.info("fault 0x1000", .{});
+    vmem.ptr.pageFault(
+        .write,
+        addr.Virt.fromInt(0x1000),
+    ) catch unreachable;
+    log.info("fault 0x4000", .{});
+    vmem.ptr.pageFault(
+        .write,
+        addr.Virt.fromInt(0x4000),
+    ) catch unreachable;
+    log.info("unmap", .{});
+    try vmem.ptr.unmap(addr.Virt.fromInt(0x2000), 1);
+    log.info("fault 0x2000", .{});
+    std.debug.assert(error.NotMapped == vmem.ptr.pageFault(
+        .write,
+        addr.Virt.fromInt(0x2000),
+    ));
+    log.info("fault 0x5000", .{});
+    vmem.ptr.pageFault(
+        .write,
+        addr.Virt.fromInt(0x5000),
+    ) catch unreachable;
+    const a = try frame.ptr.page_hit(4, true);
+    const b = try frame.ptr.page_hit(4, false);
+    std.debug.assert(a == b);
+    std.debug.assert(a != 0);
+    frame.deinit();
+    vmem.deinit();
 }
