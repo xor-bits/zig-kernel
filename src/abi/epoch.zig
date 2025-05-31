@@ -195,6 +195,30 @@ pub const RefCnt = struct {
     }
 };
 
+pub fn RefCntHandle(comptime T: type) type {
+    // a refcnt field is needed
+    std.debug.assert(@FieldType(T, "refcnt") == RefCnt);
+    // a deinit function is needed
+    std.debug.assert(@hasDecl(T, "deinit"));
+
+    return packed struct {
+        ptr: *T,
+
+        pub fn init(p: *T) @This() {
+            return .{ .ptr = p };
+        }
+
+        pub fn clone(self: *const @This()) void {
+            self.ptr.refcnt.inc();
+        }
+
+        pub fn deinit(self: @This()) void {
+            if (!self.ptr.refcnt.dec()) return;
+            self.ptr.deinit();
+        }
+    };
+}
+
 //
 
 var global_epoch: CachePadded(std.atomic.Value(usize)) = .{ .val = .init(0) };

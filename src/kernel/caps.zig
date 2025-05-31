@@ -16,6 +16,8 @@ const caps_x86 = @import("caps/x86.zig");
 const conf = abi.conf;
 const log = std.log.scoped(.caps);
 const Error = abi.sys.Error;
+const RefCnt = abi.epoch.RefCnt;
+const RefCntHandle = abi.epoch.RefCntHandle;
 
 //
 
@@ -44,12 +46,21 @@ pub fn init() !void {
     const page = pmem.allocChunk(.@"4KiB") orelse return error.OutOfMemory;
     readonly_zero_page.store(page.toParts().page, .release);
 
-    const frame = try FrameObject.init(0x8000);
-    const a = try frame.page_hit(4);
-    const b = try frame.page_hit(4);
+    const vmem = RefCntHandle(VmemObject).init(try VmemObject.init());
+    const frame = RefCntHandle(FrameObject).init(try FrameObject.init(0x8000));
+    frame.clone();
+    try vmem.ptr.map(frame, 1, addr.Virt.fromInt(0x1000), 6, .{
+        .readable = true,
+        .writable = true,
+        .executable = true,
+    });
+    try vmem.ptr.unmap(addr.Virt.fromInt(0x2000), 1);
+    const a = try frame.ptr.page_hit(4);
+    const b = try frame.ptr.page_hit(4);
     std.debug.assert(a == b);
     std.debug.assert(a != 0);
     frame.deinit();
+    vmem.deinit();
 
     // push the null capability
     _ = pushCapability(.{});
@@ -348,6 +359,56 @@ pub const GenericObject = struct {
 //     pages: [2:0]u32, //
 // };
 
+pub const ProcessObject = struct {
+    // FIXME: prevent reordering so that the offset would be same on all objects
+    refcnt: abi.epoch.RefCnt = .{},
+
+    vmem: RefCntHandle(VmemObject),
+
+    pub fn init(from_vmem: RefCntHandle(VmemObject)) !*@This() {
+        const obj: *@This() = try slab_allocator.allocator().create(@This());
+
+        obj.* = .{
+            .vmem = from_vmem,
+        };
+        obj.lock.unlock();
+
+        return obj;
+    }
+
+    pub fn deinit(self: *@This()) void {
+        self.proc.deinit();
+
+        slab_allocator.allocator().destroy(self);
+    }
+};
+
+pub const ThreadObject = struct {
+    // FIXME: prevent reordering so that the offset would be same on all objects
+    refcnt: abi.epoch.RefCnt = .{},
+
+    proc: RefCntHandle(ProcessObject),
+
+    trap: arch.SyscallRegs = .{},
+
+    pub fn init(from_proc: RefCntHandle(ProcessObject)) !*@This() {
+        const obj: *@This() = try slab_allocator.allocator().create(@This());
+
+        obj.* = .{
+            .proc = from_proc,
+        };
+        obj.lock.unlock();
+
+        return obj;
+    }
+
+    pub fn deinit(self: *@This()) void {
+        self.proc.deinit();
+
+        slab_allocator.allocator().destroy(self);
+    }
+};
+
 pub const FrameObject = struct {
     // FIXME: prevent reordering so that the offset would be same on all objects
     refcnt: abi.epoch.RefCnt = .{},
@@ -373,6 +434,20 @@ pub const FrameObject = struct {
         return obj;
     }
 
+    pub fn deinit(self: *@This()) void {
+        for (self.pages) |page| {
+            if (page == 0) continue;
+
+            pmem.deallocChunk(
+                addr.Phys.fromParts(.{ .page = page }),
+                .@"4KiB",
+            );
+        }
+
+        slab_allocator.allocator().free(self.pages);
+        slab_allocator.allocator().destroy(self);
+    }
+
     pub fn page_hit(self: *@This(), idx: u32) !u32 {
         self.lock.lock();
         defer self.lock.unlock();
@@ -387,22 +462,6 @@ pub const FrameObject = struct {
 
         return new_page.toParts().page;
     }
-
-    pub fn deinit(self: *@This()) void {
-        if (!self.refcnt.dec()) return;
-
-        for (self.pages) |page| {
-            if (page == 0) continue;
-
-            pmem.deallocChunk(
-                addr.Phys.fromParts(.{ .page = page }),
-                .@"4KiB",
-            );
-        }
-
-        slab_allocator.allocator().free(self.pages);
-        slab_allocator.allocator().destroy(self);
-    }
 };
 
 pub const VmemObject = struct {
@@ -415,7 +474,7 @@ pub const VmemObject = struct {
 
     const Mapping = packed struct {
         /// refcounted
-        frame: *FrameObject,
+        frame: RefCntHandle(FrameObject),
         /// page offset within the Frame object
         frame_first_page: u32,
         /// mapping flags
@@ -427,11 +486,16 @@ pub const VmemObject = struct {
         /// number of bytes (rounded up to pages) mapped
         pages: u32,
 
-        fn getVaddr(self: *@This()) addr.Virt {
+        fn setVaddr(self: *@This(), vaddr: addr.Virt) void {
+            self.page = @truncate(vaddr.raw >> 12);
+        }
+
+        fn getVaddr(self: *const @This()) addr.Virt {
             return addr.Virt.fromInt(self.page << 12);
         }
 
-        fn overlaps(self: *@This(), vaddr: addr.Virt, pages: u32) bool {
+        /// this is a `any(self AND other)`
+        fn overlaps(self: *const @This(), vaddr: addr.Virt, pages: u32) bool {
             const a_beg: usize = self.getVaddr().raw;
             const a_end: usize = self.getVaddr().raw + self.pages * 0x1000;
             const b_beg: usize = vaddr.raw;
@@ -443,11 +507,47 @@ pub const VmemObject = struct {
                 return false;
             return true;
         }
+
+        /// this is a `self = self AND !other` operation
+        fn cut(self: *@This(), vaddr: addr.Virt, pages: u32) void {
+            const a_beg: usize = self.getVaddr().raw;
+            const a_end: usize = self.getVaddr().raw + self.pages * 0x1000;
+            const b_beg: usize = vaddr.raw;
+            const b_end: usize = vaddr.raw + pages * 0x1000;
+
+            // case 0: no overlaps
+            if (a_end <= b_beg or b_end <= a_beg) return;
+
+            if (b_beg <= a_beg and b_end <= a_end) {
+                // case 1:
+                // b: |---------|
+                // a:      |=====-----|
+
+                self.setVaddr(addr.Virt.fromInt(b_end));
+                self.pages -= @intCast((b_end - a_beg) / 0x1000);
+            } else if (a_beg >= b_beg and a_end <= a_end) {
+                // case 2:
+                // b: |---------------------|
+                // a:      |==========|
+
+                self.pages = 0;
+            } else if (b_beg >= a_beg and b_end >= a_end) {
+                // case 3:
+                // b:            |---------|
+                // a:      |-----=====|
+
+                self.pages -= @intCast((a_end - b_beg) / 0x1000);
+            }
+        }
+
+        fn isEmpty(self: *const @This()) bool {
+            return self.pages == 0;
+        }
     };
 
     pub fn init() !*@This() {
         const obj: *@This() = try slab_allocator.allocator().create(@This());
-        const mappings = std.ArrayList(Mapping).init(slab_allocator);
+        const mappings = std.ArrayList(Mapping).init(slab_allocator.allocator());
 
         obj.* = .{
             .lock = .newLocked(),
@@ -459,9 +559,18 @@ pub const VmemObject = struct {
         return obj;
     }
 
+    pub fn deinit(self: *@This()) void {
+        for (self.mappings.items) |mapping| {
+            mapping.frame.deinit();
+        }
+
+        self.mappings.deinit();
+        slab_allocator.allocator().destroy(self);
+    }
+
     pub fn map(
         self: *@This(),
-        frame: *FrameObject,
+        frame: RefCntHandle(FrameObject),
         frame_first_page: u32,
         vaddr: addr.Virt,
         pages: u32,
@@ -469,14 +578,16 @@ pub const VmemObject = struct {
     ) !void {
         errdefer frame.deinit();
 
-        if (pages == 0) return;
+        if (pages == 0 or vaddr.raw == 0)
+            return error.InvalidArguments;
+
         std.debug.assert(vaddr.toParts().offset == 0);
-        try self.assert_userspace(vaddr, pages);
+        try @This().assert_userspace(vaddr, pages);
 
         {
-            frame.lock.lock();
-            defer frame.lock.unlock();
-            if (pages + frame_first_page >= frame.pages.len)
+            frame.ptr.lock.lock();
+            defer frame.ptr.lock.unlock();
+            if (pages + frame_first_page >= frame.ptr.pages.len)
                 return error.OutOfBounds;
         }
 
@@ -484,7 +595,7 @@ pub const VmemObject = struct {
             .frame = frame,
             .frame_first_page = frame_first_page,
             .rights = rights,
-            .page = vaddr.raw >> 12,
+            .page = @truncate(vaddr.raw >> 12),
             .pages = pages,
         };
 
@@ -499,18 +610,18 @@ pub const VmemObject = struct {
                 old_mapping.* = mapping;
             } else {
                 // insert new mapping
-                self.mappings.insert(idx, mapping);
+                try self.mappings.insert(idx, mapping);
             }
         } else {
             // push new mapping
-            self.mappings.append(mapping);
+            try self.mappings.append(mapping);
         }
     }
 
-    pub fn unmap(self: *@This(), vaddr: addr.Virt, pages: u32) void {
+    pub fn unmap(self: *@This(), vaddr: addr.Virt, pages: u32) !void {
         if (pages == 0) return;
         std.debug.assert(vaddr.toParts().offset == 0);
-        try self.assert_userspace(vaddr, pages);
+        try @This().assert_userspace(vaddr, pages);
 
         self.lock.lock();
         defer self.lock.unlock();
@@ -521,13 +632,16 @@ pub const VmemObject = struct {
             if (idx >= self.mappings.items.len)
                 break;
 
-            const mapping = self.mappings.items[idx];
+            const mapping = &self.mappings.items[idx];
 
             if (!mapping.overlaps(vaddr, pages))
                 break;
 
-            mapping.frame.deinit();
-            self.mappings.orderedRemove(idx); // TODO: batch remove
+            mapping.cut(vaddr, pages);
+            if (mapping.isEmpty()) {
+                mapping.frame.deinit();
+                _ = self.mappings.orderedRemove(idx); // TODO: batch remove
+            }
         }
 
         // FIXME: track CPUs using this page map
@@ -549,7 +663,7 @@ pub const VmemObject = struct {
         }
     }
 
-    pub fn page_fault(
+    pub fn pageFault(
         self: *@This(),
         caused_by: arch.FaultCause,
         vaddr_unaligned: addr.Virt,
@@ -587,37 +701,51 @@ pub const VmemObject = struct {
 
         // check if it is lazy mapping
 
+        const page_offs = (mapping.getVaddr().raw - vaddr.raw) / 0x1000;
+        std.debug.assert(page_offs < mapping.pages);
         std.debug.assert(self.cr3 != 0);
 
         const vmem: *volatile Vmem = addr.Phys.fromParts(.{ .page = self.cr3 })
             .toHhdm()
             .toPtr(*volatile Vmem);
 
-        try vmem.entryFrame(vaddr);
+        const entry = (try vmem.entryFrame(vaddr)).*;
 
-        const page_offs = (mapping.getVaddr().raw - vaddr.raw) / 0x1000;
-        std.debug.assert(page_offs < mapping.pages);
-        const real_page = try mapping.frame.page_hit(mapping.frame_first_page + page_offs);
+        switch (caused_by) {
+            .read, .exec => {
+                // shouldn't happen
+                unreachable;
+            },
+            .write => {
+                const current_page_index = entry.*.page_index;
+                if (current_page_index == readonly_zero_page.load(.monotonic)) {
+                    // a read from a lazy
+                    const wanted_page_index = try mapping.frame.page_hit(mapping.frame_first_page + page_offs);
+                    std.debug.assert(current_page_index != wanted_page_index); // mapping error from a previous fault
+
+                    try vmem.mapFrame(
+                        addr.Phys.fromParts(.{ .page = wanted_page_index }),
+                        vaddr,
+                        mapping.rights,
+                        .{},
+                    );
+
+                    return;
+                }
+
+                // TODO: copy on write maps
+            },
+        }
 
         // mapping has all rights and is present, the page fault should not have happened
         unreachable;
     }
 
-    pub fn deinit(self: *@This()) void {
-        if (!self.refcnt.dec()) return;
-
-        for (self.mappings.items) |mapping| {
-            mapping.frame.deinit();
-        }
-
-        self.mappings.deinit();
-        slab_allocator.allocator().destroy(self);
-    }
-
     fn assert_userspace(vaddr: addr.Virt, pages: u32) !void {
         const upper_bound: usize = std.math.add(
             usize,
-            vaddr.raw + std.math.mul(
+            vaddr.raw,
+            std.math.mul(
                 usize,
                 pages,
                 0x1000,
@@ -631,11 +759,11 @@ pub const VmemObject = struct {
     fn find(self: *@This(), vaddr: addr.Virt) ?usize {
         const idx = std.sort.partitionPoint(
             Mapping,
-            self.mappings,
+            self.mappings.items,
             vaddr,
             struct {
                 fn pred(target_vaddr: addr.Virt, val: Mapping) bool {
-                    return val.vaddr.raw < target_vaddr.raw;
+                    return val.getVaddr().raw < target_vaddr.raw;
                 }
             }.pred,
         );
@@ -648,6 +776,8 @@ pub const VmemObject = struct {
 };
 
 var slab_allocator = abi.mem.SlabAllocator.init(pmem.page_allocator);
+/// written once by the BSP with .release before any other CPU runs
+/// only read after that with .monotonic
 var readonly_zero_page: std.atomic.Value(u32) = .init(0);
 
 pub const Object = struct {
