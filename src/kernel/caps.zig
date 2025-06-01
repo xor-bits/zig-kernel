@@ -92,18 +92,24 @@ pub fn pushCapability(cap: Capability) !u32 {
 }
 
 // FIXME: process local capability arrays, now all processes can use all capabilities
-pub fn getCapability(id: u32, current: *Process) Error!Capability {
+pub fn getCapability(handle: u32, current: *Process) Error!Capability {
     _ = current;
 
-    if (id == 0) return Error.InvalidCapability;
+    if (handle == 0) return Error.InvalidCapability;
 
     const caps = capabilityArray();
-    if (id >= caps.len) return Error.InvalidCapability;
+    if (handle >= caps.len) return Error.InvalidCapability;
 
-    const cap = &caps[id];
+    const cap = &caps[handle];
 
-    const handle = cap.load() orelse return Error.InvalidCapability;
-    return handle;
+    return cap.load() orelse return Error.InvalidCapability;
+}
+
+// FIXME: process local capability arrays, now all processes can use all capabilities
+pub fn getObject(comptime T: type, handle: u32, current: *Process) Error!*T {
+    const cap = try getCapability(handle, current);
+    errdefer cap.deinit();
+    return cap.as(T) orelse return Error.InvalidCapability;
 }
 
 //
@@ -297,10 +303,11 @@ pub const Capability = struct {
 
     pub fn deinit(self: @This()) void {
         switch (self.type) {
-            .frame => &self.as(Frame).?.deinit(),
-            .vmem => &self.as(Vmem).?.deinit(),
-            .process => &self.as(Process).?.deinit(),
-            .thread => &self.as(Thread).?.deinit(),
+            .frame => self.as(Frame).?.deinit(),
+            .vmem => self.as(Vmem).?.deinit(),
+            .process => self.as(Process).?.deinit(),
+            .thread => self.as(Thread).?.deinit(),
+            else => unreachable,
         }
     }
 
@@ -396,11 +403,12 @@ pub const Frame = struct {
         slab_allocator.allocator().destroy(self);
     }
 
-    pub fn clone(self: *@This()) void {
+    pub fn clone(self: *@This()) *@This() {
         if (conf.LOG_OBJ_CALLS)
             log.info("Frame.clone", .{});
 
         self.refcnt.inc();
+        return self;
     }
 
     pub fn write(self: *@This(), offset_bytes: usize, source: []const volatile u8) Error!void {
@@ -622,7 +630,7 @@ pub const Vmem = struct {
         }
     };
 
-    pub fn init() !*@This() {
+    pub fn init() Error!*@This() {
         if (conf.LOG_OBJ_CALLS)
             log.info("Vmem.init", .{});
 
@@ -653,11 +661,12 @@ pub const Vmem = struct {
         slab_allocator.allocator().destroy(self);
     }
 
-    pub fn clone(self: *@This()) void {
+    pub fn clone(self: *@This()) *@This() {
         if (conf.LOG_OBJ_CALLS)
             log.info("Vmem.clone", .{});
 
         self.refcnt.inc();
+        return self;
     }
 
     pub fn switchTo(self: *@This()) void {
@@ -667,7 +676,7 @@ pub const Vmem = struct {
         ));
     }
 
-    pub fn start(self: *@This()) !void {
+    pub fn start(self: *@This()) Error!void {
         if (self.cr3 == 0) {
             @branchHint(.cold);
 
@@ -684,7 +693,7 @@ pub const Vmem = struct {
         vaddr: addr.Virt,
         pages: u32,
         rights: abi.sys.Rights,
-    ) !void {
+    ) Error!void {
         errdefer frame.deinit();
 
         if (conf.LOG_OBJ_CALLS)
@@ -697,7 +706,7 @@ pub const Vmem = struct {
             });
 
         if (pages == 0 or vaddr.raw == 0)
-            return error.InvalidArguments;
+            return Error.InvalidArgument;
 
         std.debug.assert(vaddr.toParts().offset == 0);
         try @This().assert_userspace(vaddr, pages);
@@ -706,7 +715,7 @@ pub const Vmem = struct {
             frame.lock.lock();
             defer frame.lock.unlock();
             if (pages + frame_first_page > frame.pages.len)
-                return error.OutOfBounds;
+                return Error.OutOfBounds;
         }
 
         const mapping = Mapping.init(
@@ -736,7 +745,7 @@ pub const Vmem = struct {
         }
     }
 
-    pub fn unmap(self: *@This(), vaddr: addr.Virt, pages: u32) !void {
+    pub fn unmap(self: *@This(), vaddr: addr.Virt, pages: u32) Error!void {
         if (conf.LOG_OBJ_CALLS)
             log.info("Vmem.unmap vaddr=0x{x} pages={}", .{ vaddr.raw, pages });
 
@@ -796,8 +805,8 @@ pub const Vmem = struct {
                 // a: |----============-----|
                 // cases 1,2,3 already cover equal start/end bounds
 
-                mapping.frame.clone();
                 var cloned = mapping.*;
+                cloned.frame = mapping.frame.clone();
 
                 const trunc: u32 = @intCast((a_end - b_beg) / 0x1000);
                 mapping.pages -= trunc;
@@ -842,7 +851,7 @@ pub const Vmem = struct {
         self: *@This(),
         caused_by: arch.FaultCause,
         vaddr_unaligned: addr.Virt,
-    ) !void {
+    ) Error!void {
         const vaddr: addr.Virt = addr.Virt.fromInt(std.mem.alignBackward(
             usize,
             vaddr_unaligned.raw,
@@ -862,27 +871,27 @@ pub const Vmem = struct {
 
         // check if it was user error
         const idx = self.find(vaddr) orelse
-            return error.NotMapped;
+            return Error.NotMapped;
 
         const mapping = self.mappings.items[idx];
 
         // check if it was user error
         if (!mapping.overlaps(vaddr, 1))
-            return error.NotMapped;
+            return Error.NotMapped;
 
         // check if it was user error
         switch (caused_by) {
             .read => {
                 if (!mapping.target.rights.readable)
-                    return error.ReadFault;
+                    return Error.ReadFault;
             },
             .write => {
                 if (!mapping.target.rights.readable)
-                    return error.WriteFault;
+                    return Error.WriteFault;
             },
             .exec => {
                 if (!mapping.target.rights.readable)
-                    return error.ExecFault;
+                    return Error.ExecFault;
             },
         }
 
@@ -945,7 +954,7 @@ pub const Vmem = struct {
         unreachable;
     }
 
-    fn assert_userspace(vaddr: addr.Virt, pages: u32) !void {
+    fn assert_userspace(vaddr: addr.Virt, pages: u32) Error!void {
         const upper_bound: usize = std.math.add(
             usize,
             vaddr.raw,
@@ -953,10 +962,10 @@ pub const Vmem = struct {
                 usize,
                 pages,
                 0x1000,
-            ) catch return error.OutOfBounds,
-        ) catch return error.OutOfBounds;
+            ) catch return Error.OutOfBounds,
+        ) catch return Error.OutOfBounds;
         if (upper_bound > 0x8000_0000_0000) {
-            return error.OutOfBounds;
+            return Error.OutOfBounds;
         }
     }
 
@@ -1009,11 +1018,12 @@ pub const Process = struct {
         slab_allocator.allocator().destroy(self);
     }
 
-    pub fn clone(self: *@This()) void {
+    pub fn clone(self: *@This()) *@This() {
         if (conf.LOG_OBJ_CALLS)
             log.info("Process.clone", .{});
 
         self.refcnt.inc();
+        return self;
     }
 };
 
@@ -1057,11 +1067,12 @@ pub const Thread = struct {
         slab_allocator.allocator().destroy(self);
     }
 
-    pub fn clone(self: *@This()) void {
+    pub fn clone(self: *@This()) *@This() {
         if (conf.LOG_OBJ_CALLS)
             log.info("Thread.clone", .{});
 
         self.refcnt.inc();
+        return self;
     }
 };
 
@@ -1077,8 +1088,7 @@ fn debugType(comptime T: type) void {
 test "new VmemObject and FrameObject" {
     const vmem = try Vmem.init();
     const frame = try Frame.init(0x8000);
-    frame.clone();
-    try vmem.map(frame, 1, addr.Virt.fromInt(0x1000), 6, .{
+    try vmem.map(frame.clone(), 1, addr.Virt.fromInt(0x1000), 6, .{
         .readable = true,
         .writable = true,
         .executable = true,

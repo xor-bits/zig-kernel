@@ -172,7 +172,7 @@ fn printSourceAtAddress(writer: anytype, debug_info: *std.debug.Dwarf, address: 
 
     try std.fmt.format(writer, "{s}\n", .{source_line});
 
-    const space_needed = @as(usize, @intCast(loc.column - 1));
+    const space_needed = @as(usize, @intCast(@max(loc.column, 1) - 1));
 
     try writer.writeBytesNTimes(" ", space_needed);
     try writer.writeAll("\x1B[92m^\x1B[0m\n");

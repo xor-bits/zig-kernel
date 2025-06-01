@@ -21,6 +21,7 @@ const util = @import("util.zig");
 const conf = abi.conf;
 pub const std_options = logs.std_options;
 pub const panic = logs.panic;
+const Error = abi.sys.Error;
 
 //
 
@@ -203,35 +204,42 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
         }
     }
 
+    handle_syscall(locals, thread, id, trap) catch |err| {
+        trap.syscall_id = abi.sys.encode(err);
+    };
+
+    const thread_now = locals.current_thread.?;
+    if (thread_now.status == .stopped or thread_now.status == .waiting) {
+        proc.yield(trap);
+    }
+}
+
+fn handle_syscall(
+    locals: *CpuLocalStorage,
+    thread: *caps.Thread,
+    id: abi.sys.Id,
+    trap: *arch.SyscallRegs,
+) Error!void {
+    const log = std.log.scoped(.syscall);
+
+    _ = locals;
+
     switch (id) {
         .log => {
-
             // FIXME: disable on release builds
 
             // log syscall
-            if (trap.arg1 > 0x1000) {
-                log.warn("log syscall too long", .{});
-                trap.syscall_id = abi.sys.encode(abi.sys.Error.InvalidArgument);
-                return;
-            }
+            if (trap.arg1 > 0x1000)
+                return Error.InvalidArgument;
 
-            const end = std.math.add(u64, trap.arg0, trap.arg1) catch {
-                log.warn("log syscall string outside of 64 bit range", .{});
-                trap.syscall_id = abi.sys.encode(abi.sys.Error.InvalidArgument);
-                return;
-            };
+            const end = std.math.add(u64, trap.arg0, trap.arg1) catch
+                return Error.InvalidArgument;
 
-            if (end >= 0x8000_0000_0000) {
-                log.warn("log syscall string outside of user space", .{});
-                trap.syscall_id = abi.sys.encode(abi.sys.Error.InvalidAddress);
-                return;
-            }
+            if (end >= 0x8000_0000_0000)
+                return Error.InvalidArgument;
 
-            if (trap.arg0 == 0) {
-                log.warn("log syscall string from nullptr", .{});
-                trap.syscall_id = abi.sys.encode(abi.sys.Error.InvalidAddress);
-                return;
-            }
+            if (trap.arg0 == 0)
+                return Error.InvalidArgument;
 
             const msg = @as([*]const u8, @ptrFromInt(trap.arg0))[0..trap.arg1];
 
@@ -246,13 +254,74 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
             trap.syscall_id = abi.sys.encode(0);
         },
         .kernelPanic => {
-            if (!conf.KERNEL_PANIC_SYSCALL) {
-                trap.syscall_id = abi.sys.encode(abi.sys.Error.InvalidSyscall);
-                return;
-            }
+            if (!conf.KERNEL_PANIC_SYSCALL)
+                return abi.sys.Error.InvalidSyscall;
 
             @panic("manual kernel panic");
         },
+
+        .frame_create => {
+            const size_bytes = trap.arg0;
+            const frame = try caps.Frame.init(size_bytes);
+            errdefer frame.deinit();
+
+            const handle = try caps.pushCapability(caps.Capability.init(frame));
+            trap.syscall_id = abi.sys.encode(handle);
+        },
+
+        .vmem_create => {
+            const vmem = try caps.Vmem.init();
+            errdefer vmem.deinit();
+
+            const handle = try caps.pushCapability(caps.Capability.init(vmem));
+            trap.syscall_id = abi.sys.encode(handle);
+        },
+        .vmem_self => {
+            const vmem = thread.proc.vmem.clone();
+
+            const handle = try caps.pushCapability(caps.Capability.init(vmem));
+            trap.syscall_id = abi.sys.encode(handle);
+        },
+        .vmem_map => {
+            const frame_first_page: u32 = @truncate(trap.arg2 / 0x1000);
+            const vaddr = try addr.Virt.fromUser(trap.arg3);
+            const vmem = try caps.getObject(caps.Vmem, @truncate(trap.arg0), thread.proc);
+            defer vmem.deinit();
+            const frame = try caps.getObject(caps.Frame, @truncate(trap.arg1), thread.proc);
+            // map takes ownership of the frame
+            const pages: u32 = @truncate(std.math.divCeil(usize, trap.arg4, 0x1000) catch unreachable);
+            const rights = abi.sys.Rights.fromInt(@truncate(trap.arg5));
+
+            // TODO: search, maybe
+            try vmem.map(
+                frame,
+                frame_first_page,
+                vaddr,
+                pages,
+                rights,
+            );
+
+            trap.syscall_id = abi.sys.encode(0);
+        },
+        .vmem_unmap => {
+            const pages: u32 = @truncate(trap.arg2);
+            const vaddr = try addr.Virt.fromUser(trap.arg1);
+            const vmem = try caps.getObject(caps.Vmem, @truncate(trap.arg0), thread.proc);
+            defer vmem.deinit();
+
+            try vmem.unmap(vaddr, pages);
+        },
+
+        .proc_create => {},
+        .proc_self => {},
+
+        .thread_create => {},
+        .thread_self => {},
+
+        .handle_identify => {},
+        .handle_duplicate => {},
+        .handle_close => {},
+
         .self_yield => {
             proc.yield(trap);
         },
@@ -260,11 +329,6 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
             proc.stop(thread);
         },
         else => std.debug.panic("TODO: syscall {s}", .{@tagName(id)}),
-    }
-
-    const thread_now = locals.current_thread.?;
-    if (thread_now.status == .stopped or thread_now.status == .waiting) {
-        proc.yield(trap);
     }
 }
 

@@ -23,12 +23,15 @@ pub const Id = enum(usize) {
     frame_create,
 
     vmem_create,
+    vmem_self,
     vmem_map,
     vmem_unmap,
 
     proc_create,
+    proc_self,
 
     thread_create,
+    thread_self,
 
     handle_identify,
     handle_duplicate,
@@ -146,6 +149,9 @@ pub const Error = error{
     TooManyIrqs,
     OutOfBounds,
     NotFound,
+    ReadFault,
+    WriteFault,
+    ExecFault,
 
     UnknownError,
 };
@@ -192,6 +198,9 @@ fn encodeError(err: Error) usize {
         error.TooManyIrqs => 23,
         error.OutOfBounds => 24,
         error.NotFound => 25,
+        error.ReadFault => 26,
+        error.WriteFault => 27,
+        error.ExecFault => 28,
 
         error.UnknownError => std.debug.panic("unknown error shouldn't be encoded", .{}),
     }));
@@ -228,6 +237,9 @@ pub fn decode(v: usize) Error!usize {
         23 => error.TooManyIrqs,
         24 => error.OutOfBounds,
         25 => error.NotFound,
+        26 => error.ReadFault,
+        27 => error.WriteFault,
+        28 => error.ExecFault,
 
         else => return error.UnknownError,
     };
@@ -699,6 +711,47 @@ pub fn setExtra(idx: u7, val: usize, is_cap: bool) void {
         @intFromBool(is_cap),
     }) catch unreachable;
 }
+
+pub fn frameCreate(size_bytes: usize) Error!u32 {
+    return @intCast(try syscall(.frame_create, .{size_bytes}));
+}
+
+pub fn vmemCreate() Error!u32 {
+    return @intCast(try syscall(.vmem_create, .{}));
+}
+
+pub fn vmemSelf() Error!u32 {
+    return @intCast(try syscall(.vmem_self, .{}));
+}
+
+pub fn vmemMap2(
+    vmem: u32,
+    frame: u32,
+    frame_offset: usize,
+    vaddr: usize,
+    length: usize,
+    rights: abi.sys.Rights,
+) Error!void {
+    _ = try syscall(.vmem_map, .{
+        vmem, frame, frame_offset, vaddr, length, rights.asInt(),
+    });
+}
+
+pub fn vmemUnmap2() void {}
+
+pub fn procCreate() void {}
+
+pub fn procSelf() void {}
+
+pub fn threadCreate() void {}
+
+pub fn threadSelf() void {}
+
+pub fn handleIdentify() void {}
+
+pub fn handleDuplicate() void {}
+
+pub fn handleClose() void {}
 
 pub fn yield() void {
     _ = syscall(.self_yield, .{}) catch unreachable;

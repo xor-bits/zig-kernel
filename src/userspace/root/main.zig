@@ -611,11 +611,11 @@ export fn zigMain() noreturn {
         std.debug.panic("not enough memory for a stack: {}", .{err});
     };
 
-    // asm volatile (
-    //     \\ call zigMainRealstack
-    //     :
-    //     : [sp] "{rsp}" (STACK_TOP),
-    // );
+    asm volatile (
+        \\ call zigMainRealstack
+        :
+        : [sp] "{rsp}" (STACK_TOP),
+    );
 
     abi.sys.stop();
 }
@@ -623,15 +623,19 @@ export fn zigMain() noreturn {
 fn mapStack() !void {
     log.info("mapping stack", .{});
 
-    // const frame = try allocSized(abi.caps.Frame, .@"256KiB");
-    // log.info("256KiB stack frame allocated", .{});
-    // try map(
-    //     frame,
-    //     STACK_BOTTOM,
-    //     .{ .writable = true },
-    //     .{},
-    // );
-    // log.info("stack mapping complete 0x{x}..0x{x}", .{ STACK_BOTTOM, STACK_TOP });
+    const frame = try abi.sys.frameCreate(1024 * 256);
+
+    const self_vmem = try abi.sys.vmemSelf();
+    try abi.sys.vmemMap2(
+        self_vmem,
+        frame,
+        0,
+        STACK_BOTTOM,
+        1024 * 256,
+        .{ .writable = true },
+    );
+
+    log.info("stack mapping complete 0x{x}..0x{x}", .{ STACK_BOTTOM, STACK_TOP });
 }
 
 export fn zigMainRealstack() noreturn {
