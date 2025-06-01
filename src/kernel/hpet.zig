@@ -22,9 +22,8 @@ pub fn init(hpet: *const Hpet) !void {
 
     log.info("found HPET addr: 0x{x}", .{hpet.address});
 
-    const hpet_phys: caps.Ref(caps.DeviceFrame) = .{ .paddr = caps.DeviceFrame.new(addr.Phys.fromInt(hpet.address), .@"4KiB") };
-    hpet_frame = hpet_phys;
-    const regs: *volatile HpetRegs = @ptrCast(hpet_phys.ptr());
+    const regs: *volatile HpetRegs = addr.Phys.fromInt(hpet.address).toHhdm().toPtr(*volatile HpetRegs);
+    hpet_frame = regs;
 
     const config = @as(*volatile Config, &regs.config);
     var tmp = config.*;
@@ -37,7 +36,7 @@ pub fn init(hpet: *const Hpet) !void {
 // TODO: something useful could be done while waiting
 // + only one CPU has to measure the APIC timer speed afaik
 pub fn hpetSpinWait(micros: u32, just_before: anytype) void {
-    const regs: *volatile HpetRegs = @ptrCast(hpet_frame.?.ptr());
+    const regs: *volatile HpetRegs = @ptrCast(hpet_frame.?);
 
     const ticks = (@as(u64, micros) * 1_000_000_000) / @as(*volatile u32, &regs.caps_and_id.counter_period_femtoseconds).*;
 
@@ -48,11 +47,7 @@ pub fn hpetSpinWait(micros: u32, just_before: anytype) void {
     }
 }
 
-pub fn hpetFrame() caps.Ref(caps.DeviceFrame) {
-    return hpet_frame.?;
-}
-
-var hpet_frame: ?caps.Ref(caps.DeviceFrame) = null;
+var hpet_frame: ?*volatile HpetRegs = null;
 
 const Hpet = extern struct {
     header: acpi.SdtHeader align(1),

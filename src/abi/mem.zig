@@ -76,7 +76,7 @@ pub const SlabAllocator = struct {
         };
     }
 
-    fn alloc(p: *anyopaque, len: usize, _: std.mem.Alignment, _: usize) ?[*]u8 {
+    fn alloc(p: *anyopaque, len: usize, alignment: std.mem.Alignment, ret_addr: usize) ?[*]u8 {
         const self: *Self = @ptrCast(@alignCast(p));
 
         if (SlabSize.of(len)) |slab_size| {
@@ -117,17 +117,17 @@ pub const SlabAllocator = struct {
 
             return @ptrCast(first);
         } else {
-            return null;
+            return self.page_allocator.rawAlloc(len, alignment, ret_addr);
         }
     }
 
-    fn resize(_: *anyopaque, mem: []u8, _: std.mem.Alignment, new_len: usize, _: usize) bool {
-        // const self: *Self = @ptrCast(@alignCast(p));
+    fn resize(p: *anyopaque, mem: []u8, alignment: std.mem.Alignment, new_len: usize, ret_addr: usize) bool {
+        const self: *Self = @ptrCast(@alignCast(p));
 
         if (SlabSize.of(mem.len)) |slab_size| {
             return slab_size.sizeBytes() >= new_len;
         } else {
-            return false;
+            return self.page_allocator.rawResize(mem, alignment, new_len, ret_addr);
         }
     }
 
@@ -137,7 +137,7 @@ pub const SlabAllocator = struct {
         return null;
     }
 
-    fn free(p: *anyopaque, mem: []u8, _: std.mem.Alignment, _: usize) void {
+    fn free(p: *anyopaque, mem: []u8, alignment: std.mem.Alignment, ret_addr: usize) void {
         const self: *Self = @ptrCast(@alignCast(p));
 
         if (SlabSize.of(mem.len)) |slab_size| {
@@ -152,7 +152,9 @@ pub const SlabAllocator = struct {
 
             new_head.next = slab.next;
             slab.next = new_head;
-        } else {}
+        } else {
+            return self.page_allocator.rawFree(mem, alignment, ret_addr);
+        }
     }
 };
 

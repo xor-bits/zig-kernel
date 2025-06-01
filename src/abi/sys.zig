@@ -19,10 +19,25 @@ pub const Id = enum(usize) {
     get_extra,
     /// write an extra message register of the current thread
     set_extra,
+
+    frame_create,
+
+    vmem_create,
+    vmem_map,
+    vmem_unmap,
+
+    proc_create,
+
+    thread_create,
+
+    handle_identify,
+    handle_duplicate,
+    handle_close,
+
     /// give up the CPU for other tasks
-    yield,
+    self_yield,
     /// stop the active thread
-    stop,
+    self_stop,
 
     // TODO: maybe move all object call id's here to be syscall id's
 };
@@ -686,11 +701,11 @@ pub fn setExtra(idx: u7, val: usize, is_cap: bool) void {
 }
 
 pub fn yield() void {
-    _ = syscall(.yield, .{}) catch unreachable;
+    _ = syscall(.self_yield, .{}) catch unreachable;
 }
 
 pub fn stop() noreturn {
-    _ = syscall(.stop, .{}) catch {};
+    _ = syscall(.self_stop, .{}) catch {};
     asm volatile ("mov 0, %rax"); // read from nullptr to kill the process for sure
     unreachable;
 }

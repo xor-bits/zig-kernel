@@ -74,7 +74,7 @@ pub fn switchTo(trap: *arch.SyscallRegs, thread: *caps.Thread, prev: ?*caps.Thre
 
     if (thread == prev)
         return;
-    caps.Vmem.switchTo(thread.vmem.?);
+    thread.proc.vmem.switchTo();
 
     if (conf.LOG_CTX_SWITCHES)
         log.debug("switch to {*}", .{thread});
@@ -93,7 +93,6 @@ pub fn stop(thread: *caps.Thread) void {
 /// start the thread, if its not running
 pub fn start(thread: *caps.Thread) void {
     std.debug.assert(thread.status == .stopped);
-    std.debug.assert(thread.vmem != null);
 
     _ = active_threads.fetchAdd(1, .acquire);
     ready(thread);

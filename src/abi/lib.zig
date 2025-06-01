@@ -61,6 +61,8 @@ pub const ObjectType = enum(u8) {
     null = 0,
     /// capability that allows kernel object allocation
     memory,
+    /// capability to manage a single process
+    process,
     /// capability to manage a single thread control block (TCB)
     thread,
     /// capability to the virtual memory structure

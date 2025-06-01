@@ -7,33 +7,32 @@ const pmem = @import("pmem.zig");
 const proc = @import("proc.zig");
 const spin = @import("spin.zig");
 
-const caps_ipc = @import("caps/ipc.zig");
-const caps_pmem = @import("caps/pmem.zig");
-const caps_thread = @import("caps/thread.zig");
+// const caps_ipc = @import("caps/ipc.zig");
+// const caps_pmem = @import("caps/pmem.zig");
+// const caps_thread = @import("caps/thread.zig");
 const caps_vmem = @import("caps/vmem.zig");
-const caps_x86 = @import("caps/x86.zig");
+// const caps_x86 = @import("caps/x86.zig");
 
 const conf = abi.conf;
 const log = std.log.scoped(.caps);
 const Error = abi.sys.Error;
 const RefCnt = abi.epoch.RefCnt;
-const RefCntHandle = abi.epoch.RefCntHandle;
 
 //
 
-pub const Memory = caps_pmem.Memory;
-pub const Frame = caps_pmem.Frame;
-pub const DeviceFrame = caps_pmem.DeviceFrame;
-pub const Thread = caps_thread.Thread;
-pub const Vmem = caps_vmem.Vmem;
-pub const Receiver = caps_ipc.Receiver;
-pub const Sender = caps_ipc.Sender;
-pub const Reply = caps_ipc.Reply;
-pub const Notify = caps_ipc.Notify;
-pub const X86IoPortAllocator = caps_x86.X86IoPortAllocator;
-pub const X86IoPort = caps_x86.X86IoPort;
-pub const X86IrqAllocator = caps_x86.X86IrqAllocator;
-pub const X86Irq = caps_x86.X86Irq;
+// pub const Memory = caps_pmem.Memory;
+// pub const Frame = caps_pmem.Frame;
+// pub const DeviceFrame = caps_pmem.DeviceFrame;
+// pub const Thread = caps_thread.Thread;
+pub const HalVmem = caps_vmem.Vmem;
+// pub const Receiver = caps_ipc.Receiver;
+// pub const Sender = caps_ipc.Sender;
+// pub const Reply = caps_ipc.Reply;
+// pub const Notify = caps_ipc.Notify;
+// pub const X86IoPortAllocator = caps_x86.X86IoPortAllocator;
+// pub const X86IoPort = caps_x86.X86IoPort;
+// pub const X86IrqAllocator = caps_x86.X86IrqAllocator;
+// pub const X86Irq = caps_x86.X86Irq;
 
 //
 
@@ -47,21 +46,24 @@ pub fn init() !void {
     readonly_zero_page.store(page.toParts().page, .release);
 
     // push the null capability
-    _ = pushCapability(.{});
+    _ = try pushCapability(.{
+        .ptr = @ptrFromInt(0xFFFF_8000_0000_0000),
+        .type = .null,
+    });
 
-    var cap: Capability = .{};
+    var cap: CapabilitySlot = .{};
     cap.object.store(.{}, .seq_cst);
     const s = cap.object.load(.acquire);
     // s.ptr;
     // s.type;
     debugType(@TypeOf(s));
-    debugType(Capability);
-    debugType(GenericObject);
-    debugType(ProcessObject);
-    debugType(ThreadObject);
-    debugType(FrameObject);
-    debugType(VmemObject);
-    debugType(VmemObject.Mapping);
+    debugType(CapabilitySlot);
+    debugType(Generic);
+    debugType(Process);
+    debugType(Thread);
+    debugType(Frame);
+    debugType(Vmem);
+    debugType(Vmem.Mapping);
     // debugType(Object);
     // debugType(Memory);
     // debugType(Frame);
@@ -78,141 +80,43 @@ pub fn init() !void {
     // debugType(X86Irq);
 }
 
-// FIXME: keep the capability locked
+// FIXME: process local capability arrays, now all processes can use all capabilities
 /// create a capability out of an object
-pub fn pushCapability(_obj: Object) u32 {
-    var obj = _obj;
-    obj.lock = .newLocked();
-
+pub fn pushCapability(cap: Capability) !u32 {
     const cap_id = allocate();
-    const cap = &capabilityArrayUnchecked()[cap_id];
+    const cap_slot = &capabilityArrayUnchecked()[cap_id];
 
-    cap.lock.lock();
-    cap.* = obj;
-    cap.lock.unlock();
+    try cap_slot.store(cap);
 
     return cap_id;
 }
 
-/// returns an object from a capability,
-/// the returned object is locked
-pub fn getCapability(thread: *Thread, cap_id: u32) Error!*Object {
-    if (cap_id == 0)
-        return Error.InvalidCapability;
+// FIXME: process local capability arrays, now all processes can use all capabilities
+pub fn getCapability(id: u32, current: *Process) Error!Capability {
+    _ = current;
+
+    if (id == 0) return Error.InvalidCapability;
 
     const caps = capabilityArray();
-    if (cap_id >= caps.len)
-        return Error.InvalidCapability;
+    if (id >= caps.len) return Error.InvalidCapability;
 
-    const current = Thread.vmemOf(thread);
-    const obj = &caps[cap_id];
+    const cap = &caps[id];
 
-    errdefer if (conf.LOG_OBJ_CALLS)
-        log.debug("obj was cap={} type={} thread={*}", .{ cap_id, obj.type, thread });
-
-    // fast path fail if the capability is not owned or being modified
-    if (obj.owner.load(.acquire) != current)
-        return Error.InvalidCapability;
-
-    if (!obj.lock.tryLock())
-        return Error.ThreadSafety;
-    errdefer obj.lock.unlock();
-
-    if (obj.owner.load(.acquire) != current)
-        return Error.InvalidCapability;
-
-    if (conf.LOG_OBJ_ACCESS_STATS) {
-        _ = obj_accesses.getPtr(obj.type).fetchAdd(1, .monotonic);
-
-        log.debug("obj accesses:", .{});
-        var it = obj_accesses.iterator();
-        while (it.next()) |e| {
-            log.debug(" - {}: {}", .{ e.key, e.value.load(.monotonic) });
-        }
-    }
-
-    return obj;
-}
-
-pub fn getCapabilityDerivation(cap_id: u32) *Object {
-    std.debug.assert(cap_id != 0);
-
-    const caps = capabilityArray();
-    std.debug.assert(cap_id < caps.len);
-
-    const obj = &caps[cap_id];
-
-    errdefer if (conf.LOG_OBJ_CALLS)
-        log.debug("obj was cap={} type={}", .{ cap_id, obj.type });
-
-    if (conf.LOG_OBJ_ACCESS_STATS) {
-        _ = obj_accesses.getPtr(obj.type).fetchAdd(1, .monotonic);
-
-        log.debug("obj accesses:", .{});
-        var it = obj_accesses.iterator();
-        while (it.next()) |e| {
-            log.debug(" - {}: {}", .{ e.key, e.value.load(.monotonic) });
-        }
-    }
-
-    return obj;
-}
-
-/// gets a capability when its already locked and checked to be owned
-pub fn getCapabilityLocked(cap_id: u32) *Object {
-    const obj = &capabilityArrayUnchecked()[cap_id];
-    std.debug.assert(obj.lock.isLocked());
-    return obj;
-}
-
-/// a single bidirectional call
-pub fn call(thread: *Thread, cap_id: u32, trap: *arch.SyscallRegs) Error!void {
-    const obj = try getCapability(thread, cap_id);
-    defer obj.lock.unlock();
-
-    return obj.call(thread, trap);
-}
-
-/// Receiver specific unidirectional call
-pub fn recv(thread: *Thread, cap_id: u32, trap: *arch.SyscallRegs) Error!void {
-    const obj = try getCapability(thread, cap_id);
-    defer obj.lock.unlock();
-
-    return obj.recv(thread, trap);
-}
-
-/// Receiver specific unidirectional call
-pub fn reply(thread: *Thread, cap_id: u32, trap: *arch.SyscallRegs) Error!void {
-    const obj = try getCapability(thread, cap_id);
-    defer obj.lock.unlock();
-
-    return obj.reply(thread, trap);
-}
-
-pub fn replyRecv(thread: *Thread, cap_id: u32, trap: *arch.SyscallRegs) Error!void {
-    const obj = try getCapability(thread, cap_id);
-    defer obj.lock.unlock();
-
-    return obj.replyRecv(thread, trap);
-}
-
-pub fn capAssertNotNull(cap: u32, trap: *arch.SyscallRegs) bool {
-    if (cap == 0) {
-        trap.syscall_id = abi.sys.encode(Error.InvalidCapability);
-        return true;
-    }
-    return false;
+    const handle = cap.load() orelse return Error.InvalidCapability;
+    return handle;
 }
 
 //
 
-pub fn capabilityArray() []Object {
+// FIXME: process local capability arrays, now all processes can use all capabilities
+pub fn capabilityArray() []CapabilitySlot {
     const len = @min(capability_array_len.load(.acquire), 2 << 32);
-    return @as([*]Object, @ptrFromInt(CAPABILITY_ARRAY_POINTER))[0..len];
+    return @as([*]CapabilitySlot, @ptrFromInt(CAPABILITY_ARRAY_POINTER))[0..len];
 }
 
-pub fn capabilityArrayUnchecked() []Object {
-    return @as([*]Object, @ptrFromInt(CAPABILITY_ARRAY_POINTER))[0 .. 2 << 32];
+// FIXME: process local capability arrays, now all processes can use all capabilities
+pub fn capabilityArrayUnchecked() []CapabilitySlot {
+    return @as([*]CapabilitySlot, @ptrFromInt(CAPABILITY_ARRAY_POINTER))[0 .. 2 << 32];
 }
 
 pub fn allocate() u32 {
@@ -220,13 +124,7 @@ pub fn allocate() u32 {
         free_list_lock.lock();
         defer free_list_lock.unlock();
 
-        if (free_list != 0) {
-            const head = free_list;
-            const new_head = capabilityArrayUnchecked()[free_list];
-            free_list = new_head.next;
-            // the capability might be locked still
-            return head;
-        }
+        log.err("FIXME: reimpl capability free list", .{});
     }
 
     return caps_vmem.growCapArray();
@@ -239,9 +137,7 @@ pub fn deallocate(cap: u32) void {
     defer free_list_lock.unlock();
 
     if (free_list != 0) {
-        const new_head = &capabilityArrayUnchecked()[cap];
-        new_head.next = free_list;
-        // the capability might be locked still
+        log.err("FIXME: reimpl capability free list", .{});
     }
 
     free_list = cap;
@@ -255,7 +151,7 @@ pub fn deallocate(cap: u32) void {
 ///
 /// it is currently `0xFFFFFFBF80000000`, right before the kernel code at `0xFFFF_FFFF_8000_0000`
 /// and capable of holding a maximum of 2^32 capabilities across all processes
-pub const CAPABILITY_ARRAY_POINTER: usize = 0xFFFF_FFFF_8000_0000 - (2 << 32) * @sizeOf(Object);
+pub const CAPABILITY_ARRAY_POINTER: usize = 0xFFFF_FFFF_8000_0000 - (2 << 32) * @sizeOf(CapabilitySlot);
 /// the length can only grow
 pub var capability_array_len: std.atomic.Value(usize) = .init(0);
 /// a linked list of unused slots
@@ -266,39 +162,37 @@ pub var obj_accesses: std.EnumArray(abi.ObjectType, std.atomic.Value(usize)) = .
 
 //
 
-pub fn Ref(comptime T: type) type {
-    return struct {
-        paddr: addr.Phys,
+// pub fn Ref(comptime T: type) type {
+//     return struct {
+//         paddr: addr.Phys,
 
-        const Self = @This();
+//         const Self = @This();
 
-        pub fn alloc(dyn_size: ?abi.ChunkSize) Error!Self {
-            const paddr = try T.alloc(dyn_size);
-            const obj = Self{ .paddr = paddr };
-            T.init(obj);
-            return obj;
-        }
+//         pub fn alloc(dyn_size: ?abi.ChunkSize) Error!Self {
+//             const paddr = try T.alloc(dyn_size);
+//             const obj = Self{ .paddr = paddr };
+//             T.init(obj);
+//             return obj;
+//         }
 
-        pub fn ptr(self: @This()) *T {
-            // recursive mapping instead of HHDM later (maybe)
-            return self.paddr.toHhdm().toPtr(*T);
-        }
+//         pub fn ptr(self: @This()) *T {
+//             // recursive mapping instead of HHDM later (maybe)
+//             return self.paddr.toHhdm().toPtr(*T);
+//         }
 
-        pub fn object(self: @This(), owner: ?*Thread) Object {
-            return .{
-                .paddr = self.paddr,
-                .type = Object.objectTypeOf(T),
-                .owner = .init(Thread.vmemOf(owner)),
-            };
-        }
-    };
-}
+//         pub fn object(self: @This(), owner: ?*Thread) Object {
+//             return .{
+//                 .paddr = self.paddr,
+//                 .type = Object.objectTypeOf(T),
+//                 .owner = .init(Thread.vmemOf(owner)),
+//             };
+//         }
+//     };
+// }
 
-pub const Capability = struct {
+pub const CapabilitySlot = struct {
     /// the actual kernel object data, possibly shared between multiple capabilities
     object: std.atomic.Value(ObjectPointer) = .init(.{}),
-    /// capability ownership is tied to virtual address spaces
-    owner: std.atomic.Value(?*Vmem) = .init(null), // TODO: will be removed with per-process caps
 
     const ObjectPointer = packed struct {
         /// object pointer's low 56 bits, the upper 8 (actually 17) bits are always 1 in kernel space
@@ -306,38 +200,146 @@ pub const Capability = struct {
         /// object type
         type: abi.ObjectType = .null,
 
-        fn getRefcntPtr(self: *@This()) *abi.epoch.RefCnt {
-            // FIXME: prevent reordering so that the offset would be same on all objects
-            switch (self.type) {
-                .frame => &@as(*FrameObject, @ptrFromInt(self.ptr)).refcnt,
-            }
+        fn fromHandle(handle: Capability) @This() {
+            std.debug.assert((@intFromPtr(handle.ptr) >> 56) == 0xFF);
+
+            return .{
+                .ptr = @truncate(@intFromPtr(handle.ptr)),
+                .type = handle.type,
+            };
+        }
+
+        fn getHandle(self: *const @This()) ?Capability {
+            if (self.type == .null) return null;
+
+            return .{
+                .ptr = @ptrFromInt(@as(u64, self.ptr) | 0xFF00_0000_0000_0000),
+                .type = self.type,
+            };
         }
     };
 
     const Self = @This();
 
-    pub fn load(self: *Self) void {
+    pub fn load(self: *Self) ?Capability {
         const guard = abi.epoch.pin();
         defer abi.epoch.unpin(guard);
 
         const object = self.object.load(.monotonic);
-        object.getRefcntPtr().inc();
-        return object.ptr;
+        const handle = object.getHandle() orelse return null;
+        handle.refcnt().inc();
+
+        return handle;
     }
 
-    pub fn store(self: *Self) void {
+    pub fn store(self: *Self, handle: Capability) !void {
         const guard = abi.epoch.pin();
         defer abi.epoch.unpin(guard);
 
-        const old_object = self.object.swap(.{}, .seq_cst);
-        if (old_object.getRefcntPtr().dec()) {
-            @branchHint(.unlikely);
-            // abi.epoch.deferFunc(guard, func: *const fn(data:*[3]usize)void, data: [3]usize)
+        const new_object = ObjectPointer.fromHandle(handle);
+
+        const old_object = self.object.swap(new_object, .seq_cst);
+        const old_handle = old_object.getHandle() orelse return;
+        if (!old_handle.refcnt().dec()) return;
+
+        switch (old_handle.type) {
+            .frame => try abi.epoch.deferCtxFunc(
+                guard,
+                old_handle.as(Frame).?,
+                Frame.deinit,
+            ),
+            .vmem => try abi.epoch.deferCtxFunc(
+                guard,
+                old_handle.as(Vmem).?,
+                Vmem.deinit,
+            ),
+            .process => try abi.epoch.deferCtxFunc(
+                guard,
+                old_handle.as(Process).?,
+                Process.deinit,
+            ),
+            .thread => try abi.epoch.deferCtxFunc(
+                guard,
+                old_handle.as(Thread).?,
+                Thread.deinit,
+            ),
+            else => unreachable,
         }
     }
 };
 
-pub const GenericObject = struct {
+pub const Capability = struct {
+    ptr: *void,
+    type: abi.ObjectType = .null,
+    // rights: abi.sys.Rights = .{},
+
+    pub fn init(obj: anytype) @This() {
+        return switch (@TypeOf(obj)) {
+            *Frame => .{
+                .ptr = @ptrCast(obj),
+                .type = .frame,
+            },
+            *Vmem => .{
+                .ptr = @ptrCast(obj),
+                .type = .vmem,
+            },
+            *Process => .{
+                .ptr = @ptrCast(obj),
+                .type = .process,
+            },
+            *Thread => .{
+                .ptr = @ptrCast(obj),
+                .type = .thread,
+            },
+            else => @compileError("invalid type"),
+        };
+    }
+
+    pub fn deinit(self: @This()) void {
+        switch (self.type) {
+            .frame => &self.as(Frame).?.deinit(),
+            .vmem => &self.as(Vmem).?.deinit(),
+            .process => &self.as(Process).?.deinit(),
+            .thread => &self.as(Thread).?.deinit(),
+        }
+    }
+
+    pub fn as(self: @This(), comptime T: type) ?*T {
+        const expected_type: abi.ObjectType = switch (T) {
+            Frame => .frame,
+            Vmem => .vmem,
+            Process => .process,
+            Thread => .thread,
+            else => @compileError("invalid type"),
+        };
+
+        if (self.type != expected_type) {
+            return null;
+        }
+
+        return @ptrCast(@alignCast(self.ptr));
+    }
+
+    pub fn refcnt(self: @This()) *abi.epoch.RefCnt {
+        if (0 != @offsetOf(Frame, "refcnt") or
+            0 != @offsetOf(Vmem, "refcnt") or
+            0 != @offsetOf(Process, "refcnt") or
+            0 != @offsetOf(Thread, "refcnt"))
+        {
+            // FIXME: prevent reordering so that the offset would be same on all objects
+            return switch (self.type) {
+                .frame => &self.as(Frame).?.ptr.refcnt,
+                .vmem => &self.as(Vmem).?.ptr.refcnt,
+                .process => &self.as(Process).?.ptr.refcnt,
+                .thread => &self.as(Thread).?.ptr.refcnt,
+            };
+        }
+
+        return @ptrCast(@alignCast(self.ptr));
+    }
+};
+
+pub const Generic = struct {
     refcnt: abi.epoch.RefCnt,
 };
 
@@ -347,57 +349,7 @@ pub const GenericObject = struct {
 //     pages: [2:0]u32, //
 // };
 
-pub const ProcessObject = struct {
-    // FIXME: prevent reordering so that the offset would be same on all objects
-    refcnt: abi.epoch.RefCnt = .{},
-
-    vmem: RefCntHandle(VmemObject),
-
-    pub fn init(from_vmem: RefCntHandle(VmemObject)) !*@This() {
-        const obj: *@This() = try slab_allocator.allocator().create(@This());
-
-        obj.* = .{
-            .vmem = from_vmem,
-        };
-        obj.lock.unlock();
-
-        return obj;
-    }
-
-    pub fn deinit(self: *@This()) void {
-        self.proc.deinit();
-
-        slab_allocator.allocator().destroy(self);
-    }
-};
-
-pub const ThreadObject = struct {
-    // FIXME: prevent reordering so that the offset would be same on all objects
-    refcnt: abi.epoch.RefCnt = .{},
-
-    proc: RefCntHandle(ProcessObject),
-
-    trap: arch.SyscallRegs = .{},
-
-    pub fn init(from_proc: RefCntHandle(ProcessObject)) !*@This() {
-        const obj: *@This() = try slab_allocator.allocator().create(@This());
-
-        obj.* = .{
-            .proc = from_proc,
-        };
-        obj.lock.unlock();
-
-        return obj;
-    }
-
-    pub fn deinit(self: *@This()) void {
-        self.proc.deinit();
-
-        slab_allocator.allocator().destroy(self);
-    }
-};
-
-pub const FrameObject = struct {
+pub const Frame = struct {
     // FIXME: prevent reordering so that the offset would be same on all objects
     refcnt: abi.epoch.RefCnt = .{},
 
@@ -405,6 +357,9 @@ pub const FrameObject = struct {
     pages: []u32,
 
     pub fn init(size_bytes: usize) !*@This() {
+        if (conf.LOG_OBJ_CALLS)
+            log.info("Frame.init size={}", .{size_bytes});
+
         const size_pages = std.math.divCeil(usize, size_bytes, 0x1000) catch unreachable;
         if (size_pages > std.math.maxInt(u32)) return error.OutOfMemory;
 
@@ -423,6 +378,11 @@ pub const FrameObject = struct {
     }
 
     pub fn deinit(self: *@This()) void {
+        if (!self.refcnt.dec()) return;
+
+        if (conf.LOG_OBJ_CALLS)
+            log.info("Frame.deinit", .{});
+
         for (self.pages) |page| {
             if (page == 0) continue;
 
@@ -434,6 +394,128 @@ pub const FrameObject = struct {
 
         slab_allocator.allocator().free(self.pages);
         slab_allocator.allocator().destroy(self);
+    }
+
+    pub fn clone(self: *@This()) void {
+        if (conf.LOG_OBJ_CALLS)
+            log.info("Frame.clone", .{});
+
+        self.refcnt.inc();
+    }
+
+    pub fn write(self: *@This(), offset_bytes: usize, source: []const volatile u8) Error!void {
+        var bytes = source;
+
+        if (conf.LOG_OBJ_CALLS)
+            log.info("Frame.write offset_bytes={} source.len={}", .{
+                offset_bytes,
+                source.len,
+            });
+
+        const limit = std.math.divCeil(usize, offset_bytes + bytes.len, 0x1000) catch
+            return Error.OutOfBounds;
+
+        {
+            self.lock.lock();
+            defer self.lock.unlock();
+
+            if (limit > self.pages.len)
+                return Error.OutOfBounds;
+        }
+
+        var it = self.data(offset_bytes, true);
+        while (try it.next()) |dst_chunk| {
+            if (dst_chunk.len == bytes.len) {
+                @memcpy(dst_chunk, bytes);
+                break;
+            } else if (dst_chunk.len > bytes.len) {
+                @memcpy(dst_chunk[0..bytes.len], bytes);
+                break;
+            } else { // dst_chunk.len < bytes.len
+                @memcpy(dst_chunk, bytes[0..dst_chunk.len]);
+                bytes = bytes[dst_chunk.len..];
+            }
+        }
+    }
+
+    pub fn read(self: *@This(), offset_bytes: usize, dest: []volatile u8) Error!void {
+        var bytes = dest;
+
+        if (conf.LOG_OBJ_CALLS)
+            log.info("Frame.read offset_bytes={} dest.len={}", .{
+                offset_bytes,
+                dest.len,
+            });
+
+        const limit = std.math.divCeil(usize, offset_bytes + bytes.len, 0x1000) catch
+            return Error.OutOfBounds;
+
+        {
+            self.lock.lock();
+            defer self.lock.unlock();
+
+            if (limit >= self.pages.len)
+                return Error.OutOfBounds;
+        }
+
+        var it = self.data(offset_bytes, false);
+        while (try it.next()) |src_chunk| {
+            if (src_chunk.len == bytes.len) {
+                @memcpy(bytes, src_chunk);
+                break;
+            } else if (src_chunk.len > bytes.len) {
+                @memcpy(bytes, src_chunk[0..bytes.len]);
+                break;
+            } else { // src_chunk.len < bytes.len
+                @memcpy(bytes[0..src_chunk.len], src_chunk);
+                bytes = bytes[src_chunk.len..];
+            }
+        }
+    }
+
+    pub const DataIterator = struct {
+        frame: *Frame,
+        offset_within_first: ?u32,
+        idx: u32,
+        is_write: bool,
+
+        pub fn next(self: *@This()) !?[]volatile u8 {
+            if (self.idx >= self.frame.pages.len)
+                return null;
+
+            defer self.idx += 1;
+            defer self.offset_within_first = null;
+
+            const page = try self.frame.page_hit(self.idx, self.is_write);
+
+            return addr.Phys.fromParts(.{ .page = page })
+                .toHhdm()
+                .toPtr([*]volatile u8)[0 .. self.offset_within_first orelse 0x1000];
+        }
+    };
+
+    pub fn data(self: *@This(), offset_bytes: usize, is_write: bool) DataIterator {
+        if (offset_bytes >= self.pages.len * 0x1000) {
+            return .{
+                .frame = self,
+                .offset_within_first = null,
+                .idx = @intCast(self.pages.len),
+                .is_write = is_write,
+            };
+        }
+
+        const first_byte = std.mem.alignBackward(usize, offset_bytes, 0x1000);
+        const offset_within_page: ?u32 = if (first_byte == offset_bytes)
+            null
+        else
+            @intCast(offset_bytes - first_byte);
+
+        return .{
+            .frame = self,
+            .offset_within_first = offset_within_page,
+            .idx = @intCast(first_byte / 0x1000),
+            .is_write = is_write,
+        };
     }
 
     pub fn page_hit(self: *@This(), idx: u32, is_write: bool) !u32 {
@@ -471,7 +553,7 @@ pub const FrameObject = struct {
     }
 };
 
-pub const VmemObject = struct {
+pub const Vmem = struct {
     // FIXME: prevent reordering so that the offset would be same on all objects
     refcnt: abi.epoch.RefCnt = .{},
 
@@ -481,7 +563,7 @@ pub const VmemObject = struct {
 
     const Mapping = struct {
         /// refcounted
-        frame: RefCntHandle(FrameObject),
+        frame: *Frame,
         /// page offset within the Frame object
         frame_first_page: u32,
         /// number of bytes (rounded up to pages) mapped
@@ -496,7 +578,7 @@ pub const VmemObject = struct {
         },
 
         fn init(
-            frame: RefCntHandle(FrameObject),
+            frame: *Frame,
             frame_first_page: u32,
             vaddr: addr.Virt,
             pages: u32,
@@ -541,6 +623,9 @@ pub const VmemObject = struct {
     };
 
     pub fn init() !*@This() {
+        if (conf.LOG_OBJ_CALLS)
+            log.info("Vmem.init", .{});
+
         const obj: *@This() = try slab_allocator.allocator().create(@This());
         const mappings = std.ArrayList(Mapping).init(slab_allocator.allocator());
 
@@ -555,6 +640,11 @@ pub const VmemObject = struct {
     }
 
     pub fn deinit(self: *@This()) void {
+        if (!self.refcnt.dec()) return;
+
+        if (conf.LOG_OBJ_CALLS)
+            log.info("Vmem.deinit", .{});
+
         for (self.mappings.items) |mapping| {
             mapping.frame.deinit();
         }
@@ -563,29 +653,48 @@ pub const VmemObject = struct {
         slab_allocator.allocator().destroy(self);
     }
 
-    pub fn switchTo(self: *@This()) !void {
+    pub fn clone(self: *@This()) void {
+        if (conf.LOG_OBJ_CALLS)
+            log.info("Vmem.clone", .{});
+
+        self.refcnt.inc();
+    }
+
+    pub fn switchTo(self: *@This()) void {
+        std.debug.assert(self.cr3 != 0);
+        HalVmem.switchTo(addr.Phys.fromParts(
+            .{ .page = self.cr3 },
+        ));
+    }
+
+    pub fn start(self: *@This()) !void {
         if (self.cr3 == 0) {
             @branchHint(.cold);
 
-            const new_cr3 = try Ref(Vmem).alloc(null);
-            self.cr3 = new_cr3.paddr.toParts().page;
+            const new_cr3 = try HalVmem.alloc(null);
+            HalVmem.init(new_cr3);
+            self.cr3 = new_cr3.toParts().page;
         }
-
-        const vmem = Ref(Vmem){ .paddr = addr.Phys.fromParts(
-            .{ .page = self.cr3 },
-        ) };
-        Vmem.switchTo(vmem);
     }
 
     pub fn map(
         self: *@This(),
-        frame: RefCntHandle(FrameObject),
+        frame: *Frame,
         frame_first_page: u32,
         vaddr: addr.Virt,
         pages: u32,
         rights: abi.sys.Rights,
     ) !void {
         errdefer frame.deinit();
+
+        if (conf.LOG_OBJ_CALLS)
+            log.info("Vmem.map frame={*} frame_first_page={} vaddr=0x{x} pages={} rights={}", .{
+                frame,
+                frame_first_page,
+                vaddr.raw,
+                pages,
+                rights,
+            });
 
         if (pages == 0 or vaddr.raw == 0)
             return error.InvalidArguments;
@@ -594,9 +703,9 @@ pub const VmemObject = struct {
         try @This().assert_userspace(vaddr, pages);
 
         {
-            frame.ptr.lock.lock();
-            defer frame.ptr.lock.unlock();
-            if (pages + frame_first_page >= frame.ptr.pages.len)
+            frame.lock.lock();
+            defer frame.lock.unlock();
+            if (pages + frame_first_page > frame.pages.len)
                 return error.OutOfBounds;
         }
 
@@ -628,6 +737,9 @@ pub const VmemObject = struct {
     }
 
     pub fn unmap(self: *@This(), vaddr: addr.Virt, pages: u32) !void {
+        if (conf.LOG_OBJ_CALLS)
+            log.info("Vmem.unmap vaddr=0x{x} pages={}", .{ vaddr.raw, pages });
+
         if (pages == 0) return;
         std.debug.assert(vaddr.toParts().offset == 0);
         try @This().assert_userspace(vaddr, pages);
@@ -636,7 +748,6 @@ pub const VmemObject = struct {
         defer self.lock.unlock();
 
         var idx = self.find(vaddr) orelse return;
-        log.info("found idx={}", .{idx});
 
         while (true) {
             if (idx >= self.mappings.items.len)
@@ -686,17 +797,17 @@ pub const VmemObject = struct {
                 // cases 1,2,3 already cover equal start/end bounds
 
                 mapping.frame.clone();
-                var clone = mapping.*;
+                var cloned = mapping.*;
 
                 const trunc: u32 = @intCast((a_end - b_beg) / 0x1000);
                 mapping.pages -= trunc;
 
                 const shift: u32 = @intCast((b_end - a_beg) / 0x1000);
-                clone.setVaddr(addr.Virt.fromInt(b_end));
-                clone.pages -= shift;
-                clone.frame_first_page += shift;
+                cloned.setVaddr(addr.Virt.fromInt(b_end));
+                cloned.pages -= shift;
+                cloned.frame_first_page += shift;
 
-                _ = try self.mappings.insert(idx + 1, clone);
+                _ = try self.mappings.insert(idx + 1, cloned);
                 break;
             }
 
@@ -714,9 +825,9 @@ pub const VmemObject = struct {
         if (self.cr3 == 0)
             return;
 
-        const vmem: *volatile Vmem = addr.Phys.fromParts(.{ .page = self.cr3 })
+        const vmem: *volatile HalVmem = addr.Phys.fromParts(.{ .page = self.cr3 })
             .toHhdm()
-            .toPtr(*volatile Vmem);
+            .toPtr(*volatile HalVmem);
 
         for (0..pages) |page_idx| {
             // already checked to be in bounds
@@ -741,20 +852,17 @@ pub const VmemObject = struct {
         self.lock.lock();
         defer self.lock.unlock();
 
-        for (self.mappings.items) |mapping| {
-            const va = mapping.getVaddr().raw;
-
-            log.info("mapping [ 0x{x:0>16}..0x{x:0>16} ]", .{
-                va,
-                va + 0x1000 * mapping.pages,
-            });
-        }
+        // for (self.mappings.items) |mapping| {
+        //     const va = mapping.getVaddr().raw;
+        //     log.info("mapping [ 0x{x:0>16}..0x{x:0>16} ]", .{
+        //         va,
+        //         va + 0x1000 * mapping.pages,
+        //     });
+        // }
 
         // check if it was user error
         const idx = self.find(vaddr) orelse
             return error.NotMapped;
-
-        log.info("found idx={}", .{idx});
 
         const mapping = self.mappings.items[idx];
 
@@ -784,9 +892,9 @@ pub const VmemObject = struct {
         std.debug.assert(page_offs < mapping.pages);
         std.debug.assert(self.cr3 != 0);
 
-        const vmem: *volatile Vmem = addr.Phys.fromParts(.{ .page = self.cr3 })
+        const vmem: *volatile HalVmem = addr.Phys.fromParts(.{ .page = self.cr3 })
             .toHhdm()
-            .toPtr(*volatile Vmem);
+            .toPtr(*volatile HalVmem);
 
         const entry = (try vmem.entryFrame(vaddr)).*;
 
@@ -795,7 +903,7 @@ pub const VmemObject = struct {
                 // was mapped but only now accessed using a read/exec
                 std.debug.assert(entry.present == 0);
 
-                const wanted_page_index = try mapping.frame.ptr.page_hit(
+                const wanted_page_index = try mapping.frame.page_hit(
                     mapping.frame_first_page + page_offs,
                     false,
                 );
@@ -814,7 +922,7 @@ pub const VmemObject = struct {
                 // was mapped but only now accessed using a write
 
                 // a read from a lazy
-                const wanted_page_index = try mapping.frame.ptr.page_hit(
+                const wanted_page_index = try mapping.frame.page_hit(
                     mapping.frame_first_page + page_offs,
                     true,
                 );
@@ -853,8 +961,6 @@ pub const VmemObject = struct {
     }
 
     fn find(self: *@This(), vaddr: addr.Virt) ?usize {
-        log.info("finding=0x{x}", .{vaddr.raw});
-
         const idx = std.sort.partitionPoint(
             Mapping,
             self.mappings.items,
@@ -873,216 +979,131 @@ pub const VmemObject = struct {
     }
 };
 
+pub const Process = struct {
+    // FIXME: prevent reordering so that the offset would be same on all objects
+    refcnt: abi.epoch.RefCnt = .{},
+
+    vmem: *Vmem,
+    lock: spin.Mutex = .newLocked(),
+    // caps: std.ArrayList(Capability),
+
+    pub fn init(from_vmem: *Vmem) !*@This() {
+        if (conf.LOG_OBJ_CALLS)
+            log.info("Process.init", .{});
+
+        const obj: *@This() = try slab_allocator.allocator().create(@This());
+        obj.* = .{ .vmem = from_vmem };
+        obj.lock.unlock();
+
+        return obj;
+    }
+
+    pub fn deinit(self: *@This()) void {
+        if (!self.refcnt.dec()) return;
+
+        if (conf.LOG_OBJ_CALLS)
+            log.info("Process.deinit", .{});
+
+        self.vmem.deinit();
+
+        slab_allocator.allocator().destroy(self);
+    }
+
+    pub fn clone(self: *@This()) void {
+        if (conf.LOG_OBJ_CALLS)
+            log.info("Process.clone", .{});
+
+        self.refcnt.inc();
+    }
+};
+
+pub const Thread = struct {
+    // FIXME: prevent reordering so that the offset would be same on all objects
+    refcnt: abi.epoch.RefCnt = .{},
+
+    proc: *Process,
+    // lock for modifying / executing the thread
+    lock: spin.Mutex = .newLocked(),
+    /// all context data
+    trap: arch.SyscallRegs = .{},
+    /// scheduler priority
+    priority: u2 = 1,
+    /// is the thread stopped/running/ready/waiting
+    status: enum { stopped, running, ready, waiting } = .stopped,
+    /// scheduler linked list
+    next: ?*Thread = null,
+    /// scheduler linked list
+    prev: ?*Thread = null,
+
+    pub fn init(from_proc: *Process) !*@This() {
+        if (conf.LOG_OBJ_CALLS)
+            log.info("Thread.init", .{});
+
+        const obj: *@This() = try slab_allocator.allocator().create(@This());
+        obj.* = .{ .proc = from_proc };
+        obj.lock.unlock();
+
+        return obj;
+    }
+
+    pub fn deinit(self: *@This()) void {
+        if (!self.refcnt.dec()) return;
+
+        if (conf.LOG_OBJ_CALLS)
+            log.info("Thread.deinit", .{});
+
+        self.proc.deinit();
+
+        slab_allocator.allocator().destroy(self);
+    }
+
+    pub fn clone(self: *@This()) void {
+        if (conf.LOG_OBJ_CALLS)
+            log.info("Thread.clone", .{});
+
+        self.refcnt.inc();
+    }
+};
+
 var slab_allocator = abi.mem.SlabAllocator.init(pmem.page_allocator);
 /// written once by the BSP with .release before any other CPU runs
 /// only read after that with .monotonic
 var readonly_zero_page: std.atomic.Value(u32) = .init(0);
-
-pub const Object = struct {
-    /// physical address (or metadata for ZST) for the kernel object
-    paddr: addr.Phys = .{ .raw = 0 },
-    /// capability ownership is tied to virtual address spaces
-    owner: std.atomic.Value(?*Vmem) = .init(null),
-    /// capability kind, like memory, receiver, .. or thread
-    type: abi.ObjectType = .null,
-    /// lock for reading/writing the capability slot
-    /// the object is just quickly copied while the lock is held
-    lock: spin.Mutex = .new(),
-
-    flags: u16 = 0,
-
-    /// a linked list of Objects that are derived from this one
-    children: u32 = 0,
-    /// the next element or the parent in the linked list derived from the parent
-    prev: u32 = 0,
-    /// the next element in the linked list derived from the parent
-    next: u32 = 0,
-
-    const Self = @This();
-
-    pub fn capOf(obj: *@This()) ?u32 {
-        if (@intFromPtr(obj) < CAPABILITY_ARRAY_POINTER)
-            return null;
-
-        const relative_addr: usize = @intFromPtr(obj) - CAPABILITY_ARRAY_POINTER;
-        const index: usize = relative_addr / @sizeOf(@This());
-
-        if (index > std.math.maxInt(u32))
-            return null;
-
-        return @truncate(index);
-    }
-
-    pub fn objectTypeOf(comptime T: type) abi.ObjectType {
-        return switch (T) {
-            Memory => .memory,
-            Thread => .thread,
-            Vmem => .vmem,
-            Frame => .frame,
-            DeviceFrame => .device_frame,
-            Receiver => .receiver,
-            Sender => .sender,
-            Reply => .reply,
-            Notify => .notify,
-            X86IoPortAllocator => .x86_ioport_allocator,
-            X86IoPort => .x86_ioport,
-            X86IrqAllocator => .x86_irq_allocator,
-            X86Irq => .x86_irq,
-            else => @compileError(std.fmt.comptimePrint("invalid Capability type: {s}", .{@typeName(T)})),
-        };
-    }
-
-    pub fn as(self: Self, comptime T: type) Error!Ref(T) {
-        const expected = objectTypeOf(T);
-        if (expected == self.type) {
-            return Ref(T){ .paddr = self.paddr };
-        } else {
-            return Error.InvalidCapability;
-        }
-    }
-
-    // pub fn asUnion(self: Self) Error!union(enum) {} {
-    //     return switch (self.type) {
-    //         .null => Error.InvalidCapability,
-    //         .memory => ,
-    //     };
-    // }
-
-    pub fn alloc(ty: abi.ObjectType, owner: *Thread, dyn_size: abi.ChunkSize) Error!Self {
-        return switch (ty) {
-            .null => Error.InvalidCapability,
-            .memory => (try Ref(Memory).alloc(dyn_size)).object(owner),
-            .thread => (try Ref(Thread).alloc(dyn_size)).object(owner),
-            .vmem => (try Ref(Vmem).alloc(dyn_size)).object(owner),
-            .frame => (try Ref(Frame).alloc(dyn_size)).object(owner),
-            .device_frame => (try Ref(DeviceFrame).alloc(dyn_size)).object(owner),
-            .receiver => (try Ref(Receiver).alloc(dyn_size)).object(owner),
-            .sender => (try Ref(Sender).alloc(dyn_size)).object(owner),
-            .reply => (try Ref(Reply).alloc(dyn_size)).object(owner),
-            .notify => (try Ref(Notify).alloc(dyn_size)).object(owner),
-            .x86_ioport_allocator => (try Ref(X86IoPortAllocator).alloc(dyn_size)).object(owner),
-            .x86_ioport => (try Ref(X86IoPort).alloc(dyn_size)).object(owner),
-            .x86_irq_allocator => (try Ref(X86IrqAllocator).alloc(dyn_size)).object(owner),
-            .x86_irq => (try Ref(X86Irq).alloc(dyn_size)).object(owner),
-        };
-    }
-
-    pub fn call(self: *Self, thread: *Thread, trap: *arch.SyscallRegs) Error!void {
-        // log.debug("call {}", .{self.type});
-        return switch (self.type) {
-            .null => Error.InvalidCapability,
-            .memory => Memory.call(self.paddr, thread, trap),
-            .thread => Thread.call(self.paddr, thread, trap),
-            .vmem => Vmem.call(self.paddr, thread, trap),
-            .frame => Frame.call(self, thread, trap),
-            .device_frame => DeviceFrame.call(self.paddr, thread, trap),
-            .receiver => Receiver.call(self.paddr, thread, trap),
-            .sender => Sender.call(self.paddr, thread, trap),
-            .reply => Error.InvalidArgument,
-            .notify => Notify.call(self.paddr, thread, trap),
-            .x86_ioport_allocator => X86IoPortAllocator.call(self.paddr, thread, trap),
-            .x86_ioport => X86IoPort.call(self.paddr, thread, trap),
-            .x86_irq_allocator => X86IrqAllocator.call(self.paddr, thread, trap),
-            .x86_irq => X86Irq.call(self.paddr, thread, trap),
-        };
-    }
-
-    pub fn recv(self: Self, thread: *Thread, trap: *arch.SyscallRegs) Error!void {
-        return switch (self.type) {
-            .null => Error.InvalidCapability,
-            .memory => Error.InvalidArgument,
-            .thread => Error.InvalidArgument,
-            .vmem => Error.InvalidArgument,
-            .frame => Error.InvalidArgument,
-            .device_frame => Error.InvalidArgument,
-            .receiver => Receiver.recv(self.paddr, thread, trap),
-            .sender => Error.InvalidArgument,
-            .reply => Error.InvalidArgument,
-            .notify => Error.InvalidArgument,
-            .x86_ioport_allocator => Error.InvalidArgument,
-            .x86_ioport => Error.InvalidArgument,
-            .x86_irq_allocator => Error.InvalidArgument,
-            .x86_irq => Error.InvalidArgument,
-        };
-    }
-
-    pub fn reply(self: Self, thread: *Thread, trap: *arch.SyscallRegs) Error!void {
-        return switch (self.type) {
-            .null => Error.InvalidCapability,
-            .memory => Error.InvalidArgument,
-            .thread => Error.InvalidArgument,
-            .vmem => Error.InvalidArgument,
-            .frame => Error.InvalidArgument,
-            .device_frame => Error.InvalidArgument,
-            .receiver => Receiver.reply(self.paddr, thread, trap),
-            .sender => Error.InvalidArgument,
-            .reply => Reply.reply(self.paddr, thread, trap),
-            .notify => Error.InvalidArgument,
-            .x86_ioport_allocator => Error.InvalidArgument,
-            .x86_ioport => Error.InvalidArgument,
-            .x86_irq_allocator => Error.InvalidArgument,
-            .x86_irq => Error.InvalidArgument,
-        };
-    }
-
-    pub fn replyRecv(self: Self, thread: *Thread, trap: *arch.SyscallRegs) Error!void {
-        return switch (self.type) {
-            .null => Error.InvalidCapability,
-            .memory => Error.InvalidArgument,
-            .thread => Error.InvalidArgument,
-            .vmem => Error.InvalidArgument,
-            .frame => Error.InvalidArgument,
-            .device_frame => Error.InvalidArgument,
-            .receiver => Receiver.replyRecv(self.paddr, thread, trap),
-            .sender => Error.InvalidArgument,
-            .reply => Error.InvalidArgument,
-            .notify => Error.InvalidArgument,
-            .x86_ioport_allocator => Error.InvalidArgument,
-            .x86_ioport => Error.InvalidArgument,
-            .x86_irq_allocator => Error.InvalidArgument,
-            .x86_irq => Error.InvalidArgument,
-        };
-    }
-};
 
 fn debugType(comptime T: type) void {
     std.log.debug("{s}: size={} align={}", .{ @typeName(T), @sizeOf(T), @alignOf(T) });
 }
 
 test "new VmemObject and FrameObject" {
-    const vmem = RefCntHandle(VmemObject).init(try VmemObject.init());
-    const frame = RefCntHandle(FrameObject).init(try FrameObject.init(0x8000));
+    const vmem = try Vmem.init();
+    const frame = try Frame.init(0x8000);
     frame.clone();
-    try vmem.ptr.map(frame, 1, addr.Virt.fromInt(0x1000), 6, .{
+    try vmem.map(frame, 1, addr.Virt.fromInt(0x1000), 6, .{
         .readable = true,
         .writable = true,
         .executable = true,
     });
-    try vmem.ptr.switchTo();
-    log.info("fault 0x1000", .{});
-    vmem.ptr.pageFault(
+    try vmem.start();
+    vmem.switchTo();
+    vmem.pageFault(
         .write,
         addr.Virt.fromInt(0x1000),
     ) catch unreachable;
-    log.info("fault 0x4000", .{});
-    vmem.ptr.pageFault(
+    vmem.pageFault(
         .write,
         addr.Virt.fromInt(0x4000),
     ) catch unreachable;
-    log.info("unmap", .{});
-    try vmem.ptr.unmap(addr.Virt.fromInt(0x2000), 1);
-    log.info("fault 0x2000", .{});
-    std.debug.assert(error.NotMapped == vmem.ptr.pageFault(
+    try vmem.unmap(addr.Virt.fromInt(0x2000), 1);
+    std.debug.assert(error.NotMapped == vmem.pageFault(
         .write,
         addr.Virt.fromInt(0x2000),
     ));
-    log.info("fault 0x5000", .{});
-    vmem.ptr.pageFault(
+    vmem.pageFault(
         .write,
         addr.Virt.fromInt(0x5000),
     ) catch unreachable;
-    const a = try frame.ptr.page_hit(4, true);
-    const b = try frame.ptr.page_hit(4, false);
+    const a = try frame.page_hit(4, true);
+    const b = try frame.page_hit(4, false);
     std.debug.assert(a == b);
     std.debug.assert(a != 0);
     frame.deinit();

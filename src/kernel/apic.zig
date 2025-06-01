@@ -54,7 +54,8 @@ var ioapic_lapic_lock: spin.Mutex = .{};
 
 //
 
-pub const Handler = std.atomic.Value(?*caps.Notify);
+// pub const Handler = std.atomic.Value(?*caps.Notify);
+pub const Handler = std.atomic.Value(?*void);
 
 pub const ApicRegs = union(enum) {
     xapic: *LocalXApicRegs,

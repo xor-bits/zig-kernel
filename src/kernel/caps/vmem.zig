@@ -36,7 +36,7 @@ pub fn growCapArray() u32 {
     const new_page_addr = addr.Virt.fromPtr(&caps.capabilityArrayUnchecked().ptr[current_len]);
 
     const last_byte_of_prev = new_page_addr.raw - 1;
-    const last_byte_of_next = new_page_addr.raw + @sizeOf(caps.Object) - 1;
+    const last_byte_of_next = new_page_addr.raw + @sizeOf(caps.CapabilitySlot) - 1;
     const last_page = addr.Virt.fromInt(last_byte_of_next);
 
     const SIZE_4KIB_MASK = ~(@as(usize, 0x00001000 - 1));
@@ -121,8 +121,8 @@ fn isEmpty(entries: *volatile [512]Entry) bool {
 pub const Vmem = struct {
     entries: [512]Entry align(0x1000) = std.mem.zeroes([512]Entry),
 
-    pub fn init(self: caps.Ref(@This())) void {
-        const ptr = self.ptr();
+    pub fn init(self: addr.Phys) void {
+        const ptr = self.toHhdm().toPtr(*volatile @This());
         abi.util.fillVolatile(Entry, ptr.entries[0..256], .{});
         abi.util.copyForwardsVolatile(Entry, ptr.entries[256..], kernel_table.entries[256..]);
     }
@@ -374,15 +374,15 @@ pub const Vmem = struct {
         }
     }
 
-    pub fn switchTo(self: caps.Ref(@This())) void {
+    pub fn switchTo(self: addr.Phys) void {
         const cur = arch.Cr3.read();
-        if (cur.pml4_phys_base == self.paddr.toParts().page) {
+        if (cur.pml4_phys_base == self.toParts().page) {
             // log.info("context switch avoided", .{});
             return;
         }
 
         (arch.Cr3{
-            .pml4_phys_base = self.paddr.toParts().page,
+            .pml4_phys_base = self.toParts().page,
         }).write();
     }
 

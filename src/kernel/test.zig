@@ -6,6 +6,8 @@ const kernel = @import("kernel");
 
 pub const std_options = kernel.std_options;
 pub const panic = kernel.panic;
+pub const epoch_locals = kernel.epoch_locals;
+pub const epoch_allocator = kernel.epoch_allocator;
 
 const log = std.log.scoped(.@"test");
 

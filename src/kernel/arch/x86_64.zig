@@ -861,25 +861,41 @@ pub const Idt = extern struct {
 
                 if (conf.LOG_EVERYTHING) log.debug("general protection fault interrupt", .{});
 
-                log.warn(
-                    \\page fault 0x{x}
-                    \\ - user: {any}
-                    \\ - caused by write: {any}
-                    \\ - instruction fetch: {any}
-                    \\ - ip: 0x{x}
-                    \\ - sp: 0x{x}
-                , .{
-                    target_addr,
-                    pfec.user_mode,
-                    pfec.caused_by_write,
-                    pfec.instruction_fetch,
-                    interrupt_stack_frame.ip,
-                    interrupt_stack_frame.sp,
-                });
+                // log.warn(
+                //     \\page fault 0x{x}
+                //     \\ - user: {any}
+                //     \\ - caused by write: {any}
+                //     \\ - instruction fetch: {any}
+                //     \\ - ip: 0x{x}
+                //     \\ - sp: 0x{x}
+                // , .{
+                //     target_addr,
+                //     pfec.user_mode,
+                //     pfec.caused_by_write,
+                //     pfec.instruction_fetch,
+                //     interrupt_stack_frame.ip,
+                //     interrupt_stack_frame.sp,
+                // });
+
+                const caused_by: FaultCause = if (pfec.caused_by_write)
+                    .write
+                else if (pfec.instruction_fetch)
+                    .exec
+                else
+                    .read;
+
+                const vaddr = addr.Virt.fromUser(target_addr) catch |err| {
+                    std.debug.panic("TODO: handle {}", .{err});
+                };
 
                 if (pfec.user_mode and !conf.KERNEL_PANIC_ON_USER_FAULT) {
-                    cpuLocal().current_thread.?.status = .stopped;
-                    proc.enter();
+                    const thread = cpuLocal().current_thread.?;
+                    thread.proc.vmem.pageFault(caused_by, vaddr) catch |err| {
+                        std.debug.panic("TODO: handle {}", .{err});
+                    };
+
+                    // cpuLocal().current_thread.?.status = .stopped;
+                    // proc.enter();
                 } else {
                     std.debug.panic(
                         \\unhandled page fault 0x{x}
@@ -1038,8 +1054,8 @@ pub const Idt = extern struct {
                     // log.info("extra interrupt i=0x{x}", .{i + IRQ_AVAIL_LOW});
                     defer apic.eoi();
 
-                    const notify = cpuLocal().interrupt_handlers[i].load(.acquire) orelse return;
-                    _ = notify.notify(0);
+                    // const notify = cpuLocal().interrupt_handlers[i].load(.acquire) orelse return;
+                    // _ = notify.notify(0);
                 }
             }).asInt();
         }

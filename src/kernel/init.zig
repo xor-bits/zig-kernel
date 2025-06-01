@@ -21,46 +21,39 @@ const volat = util.volat;
 
 /// load and exec the root process
 pub fn exec(a: args.Args) !void {
-    const vmem = try caps.Ref(caps.Vmem).alloc(null);
+    log.info("creating root vmem", .{});
+    const init_vmem = try caps.Vmem.init();
+    try init_vmem.start();
+    init_vmem.switchTo();
 
-    (arch.Cr3{
-        .pml4_phys_base = vmem.paddr.toParts().page,
-    }).write();
+    log.info("creating root proc", .{});
+    const init_proc = try caps.Process.init(init_vmem);
 
-    const init_thread = try caps.Ref(caps.Thread).alloc(null);
-    init_thread.ptr().* = .{
-        .trap = .{
-            .user_instr_ptr = abi.ROOT_EXE,
-        },
-        .vmem = vmem,
-        .priority = 0,
-    };
+    log.info("creating root thread", .{});
+    const init_thread = try caps.Thread.init(init_proc);
+    init_thread.priority = 0;
+    init_thread.trap.user_instr_ptr = abi.ROOT_EXE;
 
-    const init_memory = try caps.Ref(caps.Memory).alloc(null);
+    log.info("creating root boot_info", .{});
+    const boot_info = try caps.Frame.init(@sizeOf(abi.BootInfo));
 
-    const boot_info = try caps.Ref(caps.Frame).alloc(abi.ChunkSize.of(@sizeOf(abi.BootInfo)));
-
-    const x86_ioport_allocator = caps.Ref(caps.X86IoPortAllocator){ .paddr = .fromInt(0) };
-
-    const x86_irq_allocator = caps.Ref(caps.X86IrqAllocator){ .paddr = .fromInt(0) };
+    try mapRoot(init_thread, init_vmem, boot_info, a);
 
     var id: u32 = undefined;
-    id = caps.pushCapability(vmem.object(init_thread.ptr()));
+
+    id = try caps.pushCapability(.init(init_vmem));
     std.debug.assert(id == abi.caps.ROOT_SELF_VMEM.cap);
-    id = caps.pushCapability(init_thread.object(init_thread.ptr()));
+
+    id = try caps.pushCapability(.init(init_thread));
     std.debug.assert(id == abi.caps.ROOT_SELF_THREAD.cap);
-    id = caps.pushCapability(init_memory.object(init_thread.ptr()));
-    std.debug.assert(id == abi.caps.ROOT_MEMORY.cap);
-    id = caps.pushCapability(boot_info.object(init_thread.ptr()));
+
+    id = try caps.pushCapability(.init(init_proc));
+    std.debug.assert(id == abi.caps.ROOT_SELF_PROC.cap);
+
+    id = try caps.pushCapability(.init(boot_info));
     std.debug.assert(id == abi.caps.ROOT_BOOT_INFO.cap);
-    id = caps.pushCapability(x86_ioport_allocator.object(init_thread.ptr()));
-    std.debug.assert(id == abi.caps.ROOT_X86_IOPORT_ALLOCATOR.cap);
-    id = caps.pushCapability(x86_irq_allocator.object(init_thread.ptr()));
-    std.debug.assert(id == abi.caps.ROOT_X86_IRQ_ALLOCATOR.cap);
 
-    try mapRoot(init_thread.ptr(), vmem.ptr(), boot_info.ptr(), a);
-
-    proc.start(init_thread.ptr());
+    proc.start(init_thread);
     proc.init();
 }
 
@@ -70,14 +63,12 @@ const Result = struct {
 };
 
 fn mapRoot(thread: *caps.Thread, vmem: *caps.Vmem, boot_info: *caps.Frame, a: args.Args) !void {
+    _ = thread;
+
     const data_len = a.root_data.len + a.root_path.len + a.initfs_data.len + a.initfs_path.len;
 
-    const low = addr.Virt.fromInt(abi.ROOT_EXE);
-    const high = addr.Virt.fromInt(abi.ROOT_EXE + data_len);
-
-    const boot_info_ptr: *volatile abi.BootInfo = @ptrCast(boot_info);
-
-    boot_info_ptr.* = .{
+    log.info("writing root boot_info", .{});
+    try boot_info.write(0, @as([*]const u8, @ptrCast(&abi.BootInfo{
         .root_data = @ptrFromInt(abi.ROOT_EXE),
         .root_data_len = a.root_data.len,
         .root_path = @ptrFromInt(abi.ROOT_EXE + a.root_data.len),
@@ -86,69 +77,39 @@ fn mapRoot(thread: *caps.Thread, vmem: *caps.Vmem, boot_info: *caps.Frame, a: ar
         .initfs_data_len = a.initfs_data.len,
         .initfs_path = @ptrFromInt(abi.ROOT_EXE + a.root_data.len + a.root_path.len + a.initfs_data.len),
         .initfs_path_len = a.initfs_path.len,
-    };
+    }))[0..@sizeOf(abi.BootInfo)]);
 
-    try fb.bootInfoInstallFramebuffer(boot_info_ptr, thread);
+    log.info("creating root frame", .{});
+    const root_frame = try caps.Frame.init(data_len);
 
-    try acpi.bootInfoInstallMcfg(boot_info_ptr, thread);
+    var i: usize = 0;
+    log.info("copying root data", .{});
+    try root_frame.write(i, a.root_data);
+    i += a.root_data.len;
+    log.info("copying root path", .{});
+    try root_frame.write(i, a.root_path);
+    i += a.root_path.len;
+    log.info("copying initfs data", .{});
+    try root_frame.write(i, a.initfs_data);
+    i += a.initfs_data.len;
+    log.info("copying initfs path", .{});
+    try root_frame.write(i, a.initfs_path);
 
-    const hpet_cap_id = caps.pushCapability(hpet.hpetFrame().object(thread));
-    volat(&boot_info_ptr.hpet).* = .{ .cap = hpet_cap_id };
-
-    log.info("root virtual memory size: 0x{x}", .{data_len});
-    log.info("mapping root   [ 0x{x:0>16}..0x{x:0>16} ]", .{
-        @intFromPtr(boot_info_ptr.root_data),
-        @intFromPtr(boot_info_ptr.root_data) + boot_info_ptr.root_data_len,
-    });
-    log.info("mapping initfs [ 0x{x:0>16}..0x{x:0>16} ]", .{
-        @intFromPtr(boot_info_ptr.initfs_data),
-        @intFromPtr(boot_info_ptr.initfs_data) + boot_info_ptr.initfs_data_len,
-    });
-    log.info("root binary path: '{s}'", .{a.root_path});
-    log.info("initfs path:      '{s}'", .{a.initfs_path});
-
-    var current = low;
-    while (current.raw < high.raw) : (current.raw += addr.Virt.fromParts(.{ .level1 = 1 }).raw) {
-        // log.info("mapping level 1 entry", .{});
-
-        try vmem.mapFrame(
-            (try caps.Ref(caps.Frame).alloc(.@"4KiB")).paddr,
-            current,
-            .{
-                .readable = true,
-                .writable = true,
-                .executable = true,
-            },
-            .{},
-        );
-    }
+    log.info("mapping root", .{});
+    try vmem.map(
+        root_frame,
+        0,
+        addr.Virt.fromInt(abi.ROOT_EXE),
+        @intCast(root_frame.pages.len),
+        .{
+            .readable = true,
+            .writable = true,
+            .executable = true,
+            .user_accessible = true,
+        },
+    );
 
     arch.flushTlb();
-
-    log.info("copying root data", .{});
-    std.mem.copyForwards(
-        u8,
-        @as([]u8, @ptrCast(boot_info_ptr.rootData())),
-        a.root_data,
-    );
-    log.info("copying root path", .{});
-    std.mem.copyForwards(
-        u8,
-        @as([]u8, @ptrCast(boot_info_ptr.rootPath())),
-        a.root_path,
-    );
-    log.info("copying initfs data", .{});
-    std.mem.copyForwards(
-        u8,
-        @as([]u8, @ptrCast(boot_info_ptr.initfsData())),
-        a.initfs_data,
-    );
-    log.info("copying initfs path", .{});
-    std.mem.copyForwards(
-        u8,
-        @as([]u8, @ptrCast(boot_info_ptr.initfsPath())),
-        a.initfs_path,
-    );
 
     log.info("root mapped and copied", .{});
 }

@@ -19,7 +19,7 @@ pub fn init_thread() void {
     var all_locals_now = all_locals.load(.monotonic);
 
     while (true) {
-        l.next = all_locals_now;
+        l.next.val = all_locals_now;
         if (all_locals.cmpxchgStrong(
             all_locals_now,
             l,
@@ -77,8 +77,6 @@ pub fn collect(guard: Guard) void {
     const new_epoch = tryAdvance();
     const expired = (new_epoch + 1) % 3;
 
-    guard.locals.hazard[expired].items.len == 0;
-
     for (guard.locals.hazard[expired].items) |*deferred| {
         deferred.func(&deferred.data);
     }
@@ -102,7 +100,7 @@ fn tryAdvance() usize {
             return epoch;
         }
 
-        next_locals = current_locals.next;
+        next_locals = current_locals.next.val;
     }
 
     const new_epoch = (epoch + 1) % 3;
@@ -122,6 +120,7 @@ pub fn deferDeinit(guard: Guard, allocator: std.mem.Allocator, ptr: anytype) voi
     };
 
     std.debug.assert(@sizeOf(Obj) <= @sizeOf([3]usize));
+    std.debug.assert(@alignOf(Obj) <= @sizeOf([3]usize));
 
     var data: [3]usize = undefined;
     @as(*Obj, @ptrCast(&data)).* = Obj{
@@ -132,12 +131,25 @@ pub fn deferDeinit(guard: Guard, allocator: std.mem.Allocator, ptr: anytype) voi
     deferFunc(guard, Obj.func, data);
 }
 
-pub fn deferFunc(guard: Guard, func: *const fn (data: *[3]usize) void, data: [3]usize) !void {
-    // FIXME: lockless
-    guard.locals.hazard[guard.epoch].mutex.lock();
-    defer guard.locals.hazard[guard.epoch].mutex.unlock();
+pub fn deferCtxFunc(guard: Guard, ctx: anytype, comptime func: fn (ctx: @TypeOf(ctx)) void) !void {
+    const T: type = @TypeOf(ctx);
+    std.debug.assert(@sizeOf(T) <= @sizeOf([3]usize));
+    std.debug.assert(@alignOf(T) <= @sizeOf([3]usize));
 
-    try guard.locals.hazard[guard.epoch].arr.append(DeferFunc{
+    const Wrapper = struct {
+        fn wrapper(data: *[3]usize) void {
+            func(@as(*T, @ptrCast(data)).*);
+        }
+    };
+
+    var data: [3]usize = undefined;
+    @as(*T, @ptrCast(&data)).* = ctx;
+
+    try deferFunc(guard, Wrapper.wrapper, data);
+}
+
+pub fn deferFunc(guard: Guard, func: *const fn (data: *[3]usize) void, data: [3]usize) !void {
+    try guard.locals.hazard[guard.epoch].append(DeferFunc{
         .func = func,
         .data = data,
     });
@@ -152,14 +164,14 @@ pub const Guard = struct {
 pub const Locals = struct {
     // bit 0    => is_active
     // bits 1.. => epoch counter
-    epoch: CachePadded(std.atomic.Value(usize)) = .{ .val = .init(0) },
+    epoch: CachePadded(std.atomic.Value(usize)) = .init(.init(0)),
 
     // the rest are only for the owner thread
 
-    next: CachePadded(?*Locals) = null,
+    next: CachePadded(?*Locals) = .init(null),
     added: bool = false,
     count: usize = 0,
-    hazard: [3]std.ArrayList(DeferFunc),
+    hazard: [3]std.ArrayList(DeferFunc) = undefined,
 };
 
 //

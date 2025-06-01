@@ -45,7 +45,15 @@ pub const CpuLocalStorage = struct {
     // FIXME: remove notify caps from here
     interrupt_handlers: [apic.IRQ_AVAIL_COUNT]apic.Handler =
         .{apic.Handler.init(null)} ** apic.IRQ_AVAIL_COUNT,
+
+    epoch_locals: abi.epoch.Locals = .{},
 };
+
+pub fn epoch_locals() *abi.epoch.Locals {
+    return &arch.cpuLocal().epoch_locals;
+}
+
+pub const epoch_allocator: std.mem.Allocator = pmem.page_allocator;
 
 //
 
@@ -96,6 +104,9 @@ pub fn main() noreturn {
         std.debug.panic("failed to initialize CPU-{}: {}", .{ id, err });
     };
 
+    // initialize kernel object garbage collector
+    abi.epoch.init_thread();
+
     log.info("parsing kernel cmdline", .{});
     const a = args.parse() catch |err| {
         std.debug.panic("failed to parse kernel cmdline: {}", .{err});
@@ -143,6 +154,9 @@ pub fn smpmain(smpinfo: *limine.SmpInfo) noreturn {
     arch.initCpu(id, smpinfo) catch |err| {
         std.debug.panic("failed to initialize CPU-{}: {}", .{ id, err });
     };
+
+    // initialize kernel object garbage collector
+    abi.epoch.init_thread();
 
     // initialize ACPI specific things: APIC, HPET, ...
     log.info("initializing ACPI for CPU-{}", .{id});
@@ -239,65 +253,13 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
 
             @panic("manual kernel panic");
         },
-        .debug => {
-            if (caps.getCapability(thread, @truncate(trap.arg0))) |obj| {
-                defer obj.lock.unlock();
-                trap.syscall_id = abi.sys.encode(@intFromEnum(obj.type));
-            } else |err| {
-                if (conf.LOG_OBJ_CALLS) log.warn("obj call error: {}", .{err});
-                trap.syscall_id = abi.sys.encode(err);
-            }
-        },
-        .call => {
-            if (caps.call(thread, @truncate(trap.arg0), trap)) |_| {
-                trap.syscall_id = abi.sys.encode(0);
-            } else |err| {
-                if (conf.LOG_OBJ_CALLS) log.warn("obj call error: {}", .{err});
-                trap.syscall_id = abi.sys.encode(err);
-            }
-        },
-        .recv => {
-            if (caps.recv(thread, @truncate(trap.arg0), trap)) |_| {
-                trap.syscall_id = abi.sys.encode(0);
-            } else |err| {
-                if (conf.LOG_OBJ_CALLS) log.warn("obj call error: {}", .{err});
-                trap.syscall_id = abi.sys.encode(err);
-            }
-        },
-        .reply => {
-            if (caps.reply(thread, @truncate(trap.arg0), trap)) |_| {
-                trap.syscall_id = abi.sys.encode(0);
-            } else |err| {
-                if (conf.LOG_OBJ_CALLS) log.warn("obj call error: {}", .{err});
-                trap.syscall_id = abi.sys.encode(err);
-            }
-        },
-        .reply_recv => {
-            if (caps.replyRecv(thread, @truncate(trap.arg0), trap)) |_| {
-                trap.syscall_id = abi.sys.encode(0);
-            } else |err| {
-                if (conf.LOG_OBJ_CALLS) log.warn("obj call error: {}", .{err});
-                trap.syscall_id = abi.sys.encode(err);
-            }
-        },
-        .yield => {
+        .self_yield => {
             proc.yield(trap);
         },
-        .stop => {
+        .self_stop => {
             proc.stop(thread);
         },
-        .get_extra => {
-            const idx: u7 = @truncate(trap.arg0);
-            trap.arg0 = thread.getExtra(idx);
-            trap.syscall_id = abi.sys.encode(0);
-        },
-        .set_extra => {
-            const idx: u7 = @truncate(trap.arg0);
-            const val: usize = @truncate(trap.arg1);
-            thread.setExtra(idx, val, trap.arg2 != 0);
-            trap.syscall_id = abi.sys.encode(0);
-        },
-        // else => std.debug.panic("TODO: syscall {s}", .{@tagName(id)}),
+        else => std.debug.panic("TODO: syscall {s}", .{@tagName(id)}),
     }
 
     const thread_now = locals.current_thread.?;

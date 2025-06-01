@@ -5,8 +5,9 @@ const sys = @import("sys.zig");
 
 pub const ROOT_SELF_VMEM: Vmem = .{ .cap = 1 };
 pub const ROOT_SELF_THREAD: Thread = .{ .cap = 2 };
-pub const ROOT_MEMORY: Memory = .{ .cap = 3 };
+pub const ROOT_SELF_PROC: Memory = .{ .cap = 3 };
 pub const ROOT_BOOT_INFO: Frame = .{ .cap = 4 };
+pub const ROOT_MEMORY: Memory = .{ .cap = 5 };
 pub const ROOT_X86_IOPORT_ALLOCATOR: X86IoPortAllocator = .{ .cap = 5 };
 pub const ROOT_X86_IRQ_ALLOCATOR: X86IrqAllocator = .{ .cap = 6 };
 
