@@ -59,8 +59,6 @@ pub fn panic(msg: []const u8, _: ?*std.builtin.StackTrace, _: ?usize) noreturn {
 pub const ObjectType = enum(u8) {
     /// an unallocated/invalid capability
     null = 0,
-    /// capability that allows kernel object allocation
-    memory,
     /// capability to manage a single process
     process,
     /// capability to manage a single thread control block (TCB)
@@ -69,20 +67,18 @@ pub const ObjectType = enum(u8) {
     vmem,
     /// capability to a physical memory region (sized `ChunkSize`)
     frame,
-    /// capability to a MMIO physical memory region
-    device_frame,
     /// capability to **the** receiver end of an endpoint,
     /// there can only be a single receiver
     receiver,
+    /// capability to **a** reply object
+    /// it can be saved/loaded from receiver or replied with
+    reply,
     /// capability to **a** sender end of an endpoint,
     /// there can be multiple senders
     sender,
     /// capability to **a** notify object
     /// there can be multiple of them
     notify,
-    /// capability to **a** reply object
-    /// it can be saved/loaded from receiver or replied with
-    reply,
 
     /// x86 specific capability that allows allocating `x86_ioport` capabilities
     x86_ioport_allocator,

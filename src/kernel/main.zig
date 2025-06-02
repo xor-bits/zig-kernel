@@ -253,7 +253,7 @@ fn handle_syscall(
 
             trap.syscall_id = abi.sys.encode(0);
         },
-        .kernelPanic => {
+        .kernel_panic => {
             if (!conf.KERNEL_PANIC_SYSCALL)
                 return abi.sys.Error.InvalidSyscall;
 

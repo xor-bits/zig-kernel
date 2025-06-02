@@ -8,39 +8,97 @@ const ring = @import("ring.zig");
 pub const Id = enum(usize) {
     /// print debug logs to serial output
     log = 1,
-    kernelPanic,
-    /// identify the object type of a capability
-    debug,
-    call,
-    recv,
-    reply,
-    reply_recv,
-    /// read (and reset) an extra message register of the current thread
-    get_extra,
-    /// write an extra message register of the current thread
-    set_extra,
+    /// manually panic the kernel from user-space in debug mode
+    kernel_panic,
 
+    /// create a new `Frame` object that can be mapped to one or many `Vmem`s
     frame_create,
+    /// get the `Frame` object's size in pages
     frame_get_size,
 
+    /// create a new `Vmem` object that handles a single virtual address space
     vmem_create,
+    /// create a new handle to the current `Vmem`
     vmem_self,
+    /// map a part of (or the whole) `Frame` into this `Vmem`
     vmem_map,
+    /// unmap any virtual address space region from this `Vmem`
     vmem_unmap,
 
+    /// create a new `Process` object that handles a single process
+    /// capability handles are tied to processes
     proc_create,
+    /// create a new handle to the current `Process`
     proc_self,
 
+    /// create a new `Thread` object that handles a single thread within a single process
     thread_create,
+    /// create a new handle to the current `Thread`
     thread_self,
+    /// read all registers of a stopped `Thread`
     thread_read_regs,
+    /// write all registers of a stopped `Thread`
     thread_write_regs,
+    /// start a stopped/new `Thread`
     thread_start,
+    /// stop a running `Thread`
     thread_stop,
+    /// modify `Thread` priority, the priority can only be as high as the highest priority in the current process
     thread_set_prio,
 
+    /// create a new `Receiver` object that is the receiver end of a new IPC queue
+    receiver_create,
+    // receiver_subscribe,
+    /// wait until a matching `Sender.call` is called and return the message
+    receiver_recv,
+    /// non-blocking reply to the last caller with a message
+    receiver_reply,
+    /// combined `receiver_reply` + `receiver_recv`
+    receiver_reply_recv,
+    /// save the last caller into a new `Reply` object to allow another `receiver_recv` before `receiver_reply`
+    receiver_save_caller,
+    // receiver_load_caller,
+
+    /// non-blocking reply to the last caller with a message
+    reply_reply,
+
+    /// create a new `Sender` object that is the sender end of some already existing IPC queue
+    sender_create,
+    // sender_send, // TODO: non-blocking call
+    /// wait until a matching `Receiver.recv` is called and switch to that thread
+    /// with a provided message, and return the reply message
+    sender_call,
+
+    /// create a new `Notify` object that is a messageless IPC structure
+    notify_create,
+    /// wait until this `Notify` is notified with `notify_notify`,
+    /// or return immediately if it was already notified
+    notify_wait,
+    /// check if this `Notify` object is already notified
+    notify_poll,
+    /// notify this `Notify` object and wake up sleepers
+    notify_notify,
+
+    /// create a new `X86IoPort` object that manages a single x86 I/O port
+    /// TODO: use I/O Permissions Bitmap in the TSS to do port io from user-space
+    x86_ioport_create,
+    /// `inb` instruction on the specific provided `X86IoPort` port
+    x86_ioport_inb,
+    /// `outb` instruction on the specific provided `X86IoPort` port
+    x86_ioport_outb,
+
+    /// create a new `X86Irq` object that manages a single x86 interrupt vector
+    x86_irq_create,
+    /// notify a specific `Notify` object every time this IRQ is generated
+    x86_irq_subscribe,
+    /// stop notifying a specific `Notify` object
+    x86_irq_unsubscribe,
+
+    /// identify which object type some capability is
     handle_identify,
+    /// create another handle to the same object
     handle_duplicate,
+    /// close a handle to some object, might or might not delete the object
     handle_close,
 
     /// give up the CPU for other tasks
@@ -51,6 +109,7 @@ pub const Id = enum(usize) {
     // TODO: maybe move all object call id's here to be syscall id's
 };
 
+/// capability or mapping rights
 pub const Rights = packed struct {
     readable: bool = true,
     writable: bool = false,
@@ -115,6 +174,7 @@ pub const CacheType = enum(u8) {
     }
 };
 
+/// extra mapping flags
 pub const MapFlags = packed struct {
     // protection_key: u8 = 0,
     cache: CacheType = .write_back,
@@ -129,6 +189,7 @@ pub const MapFlags = packed struct {
     }
 };
 
+/// syscall interface Error type
 pub const Error = error{
     Unimplemented,
     InvalidAddress,
@@ -162,6 +223,7 @@ pub const Error = error{
     UnknownError,
 };
 
+/// FIXME: should be Error!u32
 pub fn encode(result: Error!usize) usize {
     const val = result catch |err| {
         return encodeError(err);
@@ -255,27 +317,7 @@ pub fn decodeVoid(v: usize) Error!void {
     _ = try decode(v);
 }
 
-//
-
-// MEMORY CAPABILITY CALLS
-
-pub const MemoryCallId = enum(u8) {
-    alloc,
-};
-
-// allocate a new capability using a memory capability
-pub fn alloc(mem_cap: u32, ty: abi.ObjectType, dyn_size: ?abi.ChunkSize) !u32 {
-    var msg: Message = .{
-        .arg0 = @intFromEnum(MemoryCallId.alloc),
-        .arg1 = @intFromEnum(ty),
-        .arg2 = @intFromEnum(dyn_size orelse .@"4KiB"),
-    };
-    try call(mem_cap, &msg);
-    return @truncate(msg.cap);
-}
-
-// THREAD CAPABILITY CALLS
-
+/// x86_64 thread registers
 pub const ThreadRegs = extern struct {
     _r15: u64 = 0,
     _r14: u64 = 0,
@@ -305,250 +347,7 @@ pub const ThreadRegs = extern struct {
     user_stack_ptr: u64 = 0,
 };
 
-// FRAME CAPABILITY CALLS
-
-pub const FrameCallId = enum(u8) {
-    size_of,
-    subframe,
-    revoke,
-};
-
-pub fn frameSizeOf(frame_cap: u32) !abi.ChunkSize {
-    var msg: Message = .{
-        .arg0 = @intFromEnum(FrameCallId.size_of),
-    };
-    try call(frame_cap, &msg);
-    return std.meta.intToEnum(abi.ChunkSize, msg.arg0) catch unreachable;
-}
-
-pub fn frameSubframe(frame_cap: u32, paddr: usize, size: abi.ChunkSize) !u32 {
-    var msg: Message = .{
-        .arg0 = @intFromEnum(FrameCallId.subframe),
-        .arg1 = paddr,
-        .arg2 = @intFromEnum(size),
-    };
-    try call(frame_cap, &msg);
-    return @truncate(msg.arg0);
-}
-
-pub fn frameRevoke(frame_cap: u32) !void {
-    var msg: Message = .{
-        .arg0 = @intFromEnum(FrameCallId.revoke),
-    };
-    try call(frame_cap, &msg);
-}
-
-// DEVICE FRAME CAPABILITY CALLS
-
-pub const DeviceFrameCallId = enum(u8) {
-    addr_of,
-    size_of,
-    subframe,
-};
-
-pub fn deviceFrameAddrOf(frame_cap: u32) !usize {
-    var msg: Message = .{
-        .arg0 = @intFromEnum(DeviceFrameCallId.addr_of),
-    };
-    try call(frame_cap, &msg);
-    return msg.arg0;
-}
-
-pub fn deviceFrameSizeOf(frame_cap: u32) !abi.ChunkSize {
-    var msg: Message = .{
-        .arg0 = @intFromEnum(DeviceFrameCallId.size_of),
-    };
-    try call(frame_cap, &msg);
-    return std.meta.intToEnum(abi.ChunkSize, msg.arg0) catch unreachable;
-}
-
-pub fn deviceFrameSubframe(frame_cap: u32, paddr: usize, size: abi.ChunkSize) !u32 {
-    var msg: Message = .{
-        .arg0 = @intFromEnum(DeviceFrameCallId.subframe),
-        .arg1 = paddr,
-        .arg2 = @intFromEnum(size),
-    };
-    try call(frame_cap, &msg);
-    return @truncate(msg.arg0);
-}
-
-// RECEIVER CAPABILITY CALLS
-
-pub const ReceiverCallId = enum(u8) {
-    subscribe,
-    save_caller,
-    load_caller,
-};
-
-pub fn receiverSubscribe(recv_cap: u32) Error!u32 {
-    var msg: Message = .{
-        .arg0 = @intFromEnum(ReceiverCallId.subscribe),
-    };
-    try call(recv_cap, &msg);
-    return @truncate(msg.cap);
-}
-
-pub fn receiverSaveCaller(recv_cap: u32) Error!u32 {
-    var msg: Message = .{
-        .arg0 = @intFromEnum(ReceiverCallId.save_caller),
-    };
-    try call(recv_cap, &msg);
-    return @truncate(msg.cap);
-}
-
-pub fn receiverLoadCaller(recv_cap: u32, reply_cap: u32) Error!void {
-    var msg: Message = .{
-        .arg0 = @intFromEnum(ReceiverCallId.load_caller),
-        .arg1 = reply_cap,
-    };
-    try call(recv_cap, &msg);
-}
-
-// REPLY CAPABILITY CALLS
-
-// SENDER CAPABILITY CALLS
-
-// NOTIFY CAPABILITY CALLS
-
-pub const NotifyCallId = enum(u8) {
-    wait,
-    poll,
-    notify,
-    clone,
-};
-
-// returns the cap id of whoever notified this thread first
-pub fn notifyWait(notify_cap: u32) Error!u32 {
-    var msg: Message = .{
-        .arg0 = @intFromEnum(NotifyCallId.wait),
-    };
-    try call(notify_cap, &msg);
-    return @truncate(msg.cap);
-}
-
-// returns the cap id of whoever notified this thread first
-pub fn notifyPoll(notify_cap: u32) Error!?u32 {
-    var msg: Message = .{
-        .arg0 = @intFromEnum(NotifyCallId.poll),
-    };
-    try call(notify_cap, &msg);
-    return if ((msg.cap) == 0) null else @truncate(msg.cap);
-}
-
-/// returns true if it was already signaled
-pub fn notifyNotify(notify_cap: u32) Error!bool {
-    var msg: Message = .{
-        .arg0 = @intFromEnum(NotifyCallId.notify),
-    };
-    try call(notify_cap, &msg);
-    return msg.arg0 != 0;
-}
-
-/// clone the capability, the clone points to the same notify object
-pub fn notifyClone(notify_cap: u32) Error!u32 {
-    var msg: Message = .{
-        .arg0 = @intFromEnum(NotifyCallId.clone),
-    };
-    try call(notify_cap, &msg);
-    return @truncate(msg.arg0);
-}
-
-// X86IOPORTALLOCATOR CAPABILITY CALLS
-
-pub const X86IoPortAllocatorCallId = enum(u8) {
-    alloc,
-    clone,
-};
-
-pub fn x86IoPortAllocatorAlloc(x86_ioport_allocator_cap_id: u32, port: u16) Error!u32 {
-    var msg: Message = .{
-        .arg0 = @intFromEnum(X86IoPortAllocatorCallId.alloc),
-        .arg1 = port,
-    };
-    try call(x86_ioport_allocator_cap_id, &msg);
-    return @truncate(msg.arg0);
-}
-
-pub fn x86IoPortAllocatorClone(x86_ioport_allocator_cap_id: u32) Error!u32 {
-    var msg: Message = .{
-        .arg0 = @intFromEnum(X86IoPortAllocatorCallId.clone),
-    };
-    try call(x86_ioport_allocator_cap_id, &msg);
-    return @truncate(msg.arg0);
-}
-
-// X86IOPORT CAPABILITY CALLS
-
-pub const X86IoPortCallId = enum(u8) {
-    inb,
-    outb,
-};
-
-pub fn x86IoPortInb(x86_ioport_cap_id: u32) Error!u8 {
-    var msg: Message = .{
-        .arg0 = @intFromEnum(X86IoPortCallId.inb),
-    };
-    try call(x86_ioport_cap_id, &msg);
-    return @truncate(msg.arg0);
-}
-
-pub fn x86IoPortOutb(x86_ioport_cap_id: u32, byte: u8) Error!void {
-    var msg: Message = .{
-        .arg0 = @intFromEnum(X86IoPortCallId.outb),
-        .arg1 = byte,
-    };
-    try call(x86_ioport_cap_id, &msg);
-}
-
-// X86IRQALLOCATOR CAPABILITY CALLS
-
-pub const X86IrqAllocatorCallId = enum(u8) {
-    alloc,
-    clone,
-};
-
-pub fn x86IrqAllocatorAlloc(x86_irq_allocator_cap_id: u32, global_system_interrupt: u8) Error!u32 {
-    var msg: Message = .{
-        .arg0 = @intFromEnum(X86IrqAllocatorCallId.alloc),
-        .arg1 = global_system_interrupt,
-    };
-    try call(x86_irq_allocator_cap_id, &msg);
-    return @truncate(msg.arg0);
-}
-
-pub fn x86IrqAllocatorClone(x86_irq_allocator_cap_id: u32) Error!u32 {
-    var msg: Message = .{
-        .arg0 = @intFromEnum(X86IrqAllocatorCallId.clone),
-    };
-    try call(x86_irq_allocator_cap_id, &msg);
-    return @truncate(msg.arg0);
-}
-
-// X86IRQ CAPABILITY CALLS
-
-pub const X86IrqCallId = enum(u8) {
-    subscribe,
-    unsubscribe,
-};
-
-pub fn x86IrqSubscribe(x86_irq_cap_id: u32, notify_cap_id: u32) Error!void {
-    var msg: Message = .{
-        .arg0 = @intFromEnum(X86IrqCallId.subscribe),
-        .arg1 = notify_cap_id,
-    };
-    try call(x86_irq_cap_id, &msg);
-}
-
-pub fn x86IrqUnsubscribe(x86_irq_cap_id: u32, notify_cap_id: u32) Error!void {
-    var msg: Message = .{
-        .arg0 = @intFromEnum(X86IrqCallId.unsubscribe),
-        .arg1 = notify_cap_id,
-    };
-    try call(x86_irq_cap_id, &msg);
-}
-
-// SYSCALLS
-
+/// small IPC message
 pub const Message = extern struct {
     /// capability id
     cap: u32 = 0,
@@ -568,63 +367,16 @@ comptime {
     std.debug.assert(@sizeOf(Message) == @sizeOf([6]usize));
 }
 
+// SYSCALLS
+
 pub fn log(s: []const u8) void {
     _ = syscall(.log, .{ @intFromPtr(s.ptr), s.len }) catch unreachable;
 }
 
 pub fn kernelPanic() noreturn {
     if (!abi.conf.KERNEL_PANIC_SYSCALL) @compileError("debug kernel panics not enabled");
-    _ = syscall(.kernelPanic, .{}) catch {};
+    _ = syscall(.kernel_panic, .{}) catch {};
     unreachable;
-}
-
-pub fn debug(cap: u32) !abi.ObjectType {
-    const id = try syscall(.debug, .{cap});
-    return std.meta.intToEnum(abi.ObjectType, id) catch unreachable;
-}
-
-pub fn call(cap: u32, msg: *Message) !void {
-    msg.cap = cap;
-    _ = try rwcall(.call, msg);
-}
-
-pub fn recv(cap: u32, msg: *Message) !void {
-    msg.cap = cap;
-    _ = try rwcall(.recv, msg);
-}
-
-pub fn reply(cap: u32, msg: *Message) !void {
-    msg.cap = cap;
-    const regs: *[6]usize = @ptrCast(msg);
-    _ = try syscall(.reply, .{
-        regs[0],
-        regs[1],
-        regs[2],
-        regs[3],
-        regs[4],
-        regs[5],
-    });
-}
-
-pub fn replyRecv(cap: u32, msg: *Message) !void {
-    msg.cap = cap;
-    _ = try rwcall(.reply_recv, msg);
-}
-
-pub fn getExtra(idx: u7) usize {
-    const result, const vals = syscall1rw(@intFromEnum(Id.get_extra), .{
-        idx,
-    });
-    _ = decode(result) catch unreachable;
-    return vals[0];
-}
-
-pub fn setExtra(idx: u7, val: usize, is_cap: bool) void {
-    _ = syscall(.set_extra, .{
-        idx,
-        val,
-        @intFromBool(is_cap),
-    }) catch unreachable;
 }
 
 pub fn frameCreate(size_bytes: usize) Error!u32 {
@@ -736,28 +488,6 @@ pub fn self_stop() noreturn {
     _ = syscall(.self_stop, .{}) catch {};
     asm volatile ("mov 0, %rax"); // read from nullptr to kill the process for sure
     unreachable;
-}
-
-fn rwcall(id: Id, msg: *Message) !usize {
-    const regs: *[6]usize = @ptrCast(msg);
-
-    const res, const args_out = syscall6rw(@intFromEnum(id), .{
-        regs[0],
-        regs[1],
-        regs[2],
-        regs[3],
-        regs[4],
-        regs[5],
-    });
-
-    regs[0] = args_out[0];
-    regs[1] = args_out[1];
-    regs[2] = args_out[2];
-    regs[3] = args_out[3];
-    regs[4] = args_out[4];
-    regs[5] = args_out[5];
-
-    return decode(res);
 }
 
 //
