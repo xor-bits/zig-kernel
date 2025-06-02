@@ -46,24 +46,18 @@ pub fn main() !void {
 
     const len = try abi.sys.frameGetSize(abi.caps.ROOT_BOOT_INFO.cap);
 
-    try abi.sys.vmemMap2(
-        abi.caps.ROOT_SELF_VMEM.cap,
-        abi.caps.ROOT_BOOT_INFO.cap,
+    try abi.caps.ROOT_SELF_VMEM.map(
+        abi.caps.ROOT_BOOT_INFO,
         0,
         BOOT_INFO,
         len,
         .{},
         .{},
     );
-
-    try map(
-        abi.caps.ROOT_BOOT_INFO,
-        BOOT_INFO,
-        .{ .writable = true },
-        .{},
-    );
     log.info("boot info mapped", .{});
+}
 
+pub fn _main() !void {
     try initfsd.init();
 
     const recv = try alloc(abi.caps.Receiver);
@@ -635,11 +629,8 @@ export fn zigMain() noreturn {
 fn mapStack() !void {
     log.info("mapping stack", .{});
 
-    const frame = try abi.sys.frameCreate(1024 * 256);
-
-    const self_vmem = try abi.sys.vmemSelf();
-    try abi.sys.vmemMap2(
-        self_vmem,
+    const frame = try caps.Frame.create(1024 * 256);
+    try caps.ROOT_SELF_VMEM.map(
         frame,
         0,
         STACK_BOTTOM,

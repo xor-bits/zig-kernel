@@ -71,20 +71,38 @@ pub const Vmem = extern struct {
 
     pub const Type: abi.ObjectType = .vmem;
 
-    pub fn map(self: @This(), frame: Frame, vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) sys.Error!void {
-        return sys.vmemMap(self.cap, frame.cap, vaddr, rights, flags);
+    pub fn create() sys.Error!@This() {
+        const cap = try sys.vmemCreate();
+        return .{ .cap = cap };
     }
 
-    pub fn unmap(self: @This(), frame: Frame, vaddr: usize) sys.Error!void {
-        return sys.vmemUnmap(self.cap, frame.cap, vaddr);
+    pub fn self() sys.Error!@This() {
+        const cap = try sys.vmemSelf();
+        return .{ .cap = cap };
     }
 
-    pub fn mapDevice(self: @This(), frame: DeviceFrame, vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) sys.Error!void {
-        return sys.vmemMap(self.cap, frame.cap, vaddr, rights, flags);
+    pub fn map(
+        this: @This(),
+        frame: Frame,
+        frame_offset: usize,
+        vaddr: usize,
+        length: usize,
+        rights: abi.sys.Rights,
+        flags: abi.sys.MapFlags,
+    ) sys.Error!void {
+        return sys.vmemMap(
+            this.cap,
+            frame.cap,
+            frame_offset,
+            vaddr,
+            length,
+            rights,
+            flags,
+        );
     }
 
-    pub fn unmapDevice(self: @This(), frame: DeviceFrame, vaddr: usize) sys.Error!void {
-        return sys.vmemUnmap(self.cap, frame.cap, vaddr);
+    pub fn unmap(this: @This(), vaddr: usize, length: usize) sys.Error!void {
+        return sys.vmemUnmap(this.cap, vaddr, length);
     }
 };
 
@@ -94,16 +112,13 @@ pub const Frame = extern struct {
 
     pub const Type: abi.ObjectType = .frame;
 
-    pub fn sizeOf(self: @This()) !abi.ChunkSize {
-        return sys.frameSizeOf(self.cap);
+    pub fn create(size_bytes: usize) sys.Error!@This() {
+        const cap = try sys.frameCreate(size_bytes);
+        return .{ .cap = cap };
     }
 
-    pub fn subframe(self: @This(), paddr: usize, size: abi.ChunkSize) !@This() {
-        return .{ .cap = try sys.frameSubframe(self.cap, paddr, size) };
-    }
-
-    pub fn revoke(self: @This()) !void {
-        try sys.frameRevoke(self.cap);
+    pub fn frameGetSize(self: @This()) sys.Error!usize {
+        return try sys.frameGetSize(self.cap);
     }
 };
 

@@ -364,33 +364,6 @@ pub fn threadTransferCap(thread_cap: u32, cap: u32) !void {
     try call(thread_cap, &msg);
 }
 
-// VMEM CAPABILITY CALLS
-
-pub const VmemCallId = enum(u8) {
-    map,
-    unmap,
-};
-
-pub fn vmemMap(vmem_cap: u32, frame_cap: u32, vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) !void {
-    var msg: Message = .{
-        .arg0 = @intFromEnum(VmemCallId.map),
-        .arg1 = frame_cap,
-        .arg2 = vaddr,
-        .arg3 = rights.asInt(),
-        .arg4 = flags.asInt(),
-    };
-    try call(vmem_cap, &msg);
-}
-
-pub fn vmemUnmap(vmem_cap: u32, frame_cap: u32, vaddr: usize) !void {
-    var msg: Message = .{
-        .arg0 = @intFromEnum(VmemCallId.unmap),
-        .arg1 = frame_cap,
-        .arg2 = vaddr,
-    };
-    try call(vmem_cap, &msg);
-}
-
 // FRAME CAPABILITY CALLS
 
 pub const FrameCallId = enum(u8) {
@@ -739,7 +712,7 @@ pub fn unpackRightsFlags(v: u16) struct { Rights, MapFlags } {
     return .{ val.r, val.f };
 }
 
-pub fn vmemMap2(
+pub fn vmemMap(
     vmem: u32,
     frame: u32,
     frame_offset: usize,
@@ -753,7 +726,11 @@ pub fn vmemMap2(
     });
 }
 
-pub fn vmemUnmap2() void {}
+pub fn vmemUnmap(vmem: u32, vaddr: usize, length: usize) void {
+    _ = try syscall(.vmem_unmap, .{
+        vmem, vaddr, length,
+    });
+}
 
 pub fn procCreate() void {}
 
