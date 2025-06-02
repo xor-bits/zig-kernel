@@ -36,7 +36,7 @@ pub fn growCapArray() u32 {
     const new_page_addr = addr.Virt.fromPtr(&caps.capabilityArrayUnchecked().ptr[current_len]);
 
     const last_byte_of_prev = new_page_addr.raw - 1;
-    const last_byte_of_next = new_page_addr.raw + @sizeOf(caps.CapabilitySlot) - 1;
+    const last_byte_of_next = new_page_addr.raw + @sizeOf(caps.AtomicCapabilitySlot) - 1;
     const last_page = addr.Virt.fromInt(last_byte_of_next);
 
     const SIZE_4KIB_MASK = ~(@as(usize, 0x00001000 - 1));

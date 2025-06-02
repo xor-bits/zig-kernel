@@ -41,16 +41,16 @@ pub fn exec(a: args.Args) !void {
 
     var id: u32 = undefined;
 
-    id = try caps.pushCapability(.init(init_vmem));
+    id = try init_proc.pushCapability(.init(init_vmem));
     std.debug.assert(id == abi.caps.ROOT_SELF_VMEM.cap);
 
-    id = try caps.pushCapability(.init(init_thread));
+    id = try init_proc.pushCapability(.init(init_thread));
     std.debug.assert(id == abi.caps.ROOT_SELF_THREAD.cap);
 
-    id = try caps.pushCapability(.init(init_proc));
+    id = try init_proc.pushCapability(.init(init_proc));
     std.debug.assert(id == abi.caps.ROOT_SELF_PROC.cap);
 
-    id = try caps.pushCapability(.init(boot_info));
+    id = try init_proc.pushCapability(.init(boot_info));
     std.debug.assert(id == abi.caps.ROOT_BOOT_INFO.cap);
 
     proc.start(init_thread);

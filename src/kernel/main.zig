@@ -265,7 +265,7 @@ fn handle_syscall(
             const frame = try caps.Frame.init(size_bytes);
             errdefer frame.deinit();
 
-            const handle = try caps.pushCapability(caps.Capability.init(frame));
+            const handle = try thread.proc.pushCapability(caps.Capability.init(frame));
             trap.syscall_id = abi.sys.encode(handle);
         },
 
@@ -273,21 +273,21 @@ fn handle_syscall(
             const vmem = try caps.Vmem.init();
             errdefer vmem.deinit();
 
-            const handle = try caps.pushCapability(caps.Capability.init(vmem));
+            const handle = try thread.proc.pushCapability(caps.Capability.init(vmem));
             trap.syscall_id = abi.sys.encode(handle);
         },
         .vmem_self => {
             const vmem = thread.proc.vmem.clone();
 
-            const handle = try caps.pushCapability(caps.Capability.init(vmem));
+            const handle = try thread.proc.pushCapability(caps.Capability.init(vmem));
             trap.syscall_id = abi.sys.encode(handle);
         },
         .vmem_map => {
             const frame_first_page: u32 = @truncate(trap.arg2 / 0x1000);
             const vaddr = try addr.Virt.fromUser(trap.arg3);
-            const vmem = try caps.getObject(caps.Vmem, @truncate(trap.arg0), thread.proc);
+            const vmem = try thread.proc.getObject(caps.Vmem, @truncate(trap.arg0));
             defer vmem.deinit();
-            const frame = try caps.getObject(caps.Frame, @truncate(trap.arg1), thread.proc);
+            const frame = try thread.proc.getObject(caps.Frame, @truncate(trap.arg1));
             // map takes ownership of the frame
             const pages: u32 = @truncate(std.math.divCeil(usize, trap.arg4, 0x1000) catch unreachable);
             const rights = abi.sys.Rights.fromInt(@truncate(trap.arg5));
@@ -306,7 +306,7 @@ fn handle_syscall(
         .vmem_unmap => {
             const pages: u32 = @truncate(trap.arg2);
             const vaddr = try addr.Virt.fromUser(trap.arg1);
-            const vmem = try caps.getObject(caps.Vmem, @truncate(trap.arg0), thread.proc);
+            const vmem = try thread.proc.getObject(caps.Vmem, @truncate(trap.arg0));
             defer vmem.deinit();
 
             try vmem.unmap(vaddr, pages);

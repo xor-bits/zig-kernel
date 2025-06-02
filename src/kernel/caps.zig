@@ -45,19 +45,7 @@ pub fn init() !void {
     const page = pmem.allocChunk(.@"4KiB") orelse return error.OutOfMemory;
     readonly_zero_page.store(page.toParts().page, .release);
 
-    // push the null capability
-    _ = try pushCapability(.{
-        .ptr = @ptrFromInt(0xFFFF_8000_0000_0000),
-        .type = .null,
-    });
-
-    var cap: CapabilitySlot = .{};
-    cap.object.store(.{}, .seq_cst);
-    const s = cap.object.load(.acquire);
-    // s.ptr;
-    // s.type;
-    debugType(@TypeOf(s));
-    debugType(CapabilitySlot);
+    debugType(AtomicCapabilitySlot);
     debugType(Generic);
     debugType(Process);
     debugType(Thread);
@@ -80,123 +68,11 @@ pub fn init() !void {
     // debugType(X86Irq);
 }
 
-// FIXME: process local capability arrays, now all processes can use all capabilities
-/// create a capability out of an object
-pub fn pushCapability(cap: Capability) !u32 {
-    const cap_id = allocate();
-    const cap_slot = &capabilityArrayUnchecked()[cap_id];
-
-    try cap_slot.store(cap);
-
-    return cap_id;
-}
-
-// FIXME: process local capability arrays, now all processes can use all capabilities
-pub fn getCapability(handle: u32, current: *Process) Error!Capability {
-    _ = current;
-
-    if (handle == 0) return Error.InvalidCapability;
-
-    const caps = capabilityArray();
-    if (handle >= caps.len) return Error.InvalidCapability;
-
-    const cap = &caps[handle];
-
-    return cap.load() orelse return Error.InvalidCapability;
-}
-
-// FIXME: process local capability arrays, now all processes can use all capabilities
-pub fn getObject(comptime T: type, handle: u32, current: *Process) Error!*T {
-    const cap = try getCapability(handle, current);
-    errdefer cap.deinit();
-    return cap.as(T) orelse return Error.InvalidCapability;
-}
-
-//
-
-// FIXME: process local capability arrays, now all processes can use all capabilities
-pub fn capabilityArray() []CapabilitySlot {
-    const len = @min(capability_array_len.load(.acquire), 2 << 32);
-    return @as([*]CapabilitySlot, @ptrFromInt(CAPABILITY_ARRAY_POINTER))[0..len];
-}
-
-// FIXME: process local capability arrays, now all processes can use all capabilities
-pub fn capabilityArrayUnchecked() []CapabilitySlot {
-    return @as([*]CapabilitySlot, @ptrFromInt(CAPABILITY_ARRAY_POINTER))[0 .. 2 << 32];
-}
-
-pub fn allocate() u32 {
-    {
-        free_list_lock.lock();
-        defer free_list_lock.unlock();
-
-        log.err("FIXME: reimpl capability free list", .{});
-    }
-
-    return caps_vmem.growCapArray();
-}
-
-pub fn deallocate(cap: u32) void {
-    std.debug.assert(cap != 0);
-
-    free_list_lock.lock();
-    defer free_list_lock.unlock();
-
-    if (free_list != 0) {
-        log.err("FIXME: reimpl capability free list", .{});
-    }
-
-    free_list = cap;
-}
-
-//
-
-// TODO: make this local per process (process, not thread)
-
-/// pointer to the first capability in the global capability array (its a null capability)
-///
-/// it is currently `0xFFFFFFBF80000000`, right before the kernel code at `0xFFFF_FFFF_8000_0000`
-/// and capable of holding a maximum of 2^32 capabilities across all processes
-pub const CAPABILITY_ARRAY_POINTER: usize = 0xFFFF_FFFF_8000_0000 - (2 << 32) * @sizeOf(CapabilitySlot);
-/// the length can only grow
-pub var capability_array_len: std.atomic.Value(usize) = .init(0);
-/// a linked list of unused slots
-pub var array_grow_lock: spin.Mutex = .new();
-pub var free_list_lock: spin.Mutex = .new();
-pub var free_list: u32 = 0;
 pub var obj_accesses: std.EnumArray(abi.ObjectType, std.atomic.Value(usize)) = .initFill(.init(0));
 
 //
 
-// pub fn Ref(comptime T: type) type {
-//     return struct {
-//         paddr: addr.Phys,
-
-//         const Self = @This();
-
-//         pub fn alloc(dyn_size: ?abi.ChunkSize) Error!Self {
-//             const paddr = try T.alloc(dyn_size);
-//             const obj = Self{ .paddr = paddr };
-//             T.init(obj);
-//             return obj;
-//         }
-
-//         pub fn ptr(self: @This()) *T {
-//             // recursive mapping instead of HHDM later (maybe)
-//             return self.paddr.toHhdm().toPtr(*T);
-//         }
-
-//         pub fn object(self: @This(), owner: ?*Thread) Object {
-//             return .{
-//                 .paddr = self.paddr,
-//                 .type = Object.objectTypeOf(T),
-//                 .owner = .init(Thread.vmemOf(owner)),
-//             };
-//         }
-//     };
-// }
-
-pub const CapabilitySlot = struct {
+pub const AtomicCapabilitySlot = struct {
     /// the actual kernel object data, possibly shared between multiple capabilities
     object: std.atomic.Value(ObjectPointer) = .init(.{}),
 
@@ -271,6 +147,47 @@ pub const CapabilitySlot = struct {
             ),
             else => unreachable,
         }
+    }
+};
+
+pub const CapabilitySlot = packed struct {
+    ptr: u56 = 0,
+    type: abi.ObjectType = .null,
+
+    pub fn init(cap: Capability) @This() {
+        var self = @This(){};
+        self.set(cap);
+        return self;
+    }
+
+    pub fn deinit(self: *@This()) void {
+        if (self.get()) |cap| {
+            cap.deinit();
+        }
+    }
+
+    /// returns a Capability THAT IS NOT REF COUNTED
+    pub fn getBorrow(self: *@This()) ?Capability {
+        if (self.type == .null) return null;
+
+        return Capability{
+            .ptr = @ptrFromInt(@as(u64, self.ptr) | 0xFF00_0000_0000_0000),
+            .type = self.type,
+        };
+    }
+
+    /// returns an owned ref counted Capability
+    pub fn get(self: *@This()) ?Capability {
+        const cap = self.getBorrow() orelse return null;
+        cap.refcnt().inc();
+        return cap;
+    }
+
+    /// takes an owned ref counted Capability
+    pub fn set(self: *@This(), new: Capability) void {
+        std.debug.assert((@intFromPtr(new.ptr) >> 56) == 0xFF);
+        self.ptr = @truncate(@intFromPtr(new.ptr));
+        self.type = new.type;
     }
 };
 
@@ -994,14 +911,17 @@ pub const Process = struct {
 
     vmem: *Vmem,
     lock: spin.Mutex = .newLocked(),
-    // caps: std.ArrayList(Capability),
+    caps: std.ArrayList(CapabilitySlot), // TODO: unmanaged
 
     pub fn init(from_vmem: *Vmem) !*@This() {
         if (conf.LOG_OBJ_CALLS)
             log.info("Process.init", .{});
 
         const obj: *@This() = try slab_allocator.allocator().create(@This());
-        obj.* = .{ .vmem = from_vmem };
+        obj.* = .{
+            .vmem = from_vmem,
+            .caps = .init(slab_allocator.allocator()),
+        };
         obj.lock.unlock();
 
         return obj;
@@ -1013,6 +933,11 @@ pub const Process = struct {
         if (conf.LOG_OBJ_CALLS)
             log.info("Process.deinit", .{});
 
+        for (self.caps.items) |*cap_slot| {
+            cap_slot.deinit();
+        }
+
+        self.caps.deinit();
         self.vmem.deinit();
 
         slab_allocator.allocator().destroy(self);
@@ -1024,6 +949,42 @@ pub const Process = struct {
 
         self.refcnt.inc();
         return self;
+    }
+
+    pub fn pushCapability(self: *@This(), cap: Capability) Error!u32 {
+        std.debug.assert(cap.type != .null);
+
+        // TODO: free list
+
+        self.lock.lock();
+        defer self.lock.unlock();
+
+        const handle_usize = self.caps.items.len + 1;
+        if (handle_usize > std.math.maxInt(u32)) return Error.OutOfBounds;
+        const handle: u32 = @intCast(handle_usize);
+
+        try self.caps.append(CapabilitySlot.init(cap));
+
+        return handle;
+    }
+
+    pub fn getCapability(self: *@This(), handle: u32) Error!Capability {
+        if (handle == 0) return Error.InvalidCapability;
+
+        self.lock.lock();
+        defer self.lock.unlock();
+
+        if (handle - 1 >= self.caps.items.len) return Error.InvalidCapability;
+        const cap = &self.caps.items[handle - 1];
+
+        return cap.get() orelse return Error.InvalidCapability;
+    }
+
+    pub fn getObject(self: *@This(), comptime T: type, handle: u32) Error!*T {
+        const cap = try self.getCapability(handle);
+        errdefer cap.deinit();
+
+        return cap.as(T) orelse return Error.InvalidCapability;
     }
 };
 
