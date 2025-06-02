@@ -7,8 +7,7 @@ const pmem = @import("pmem.zig");
 const proc = @import("proc.zig");
 const spin = @import("spin.zig");
 
-// const caps_ipc = @import("caps/ipc.zig");
-// const caps_pmem = @import("caps/pmem.zig");
+const caps_ipc = @import("caps/ipc.zig");
 const caps_thread = @import("caps/thread.zig");
 const caps_vmem = @import("caps/vmem.zig");
 const caps_proc = @import("caps/proc.zig");
@@ -22,22 +21,20 @@ const RefCnt = abi.epoch.RefCnt;
 
 //
 
-// pub const Memory = caps_pmem.Memory;
-// pub const Frame = caps_pmem.Frame;
-// pub const DeviceFrame = caps_pmem.DeviceFrame;
 pub const Thread = caps_thread.Thread;
 pub const Process = caps_proc.Process;
 pub const Frame = caps_frame.Frame;
 pub const Vmem = caps_vmem.Vmem;
-pub const HalVmem = caps_x86.Vmem;
-// pub const Receiver = caps_ipc.Receiver;
-// pub const Sender = caps_ipc.Sender;
-// pub const Reply = caps_ipc.Reply;
-// pub const Notify = caps_ipc.Notify;
+pub const Receiver = caps_ipc.Receiver;
+pub const Reply = caps_ipc.Reply;
+pub const Sender = caps_ipc.Sender;
+pub const Notify = caps_ipc.Notify;
 // pub const X86IoPortAllocator = caps_x86.X86IoPortAllocator;
 // pub const X86IoPort = caps_x86.X86IoPort;
 // pub const X86IrqAllocator = caps_x86.X86IrqAllocator;
 // pub const X86Irq = caps_x86.X86Irq;
+
+pub const HalVmem = caps_x86.Vmem;
 
 //
 
@@ -50,6 +47,8 @@ pub fn init() !void {
     readonly_zero_page.store(page.toParts().page, .release);
 
     debugType(AtomicCapabilitySlot);
+    debugType(CapabilitySlot);
+    debugType(Capability);
     debugType(Generic);
     debugType(Process);
     debugType(Thread);
@@ -218,6 +217,22 @@ pub const Capability = struct {
                 .ptr = @ptrCast(obj),
                 .type = .thread,
             },
+            *Receiver => .{
+                .ptr = @ptrCast(obj),
+                .type = .receiver,
+            },
+            *Reply => .{
+                .ptr = @ptrCast(obj),
+                .type = .reply,
+            },
+            *Sender => .{
+                .ptr = @ptrCast(obj),
+                .type = .sender,
+            },
+            *Notify => .{
+                .ptr = @ptrCast(obj),
+                .type = .notify,
+            },
             else => @compileError("invalid type"),
         };
     }
@@ -228,6 +243,10 @@ pub const Capability = struct {
             .vmem => self.as(Vmem).?.deinit(),
             .process => self.as(Process).?.deinit(),
             .thread => self.as(Thread).?.deinit(),
+            .receiver => self.as(Receiver).?.deinit(),
+            .reply => self.as(Reply).?.deinit(),
+            .sender => self.as(Sender).?.deinit(),
+            .notify => self.as(Notify).?.deinit(),
             else => unreachable,
         }
     }
@@ -238,6 +257,10 @@ pub const Capability = struct {
             Vmem => .vmem,
             Process => .process,
             Thread => .thread,
+            Receiver => .receiver,
+            Reply => .reply,
+            Sender => .sender,
+            Notify => .notify,
             else => @compileError("invalid type"),
         };
 
@@ -252,7 +275,11 @@ pub const Capability = struct {
         if (0 != @offsetOf(Frame, "refcnt") or
             0 != @offsetOf(Vmem, "refcnt") or
             0 != @offsetOf(Process, "refcnt") or
-            0 != @offsetOf(Thread, "refcnt"))
+            0 != @offsetOf(Thread, "refcnt") or
+            0 != @offsetOf(Receiver, "refcnt") or
+            0 != @offsetOf(Reply, "refcnt") or
+            0 != @offsetOf(Sender, "refcnt") or
+            0 != @offsetOf(Notify, "refcnt"))
         {
             // FIXME: prevent reordering so that the offset would be same on all objects
             return switch (self.type) {
@@ -260,6 +287,10 @@ pub const Capability = struct {
                 .vmem => &self.as(Vmem).?.ptr.refcnt,
                 .process => &self.as(Process).?.ptr.refcnt,
                 .thread => &self.as(Thread).?.ptr.refcnt,
+                .receiver => self.as(Receiver).?.ptr.refcnt,
+                .reply => self.as(Reply).?.ptr.refcnt,
+                .sender => self.as(Sender).?.ptr.refcnt,
+                .notify => self.as(Notify).?.ptr.refcnt,
             };
         }
 

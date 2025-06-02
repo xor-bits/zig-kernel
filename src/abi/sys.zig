@@ -69,6 +69,7 @@ pub const Id = enum(usize) {
     /// with a provided message, and return the reply message
     sender_call,
 
+    // TODO: maybe make all kernel objects be 'waitable' and 'notifyable'
     /// create a new `Notify` object that is a messageless IPC structure
     notify_create,
     /// wait until this `Notify` is notified with `notify_notify`,
@@ -518,8 +519,8 @@ pub fn notifyPoll(notify: u32) Error!bool {
     return try syscall(.notify_wait, .{notify}) != 0;
 }
 
-pub fn notifyNotify(notify: u32) void {
-    _ = try syscall(.notify_notify, .{notify});
+pub fn notifyNotify(notify: u32) Error!bool {
+    return try syscall(.notify_notify, .{notify}) != 0;
 }
 
 pub fn x86IoportCreate() void {
@@ -546,11 +547,11 @@ pub fn x86IrqUnsubscribe() void {
     @compileError("TODO");
 }
 
-pub fn handleIdentify(cap: u32) Error!abi.ObjectType {
+pub fn handleIdentify(cap: u32) abi.ObjectType {
     return std.meta.intToEnum(
         abi.ObjectType,
-        try syscall(.handle_identify, .{cap}),
-    ) catch Error.Internal;
+        syscall(.handle_identify, .{cap}) catch unreachable,
+    ) catch .null;
 }
 
 pub fn handleDuplicate(cap: u32) Error!u32 {

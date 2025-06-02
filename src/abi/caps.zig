@@ -229,16 +229,16 @@ pub const Notify = extern struct {
         return .{ .cap = cap };
     }
 
-    pub fn wait(self: @This()) sys.Error!u32 {
-        return sys.notifyWait(self.cap);
+    pub fn wait(self: @This()) sys.Error!void {
+        return try sys.notifyWait(self.cap);
     }
 
-    pub fn poll(self: @This()) sys.Error!?u32 {
-        return sys.notifyPoll(self.cap);
+    pub fn poll(self: @This()) sys.Error!bool {
+        return try sys.notifyPoll(self.cap);
     }
 
     pub fn notify(self: @This()) sys.Error!bool {
-        return sys.notifyNotify(self.cap);
+        return try sys.notifyNotify(self.cap);
     }
 
     pub fn clone(self: @This()) sys.Error!Notify {

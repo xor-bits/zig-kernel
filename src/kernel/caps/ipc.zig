@@ -17,20 +17,43 @@ const Error = abi.sys.Error;
 //
 
 pub const Receiver = struct {
+    // FIXME: prevent reordering so that the offset would be same on all objects
+    refcnt: abi.epoch.RefCnt = .{},
+
     // TODO: remove a thread from here if gets stopped
     /// the currently waiting receiver thread
     receiver: std.atomic.Value(?*caps.Thread) = .init(null),
 
     /// a linked list of waiting callers
-    queue_lock: spin.Mutex = .{},
+    queue_lock: spin.Mutex = .newLocked(),
     queue: util.Queue(caps.Thread, "next", "prev") = .{},
 
-    pub fn init(self: caps.Ref(@This())) void {
-        self.ptr().* = .{};
+    pub fn init() !*@This() {
+        if (conf.LOG_OBJ_CALLS)
+            log.info("Receiver.init", .{});
+
+        const obj: *@This() = try caps.slab_allocator.allocator().create(@This());
+        obj.* = .{};
+        obj.queue_lock.unlock();
+
+        return obj;
     }
 
-    pub fn alloc(_: ?abi.ChunkSize) Error!addr.Phys {
-        return pmem.alloc(@sizeOf(@This())) orelse return Error.OutOfMemory;
+    pub fn deinit(self: *@This()) void {
+        if (!self.refcnt.dec()) return;
+
+        if (conf.LOG_OBJ_CALLS)
+            log.info("Receiver.deinit", .{});
+
+        // TODO: wake the waiting threads or what
+        if (self.receiver.load(.monotonic)) |receiver| {
+            receiver.deinit();
+        }
+        while (self.queue.popFront()) |waiter| {
+            waiter.deinit();
+        }
+
+        caps.slab_allocator.allocator().destroy(self);
     }
 
     pub fn call(paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
@@ -180,13 +203,36 @@ pub const Receiver = struct {
 };
 
 pub const Sender = struct {
-    pub fn alloc(_: ?abi.ChunkSize) Error!addr.Phys {
-        // receiver can be cloned to make senders
-        return Error.InvalidArgument;
+    // FIXME: prevent reordering so that the offset would be same on all objects
+    refcnt: abi.epoch.RefCnt = .{},
+
+    recv: *Receiver,
+    stamp: usize,
+
+    pub fn init(recv: *Receiver, stamp: usize) !*@This() {
+        errdefer recv.deinit(); // FIXME: errdefer in the caller instead
+
+        if (conf.LOG_OBJ_CALLS)
+            log.info("Sender.init", .{});
+
+        const obj: *@This() = try caps.slab_allocator.allocator().create(@This());
+        obj.* = .{
+            .recv = recv,
+            .stamp = stamp,
+        };
+
+        return obj;
     }
 
-    pub fn init(_: caps.Ref(@This())) void {
-        unreachable;
+    pub fn deinit(self: *@This()) void {
+        if (!self.refcnt.dec()) return;
+
+        if (conf.LOG_OBJ_CALLS)
+            log.info("Sender.deinit", .{});
+
+        self.recv.deinit();
+
+        caps.slab_allocator.allocator().destroy(self);
     }
 
     // block until the receiver is free, then switch to the receiver
@@ -234,12 +280,30 @@ pub const Sender = struct {
 };
 
 pub const Reply = struct {
-    pub fn init(self: caps.Ref(@This())) void {
-        self.ptr().* = .{};
+    // TODO: this shouldn't be cloneable
+    // FIXME: prevent reordering so that the offset would be same on all objects
+    refcnt: abi.epoch.RefCnt = .{},
+
+    /// only borrows `thread`
+    pub fn init(thread: *caps.Thread) !*@This() {
+        if (conf.LOG_OBJ_CALLS)
+            log.info("Reply.init", .{});
+
+        _ = thread;
+
+        const obj: *@This() = try caps.slab_allocator.allocator().create(@This());
+        obj.* = .{};
+
+        return obj;
     }
 
-    pub fn alloc(_: ?abi.ChunkSize) Error!addr.Phys {
-        return pmem.alloc(@sizeOf(@This())) orelse return Error.OutOfMemory;
+    pub fn deinit(self: *@This()) void {
+        if (!self.refcnt.dec()) return;
+
+        if (conf.LOG_OBJ_CALLS)
+            log.info("Reply.deinit", .{});
+
+        caps.slab_allocator.allocator().destroy(self);
     }
 
     pub fn reply(paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
@@ -261,77 +325,80 @@ pub const Reply = struct {
 };
 
 pub const Notify = struct {
-    notified: std.atomic.Value(u32) = .init(0),
+    // FIXME: prevent reordering so that the offset would be same on all objects
+    refcnt: abi.epoch.RefCnt = .{},
+
+    notified: std.atomic.Value(bool) = .init(false),
 
     // waiter queue
-    queue_lock: spin.Mutex = .{},
+    queue_lock: spin.Mutex = .newLocked(),
     queue: util.Queue(caps.Thread, "next", "prev") = .{},
 
-    pub fn init(self: caps.Ref(@This())) void {
-        self.ptr().* = .{};
+    pub fn init() !*@This() {
+        if (conf.LOG_OBJ_CALLS)
+            log.info("Notify.init", .{});
+
+        const obj: *@This() = try caps.slab_allocator.allocator().create(@This());
+        obj.* = .{};
+        obj.queue_lock.unlock();
+
+        return obj;
     }
 
-    pub fn alloc(_: ?abi.ChunkSize) Error!addr.Phys {
-        return pmem.alloc(@sizeOf(@This())) orelse return Error.OutOfMemory;
-    }
-
-    pub fn call(paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
-        const call_id = std.meta.intToEnum(abi.sys.NotifyCallId, trap.arg1) catch {
-            return Error.InvalidArgument;
-        };
+    pub fn deinit(self: *@This()) void {
+        if (!self.refcnt.dec()) return;
 
         if (conf.LOG_OBJ_CALLS)
-            log.debug("notify call \"{s}\"", .{@tagName(call_id)});
+            log.info("Notify.deinit", .{});
 
-        const self_ref = caps.Ref(Notify){ .paddr = paddr };
-        const self = self_ref.ptr();
-
-        switch (call_id) {
-            .wait => {
-                // early test if its active
-                trap.arg1 = self.notified.swap(0, .acquire);
-                if (trap.arg1 != 0) {
-                    return;
-                }
-
-                // save the state and go to sleep
-                thread.status = .waiting;
-                thread.trap = trap.*;
-                self.queue_lock.lock();
-                self.queue.pushBack(thread);
-                defer self.queue_lock.unlock();
-
-                // while holding the lock: if it became active before locking but after the swap, then test it again
-                trap.arg1 = self.notified.swap(0, .acquire);
-                if (trap.arg1 != 0) {
-                    std.debug.assert(self.queue.popBack() == thread);
-                    thread.status = .running;
-                    return;
-                }
-            },
-            .poll => {
-                trap.arg1 = self.notified.swap(0, .acquire);
-            },
-            .notify => {
-                const notifier: u32 = @truncate(trap.arg0);
-                trap.arg1 = @intFromBool(self.notify(notifier));
-            },
-            .clone => {
-                trap.arg1 = caps.pushCapability(self_ref.object(thread));
-            },
+        while (self.queue.popFront()) |waiter| {
+            waiter.deinit();
         }
+
+        caps.slab_allocator.allocator().destroy(self);
     }
 
-    pub fn notify(self: *@This(), notifier: u32) bool {
+    /// returns true if the current thread went to sleep
+    pub fn wait(self: *@This(), thread: *caps.Thread, trap: *arch.SyscallRegs) bool {
+        // early test if its active
+        if (self.poll()) {
+            return false;
+        }
+
+        // save the state and go to sleep
+        thread.status = .waiting;
+        thread.trap = trap.*;
+        self.queue_lock.lock();
+        self.queue.pushBack(thread);
+        defer self.queue_lock.unlock();
+
+        // while holding the lock: if it became active before locking but after the swap, then test it again
+        if (self.poll()) {
+            // revert
+            std.debug.assert(self.queue.popBack() == thread);
+            std.debug.assert(thread.status == .waiting);
+            thread.status = .running;
+            return false;
+        }
+
+        return true;
+    }
+
+    pub fn poll(self: *@This()) bool {
+        return self.notified.swap(false, .acquire);
+    }
+
+    pub fn notify(self: *@This()) bool {
         self.queue_lock.lock();
         if (self.queue.popFront()) |waiter| {
             self.queue_lock.unlock();
-            waiter.trap.arg1 = notifier;
+
             proc.ready(waiter);
             return false;
         } else {
             defer self.queue_lock.unlock();
-            return null != self.notified.cmpxchgStrong(0, notifier, .monotonic, .monotonic);
+
+            return null != self.notified.cmpxchgStrong(false, true, .monotonic, .monotonic);
         }
     }
 };

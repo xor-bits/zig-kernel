@@ -414,7 +414,34 @@ fn handle_syscall(
             target_thread.priority = @truncate(trap.arg1);
         },
 
-        .notify_create => {},
+        .notify_create => {
+            const notify = try caps.Notify.init();
+            errdefer notify.deinit();
+
+            const handle = try thread.proc.pushCapability(caps.Capability.init(notify));
+            trap.syscall_id = abi.sys.encode(handle);
+        },
+        .notify_wait => {
+            const notify = try thread.proc.getObject(caps.Notify, @truncate(trap.arg0));
+            defer notify.deinit();
+
+            trap.syscall_id = abi.sys.encode(0);
+            if (notify.wait(thread, trap)) {
+                proc.switchNow(trap, null);
+            }
+        },
+        .notify_poll => {
+            const notify = try thread.proc.getObject(caps.Notify, @truncate(trap.arg0));
+            defer notify.deinit();
+
+            trap.syscall_id = abi.sys.encode(@intFromBool(notify.poll()));
+        },
+        .notify_notify => {
+            const notify = try thread.proc.getObject(caps.Notify, @truncate(trap.arg0));
+            defer notify.deinit();
+
+            trap.syscall_id = abi.sys.encode(@intFromBool(notify.notify()));
+        },
 
         .handle_identify => {
             const cap = try thread.proc.getCapability(@truncate(trap.arg0));

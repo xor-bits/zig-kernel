@@ -52,6 +52,9 @@ pub const Thread = struct {
         if (conf.LOG_OBJ_CALLS)
             log.info("Thread.deinit", .{});
 
+        if (self.next) |next| next.deinit();
+        if (self.prev) |prev| prev.deinit();
+
         self.proc.deinit();
 
         caps.slab_allocator.allocator().destroy(self);
