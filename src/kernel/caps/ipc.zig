@@ -56,62 +56,27 @@ pub const Receiver = struct {
         caps.slab_allocator.allocator().destroy(self);
     }
 
-    pub fn call(paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
-        const call_id = std.meta.intToEnum(abi.sys.ReceiverCallId, trap.arg1) catch {
-            return Error.InvalidArgument;
-        };
-
+    /// block until something sends
+    /// returns true if the current thread went to sleep
+    pub fn recv(self: *@This(), thread: *caps.Thread, trap: *arch.SyscallRegs) void {
         if (conf.LOG_OBJ_CALLS)
-            log.debug("receiver call \"{s}\"", .{@tagName(call_id)});
+            log.debug("Receiver.recv", .{});
 
-        switch (call_id) {
-            .subscribe => {
-                const sender = caps.Ref(Sender){ .paddr = paddr };
-                trap.arg0 = caps.pushCapability(sender.object(thread));
-            },
-            .save_caller => {
-                const caller = thread.reply orelse {
-                    return Error.NotMapped;
-                };
-                thread.reply = null;
+        if (thread.reply) |discarded| discarded.deinit();
+        thread.reply = null;
 
-                const reply_obj = caps.Ref(Reply){ .paddr = addr.Virt.fromPtr(caller).hhdmToPhys() };
-                trap.arg0 = caps.pushCapability(reply_obj.object(thread));
-            },
-            .load_caller => {
-                if (thread.reply != null) {
-                    return Error.AlreadyMapped;
-                }
-
-                const reply_cap_id: u32 = @truncate(trap.arg2);
-                const reply_cap = try caps.getCapability(thread, reply_cap_id);
-                defer reply_cap.lock.unlock();
-
-                const reply_obj = try reply_cap.as(Reply);
-                const caller = caps.Ref(caps.Thread){ .paddr = reply_obj.paddr };
-
-                thread.reply = caller.ptr();
-                reply_cap.owner.store(null, .release);
-                caps.deallocate(reply_cap_id);
-            },
+        if (self.recvNoFail(thread, trap)) {
+            proc.switchNow(trap, null);
         }
     }
 
-    // block until something sends
-    pub fn recv(paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
-        if (conf.LOG_OBJ_CALLS)
-            log.debug("receiver recv", .{});
-
-        const self = (caps.Ref(@This()){ .paddr = paddr }).ptr();
-
-        self.recvNoFail(thread, trap);
-    }
-
     // might block the user-space thread (kernel-space should only ever block after a syscall is complete)
-    fn recvNoFail(self: *@This(), thread: *caps.Thread, trap: *arch.SyscallRegs) void {
+    /// returns true if the current thread went to sleep
+    fn recvNoFail(self: *@This(), thread: *caps.Thread, trap: *arch.SyscallRegs) bool {
         // stop the thread early to hold the lock for a shorter time
         thread.status = .waiting;
         thread.trap = trap.*;
+        arch.cpuLocal().current_thread = null;
 
         // check if a sender is already waiting
         self.queue_lock.lock();
@@ -124,7 +89,7 @@ pub const Receiver = struct {
             // copy over the message
             const msg = immediate.trap.readMessage();
             trap.writeMessage(msg);
-            immediate.moveExtra(thread, @truncate(msg.extra)); // the caps are already locked in `Sender.call`
+            // immediate.moveExtra(thread, @truncate(msg.extra)); // the caps are already locked in `Sender.call`
 
             // save the reply target
             std.debug.assert(thread.reply == null);
@@ -132,7 +97,7 @@ pub const Receiver = struct {
 
             // undo stopping the thread
             thread.status = .running;
-            return;
+            return false;
         }
 
         if (null != self.receiver.cmpxchgStrong(null, thread, .seq_cst, .monotonic)) {
@@ -140,33 +105,29 @@ pub const Receiver = struct {
         }
         self.queue_lock.unlock();
 
-        // thread is set to waiting and will yield at the end of the main syscall handler
+        return true;
     }
 
-    pub fn reply(_: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
+    pub fn reply(thread: *caps.Thread, msg: abi.sys.Message) Error!void {
         if (conf.LOG_OBJ_CALLS)
-            log.debug("receiver reply", .{});
+            log.debug("Receiver.reply", .{});
 
-        // const self = (caps.Ref(@This()){ .paddr = paddr }).ptr();
-
-        const sender = try Receiver.replyGetSender(thread, trap);
+        const sender = try Receiver.replyGetSender(thread, msg);
         std.debug.assert(sender != thread);
 
         // set the original caller thread as ready to run again, but return to the current thread
         proc.ready(sender);
     }
 
-    fn replyGetSender(thread: *caps.Thread, trap: *arch.SyscallRegs) Error!*caps.Thread {
+    fn replyGetSender(thread: *caps.Thread, msg: abi.sys.Message) Error!*caps.Thread {
         // prepare cap transfer
-        var msg = trap.readMessage();
-        msg.cap = 0; // call doesnt get to know the Receiver capability id
         if (conf.LOG_OBJ_CALLS)
-            log.debug("replying {} to {*}", .{ msg, thread });
-        try thread.prelockExtras(@truncate(msg.extra));
+            log.debug("replying {} from {*}", .{ msg, thread });
+        // try thread.prelockExtras(@truncate(msg.extra));
 
         const sender = thread.reply orelse {
             @branchHint(.cold);
-            thread.unlockExtras(@truncate(msg.extra));
+            // thread.unlockExtras(@truncate(msg.extra));
             return Error.InvalidCapability;
         };
         std.debug.assert(sender.status == .waiting);
@@ -174,30 +135,28 @@ pub const Receiver = struct {
 
         // copy over the reply message
         sender.trap.writeMessage(msg);
-        thread.moveExtra(sender, @truncate(msg.extra));
+        // thread.moveExtra(sender, @truncate(msg.extra));
 
         return sender;
     }
 
-    pub fn replyRecv(paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
+    pub fn replyRecv(self: *@This(), thread: *caps.Thread, trap: *arch.SyscallRegs, msg: abi.sys.Message) Error!void {
         if (conf.LOG_OBJ_CALLS)
-            log.debug("receiver reply", .{});
+            log.debug("Receiver.replyRecv", .{});
 
-        const sender = try Receiver.replyGetSender(thread, trap);
-
-        const self = (caps.Ref(@This()){ .paddr = paddr }).ptr();
-        self.recvNoFail(thread, trap);
+        const sender = try Receiver.replyGetSender(thread, msg);
+        std.debug.assert(sender != thread);
 
         // push the receiver thread into the ready queue
         // if there was a sender queued
-        if (thread.status == .running) {
+        if (self.recvNoFail(thread, trap)) {
+            // if the receiver went to sleep, switch to the original caller thread
+            proc.switchTo(trap, sender, thread);
+        } else {
             // return back to the server, which is prob more important
             // and keeps the TLB cache warm
             // + ready up the caller thread
             proc.ready(sender);
-        } else {
-            // if the receiver went to sleep, switch to the original caller thread
-            proc.switchTo(trap, sender, thread);
         }
     }
 };
@@ -236,11 +195,9 @@ pub const Sender = struct {
     }
 
     // block until the receiver is free, then switch to the receiver
-    pub fn call(paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
+    pub fn call(self: *@This(), thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
         if (conf.LOG_OBJ_CALLS)
-            log.debug("sender call", .{});
-
-        const self = (caps.Ref(Receiver){ .paddr = paddr }).ptr();
+            log.debug("Sender.call", .{});
 
         // prepare cap transfer
         const msg = trap.readMessage();
@@ -306,13 +263,13 @@ pub const Reply = struct {
         caps.slab_allocator.allocator().destroy(self);
     }
 
-    pub fn reply(paddr: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
+    pub fn reply(_: *@This(), thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
         if (conf.LOG_OBJ_CALLS)
-            log.debug("reply reply", .{});
+            log.debug("Reply.reply", .{});
 
         const reply_cap_id = trap.readMessage().cap;
 
-        thread.reply = (caps.Ref(caps.Thread){ .paddr = paddr }).ptr();
+        thread.reply = thread.clone();
         const sender = try Receiver.replyGetSender(thread, trap);
 
         // delete this reply object
@@ -359,10 +316,10 @@ pub const Notify = struct {
     }
 
     /// returns true if the current thread went to sleep
-    pub fn wait(self: *@This(), thread: *caps.Thread, trap: *arch.SyscallRegs) bool {
+    pub fn wait(self: *@This(), thread: *caps.Thread, trap: *arch.SyscallRegs) void {
         // early test if its active
         if (self.poll()) {
-            return false;
+            return;
         }
 
         // save the state and go to sleep
@@ -370,18 +327,19 @@ pub const Notify = struct {
         thread.trap = trap.*;
         self.queue_lock.lock();
         self.queue.pushBack(thread);
-        defer self.queue_lock.unlock();
 
         // while holding the lock: if it became active before locking but after the swap, then test it again
         if (self.poll()) {
+            self.queue_lock.unlock();
             // revert
             std.debug.assert(self.queue.popBack() == thread);
             std.debug.assert(thread.status == .waiting);
             thread.status = .running;
-            return false;
+            return;
         }
+        self.queue_lock.unlock();
 
-        return true;
+        proc.switchNow(trap, null);
     }
 
     pub fn poll(self: *@This()) bool {

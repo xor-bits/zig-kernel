@@ -55,10 +55,9 @@ pub const Id = enum(usize) {
     receiver_reply,
     /// combined `receiver_reply` + `receiver_recv`
     receiver_reply_recv,
-    /// save the last caller into a new `Reply` object to allow another `receiver_recv` before `receiver_reply`
-    receiver_save_caller,
-    // receiver_load_caller,
 
+    /// save the last caller into a new `Reply` object to allow another `receiver_recv` before `receiver_reply`
+    reply_create,
     /// non-blocking reply to the last caller with a message
     reply_reply,
 
@@ -350,8 +349,8 @@ pub const ThreadRegs = extern struct {
 
 /// small IPC message
 pub const Message = extern struct {
-    /// capability id
-    cap: u32 = 0,
+    /// capability id when sending, or stamp id when receiving
+    cap_or_stamp: u32 = 0,
     /// Number of extra arguments in the thread extra arguments array.
     /// They can contain capabilities that have their ownership
     /// automatically transferred.
@@ -369,6 +368,16 @@ comptime {
 }
 
 // SYSCALLS
+
+pub fn setExtra(i: u7, val: usize, is_cap: bool) void {
+    _ = .{ i, val, is_cap };
+    unreachable;
+}
+
+pub fn getExtra(i: u7) usize {
+    _ = .{i};
+    unreachable;
+}
 
 pub fn log(s: []const u8) void {
     _ = syscall(.log, .{ @intFromPtr(s.ptr), s.len }) catch unreachable;
@@ -406,6 +415,7 @@ pub fn unpackRightsFlags(v: u16) struct { Rights, MapFlags } {
     return .{ val.r, val.f };
 }
 
+/// if length is zero, the rest of the frame is mapped
 pub fn vmemMap(
     vmem: u32,
     frame: u32,
@@ -420,7 +430,7 @@ pub fn vmemMap(
     });
 }
 
-pub fn vmemUnmap(vmem: u32, vaddr: usize, length: usize) void {
+pub fn vmemUnmap(vmem: u32, vaddr: usize, length: usize) Error!void {
     _ = try syscall(.vmem_unmap, .{
         vmem, vaddr, length,
     });
@@ -475,36 +485,154 @@ pub fn threadSetPrio(thread: u32, prio: u2) Error!void {
     });
 }
 
-pub fn receiverCreate() void {
-    @compileError("TODO");
+pub fn receiverCreate() Error!u32 {
+    return @intCast(try syscall(.receiver_create, .{}));
 }
 
-pub fn receiverRecv() void {
-    @compileError("TODO");
+pub fn receiverRecv(recv: u32) Error!Message {
+    var arg0: usize = undefined; // arrays dont work on outputs for whatever reason
+    var arg1: usize = undefined;
+    var arg2: usize = undefined;
+    var arg3: usize = undefined;
+    var arg4: usize = undefined;
+    var arg5: usize = undefined;
+
+    const res = asm volatile ("syscall"
+        : [ret] "={rax}" (-> usize),
+          [arg0out] "={rdi}" (arg0),
+          [arg1out] "={rsi}" (arg1),
+          [arg2out] "={rdx}" (arg2),
+          [arg3out] "={r8}" (arg3),
+          [arg4out] "={r9}" (arg4),
+          [arg5out] "={r10}" (arg5),
+        : [id] "{rax}" (@intFromEnum(Id.receiver_recv)),
+          [arg0in] "{rdi}" (recv),
+        : "rcx", "r11" // rcx becomes rip and r11 becomes rflags
+    );
+
+    _ = try decode(res);
+
+    return @bitCast([_]usize{ arg0, arg1, arg2, arg3, arg4, arg5 });
 }
 
-pub fn receiverReply() void {
-    @compileError("TODO");
+pub fn receiverReply(recv: u32, msg: Message) Error!void {
+    var _msg = msg;
+    _msg.cap_or_stamp = recv;
+    const msg_regs = @as([6]usize, @bitCast(_msg));
+
+    const arg0: usize = msg_regs[0]; // arrays dont work on outputs for whatever reason
+    const arg1: usize = msg_regs[1];
+    const arg2: usize = msg_regs[2];
+    const arg3: usize = msg_regs[3];
+    const arg4: usize = msg_regs[4];
+    const arg5: usize = msg_regs[5];
+
+    const res = asm volatile ("syscall"
+        : [ret] "={rax}" (-> usize),
+        : [id] "{rax}" (@intFromEnum(Id.receiver_reply)),
+          [arg0in] "{rdi}" (arg0),
+          [arg1in] "{rsi}" (arg1),
+          [arg2in] "{rdx}" (arg2),
+          [arg3in] "{r8}" (arg3),
+          [arg4in] "{r9}" (arg4),
+          [arg5in] "{r10}" (arg5),
+        : "rcx", "r11" // rcx becomes rip and r11 becomes rflags
+    );
+
+    _ = try decode(res);
 }
 
-pub fn receiverReplyRecv() void {
-    @compileError("TODO");
+pub fn receiverReplyRecv(recv: u32, msg: Message) Error!Message {
+    var _msg = msg;
+    _msg.cap_or_stamp = recv;
+    const msg_regs = @as([6]usize, @bitCast(_msg));
+
+    var arg0: usize = msg_regs[0]; // arrays dont work on outputs for whatever reason
+    var arg1: usize = msg_regs[1];
+    var arg2: usize = msg_regs[2];
+    var arg3: usize = msg_regs[3];
+    var arg4: usize = msg_regs[4];
+    var arg5: usize = msg_regs[5];
+
+    const res = asm volatile ("syscall"
+        : [ret] "={rax}" (-> usize),
+          [arg0out] "={rdi}" (arg0),
+          [arg1out] "={rsi}" (arg1),
+          [arg2out] "={rdx}" (arg2),
+          [arg3out] "={r8}" (arg3),
+          [arg4out] "={r9}" (arg4),
+          [arg5out] "={r10}" (arg5),
+        : [id] "{rax}" (@intFromEnum(Id.receiver_reply_recv)),
+          [arg0in] "{rdi}" (arg0),
+          [arg1in] "{rsi}" (arg1),
+          [arg2in] "{rdx}" (arg2),
+          [arg3in] "{r8}" (arg3),
+          [arg4in] "{r9}" (arg4),
+          [arg5in] "{r10}" (arg5),
+        : "rcx", "r11" // rcx becomes rip and r11 becomes rflags
+    );
+
+    _ = try decode(res);
+
+    return @bitCast([_]usize{ arg0, arg1, arg2, arg3, arg4, arg5 });
 }
 
 pub fn receiverSaveCaller() void {
     @compileError("TODO");
 }
 
-pub fn replyReply() void {
-    @compileError("TODO");
+pub fn replyReply(reply: u32, msg: Message) Error!void {
+    var _msg = msg;
+    _msg.cap_or_stamp = reply;
+    const msg_regs = @as([6]usize, @bitCast(_msg));
+
+    _ = try syscall(.receiver_reply, .{
+        msg_regs[0],
+        msg_regs[1],
+        msg_regs[2],
+        msg_regs[3],
+        msg_regs[4],
+        msg_regs[5],
+    });
 }
 
-pub fn senderCreate() void {
-    @compileError("TODO");
+pub fn senderCreate(recv: u32) Error!u32 {
+    return @intCast(try syscall(.sender_create, .{recv}));
 }
 
-pub fn senderCall() void {
-    @compileError("TODO");
+pub fn senderCall(recv: u32, msg: Message) Error!Message {
+    var _msg = msg;
+    _msg.cap_or_stamp = recv;
+    const msg_regs = @as([6]usize, @bitCast(_msg));
+
+    var arg0: usize = msg_regs[0]; // arrays dont work on outputs for whatever reason
+    var arg1: usize = msg_regs[1];
+    var arg2: usize = msg_regs[2];
+    var arg3: usize = msg_regs[3];
+    var arg4: usize = msg_regs[4];
+    var arg5: usize = msg_regs[5];
+
+    const res = asm volatile ("syscall"
+        : [ret] "={rax}" (-> usize),
+          [arg0out] "={rdi}" (arg0),
+          [arg1out] "={rsi}" (arg1),
+          [arg2out] "={rdx}" (arg2),
+          [arg3out] "={r8}" (arg3),
+          [arg4out] "={r9}" (arg4),
+          [arg5out] "={r10}" (arg5),
+        : [id] "{rax}" (@intFromEnum(Id.sender_call)),
+          [arg0in] "{rdi}" (arg0),
+          [arg1in] "{rsi}" (arg1),
+          [arg2in] "{rdx}" (arg2),
+          [arg3in] "{r8}" (arg3),
+          [arg4in] "{r9}" (arg4),
+          [arg5in] "{r10}" (arg5),
+        : "rcx", "r11" // rcx becomes rip and r11 becomes rflags
+    );
+
+    _ = try decode(res);
+
+    return @bitCast([_]usize{ arg0, arg1, arg2, arg3, arg4, arg5 });
 }
 
 pub fn notifyCreate() Error!u32 {

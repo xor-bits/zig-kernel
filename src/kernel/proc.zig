@@ -90,6 +90,7 @@ pub fn stop(thread: *caps.Thread) void {
     // TODO: stop the processor and take the thread
 }
 
+/// takes ownership of the given thread pointer
 /// start the thread, if its not running
 pub fn start(thread: *caps.Thread) void {
     std.debug.assert(thread.status == .stopped);

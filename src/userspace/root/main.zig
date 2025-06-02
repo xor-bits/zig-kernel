@@ -57,16 +57,8 @@ pub fn main() !void {
     log.info("boot info mapped", .{});
 
     try initfsd.init();
-    try initfsd.wait();
-}
 
-const alloc = 0;
-const allocSized = 0;
-const map = 0;
-const unmap = 0;
-
-pub fn _main() !void {
-    const recv = try alloc(abi.caps.Receiver);
+    const recv = try caps.Receiver.create();
     var system: System = .{ .recv = recv };
 
     const boot_info = @as(*const volatile abi.BootInfo, @ptrFromInt(BOOT_INFO)).*;
@@ -83,7 +75,7 @@ pub fn _main() !void {
         .info_frame = boot_info.mcfg_info,
     });
 
-    const vm_sender = try recv.subscribe();
+    const vm_sender = try caps.Sender.create(recv);
 
     try initfsd.wait();
 
@@ -112,8 +104,6 @@ pub fn _main() !void {
     // manages input drivers
     system.servers.getPtr(.input).bin = try binBytes("/sbin/input");
 
-    // FIXME: figure out a way to reclaim capabilities from crashed processes
-
     const vm = system.servers.getPtr(.vm);
     vm.thread = try execVm(vm.bin, vm_sender);
     vm.endpoint = vm_sender.cap;
@@ -121,18 +111,22 @@ pub fn _main() !void {
     const server = Proto.init(&system, system.recv);
 
     log.info("root waiting for messages", .{});
-    var msg: abi.sys.Message = undefined;
-    try server.rx.recv(&msg);
+    var msg: abi.sys.Message = try server.rx.recv();
     while (true) {
         server.ctx.dont_reply = false;
-        server.process(&msg);
+        // server.process(&msg);
 
         if (!server.ctx.dont_reply)
-            try server.rx.replyRecv(&msg)
+            msg = try server.rx.replyRecv(msg)
         else
-            try server.rx.recv(&msg);
+            msg = try server.rx.recv();
     }
 }
+
+const alloc = 0;
+const allocSized = 0;
+const map = 0;
+const unmap = 0;
 
 fn binBytes(path: []const u8) ![]const u8 {
     return initfsd.readFile(initfsd.openFile(path) orelse {
@@ -425,7 +419,7 @@ fn execVm(elf_bytes: []const u8, sender: abi.caps.Sender) !caps.Thread {
     const header = try std.elf.Header.read(&elf);
     var program_headers = header.program_header_iterator(&elf);
 
-    const new_vmem = try alloc(abi.caps.Vmem);
+    const new_vmem = try caps.Vmem.create();
 
     var heap_bottom: usize = 0;
 
@@ -472,14 +466,14 @@ fn execVm(elf_bytes: []const u8, sender: abi.caps.Sender) !caps.Thread {
         const size = segment_vaddr_top - segment_vaddr_bottom;
         self_memory_lock.lock();
         defer self_memory_lock.unlock();
-        const frames = try abi.util.allocVector(abi.caps.ROOT_MEMORY, size);
+        const frame = try caps.Frame.create(size);
 
-        self_vmem_lock.lock();
-        defer self_vmem_lock.unlock();
-        try abi.util.mapVector(
-            &frames,
-            abi.caps.ROOT_SELF_VMEM,
+        // TODO: Frame.write instead of Vmem.map + memcpy + Vmem.unmap
+        try abi.caps.ROOT_SELF_VMEM.map(
+            frame,
+            0,
             LOADER_TMP,
+            size,
             .{ .writable = true },
             .{},
         );
@@ -488,46 +482,34 @@ fn execVm(elf_bytes: []const u8, sender: abi.caps.Sender) !caps.Thread {
         //     segment_vaddr_bottom + segment_data_bottom_offset,
         //     segment_vaddr_bottom + segment_data_bottom_offset + program_header.p_filesz,
         // });
-        abi.util.copyForwardsVolatile(
-            u8,
-            @as([*]volatile u8, @ptrFromInt(LOADER_TMP + segment_data_bottom_offset))[0..program_header.p_filesz],
-            bytes,
-        );
+        abi.util.copyForwardsVolatile(u8, @as(
+            [*]volatile u8,
+            @ptrFromInt(LOADER_TMP + segment_data_bottom_offset),
+        )[0..program_header.p_filesz], bytes);
 
-        try abi.util.unmapVector(
-            &frames,
-            abi.caps.ROOT_SELF_VMEM,
+        try abi.caps.ROOT_SELF_VMEM.unmap(
             LOADER_TMP,
+            size,
         );
 
-        try abi.util.mapVector(
-            &frames,
-            new_vmem,
+        try new_vmem.map(
+            frame,
+            0,
             segment_vaddr_bottom,
+            size,
             rights,
             .{},
         );
     }
 
-    while (true) {
-        log.info("alloc + free 10_000 frames of size 4KiB", .{});
-
-        for (0..10_000) |_| {
-            const frame = try allocSized(caps.Frame, .@"4KiB");
-            // log.info("frame cap_id={}", .{frame.cap});
-            for (0..1_000) |_| {
-                _ = try frame.subframe(0, .@"4KiB");
-            }
-            try frame.revoke();
-        }
-    }
-
     // map a stack
     // log.info("mapping a stack", .{});
-    const stack = try allocSized(caps.Frame, .@"256KiB");
+    const stack = try caps.Frame.create(1024 * 256);
     try new_vmem.map(
         stack,
+        0,
         0x7FFF_FFF0_0000,
+        1024 * 256,
         .{ .writable = true },
         .{},
     );
@@ -540,27 +522,29 @@ fn execVm(elf_bytes: []const u8, sender: abi.caps.Sender) !caps.Thread {
 
     // map an initial heap
     // log.info("mapping a heap", .{});
-    const heap = try allocSized(caps.Frame, .@"256KiB");
+    const heap = try caps.Frame.create(1024 * 256);
     try new_vmem.map(
         heap,
+        0,
         heap_bottom,
+        1024 * 256,
         .{ .writable = true },
         .{},
     );
 
-    // log.info("creating a new thread", .{});
-    const new_thread: caps.Thread = try alloc(caps.Thread);
+    const new_proc = try caps.Process.create(new_vmem);
+    _ = sender;
+    // const sender_there = new_proc.pushCapability(sender.cap);
 
-    try new_thread.setVmem(new_vmem);
-    try new_thread.transferCap(new_vmem.cap);
+    // log.info("creating a new thread", .{});
+    const new_thread = try caps.Thread.create(new_proc);
+
     try new_thread.setPrio(0);
     try new_thread.writeRegs(&.{
-        .arg0 = sender.cap, // set RDI to
-        .arg2 = new_vmem.cap, // set RSI to the self Vmem cap
+        // .arg0 = sender_there,
         .user_instr_ptr = header.entry,
         .user_stack_ptr = 0x7FFF_FFF4_0000 - 0x100,
     });
-    try new_thread.transferCap(sender.cap);
 
     // log.info("ip=0x{x} sp=0x{x}", .{ header.entry, 0x7FFF_FFF4_0000 });
 

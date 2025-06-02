@@ -144,12 +144,12 @@ pub const BootInfo = extern struct {
     initfs_data_len: usize,
     initfs_path: [*]u8,
     initfs_path_len: usize,
-    framebuffer: caps.DeviceFrame = .{},
+    framebuffer: caps.Frame = .{},
     framebuffer_info: caps.Frame = .{},
-    hpet: caps.DeviceFrame = .{},
+    hpet: caps.Frame = .{},
     hpet_info: caps.Frame = .{},
     // TODO: parse ACPI tables in rm server
-    mcfg: caps.DeviceFrame = .{},
+    mcfg: caps.Frame = .{},
     mcfg_info: caps.Frame = .{},
 
     pub fn rootData(self: @This()) []u8 {
@@ -202,7 +202,7 @@ pub const ServerKind = enum(u8) {
 
 pub const Device = struct {
     /// the actual physical device frame
-    mmio_frame: caps.DeviceFrame = .{},
+    mmio_frame: caps.Frame = .{},
     /// info about the device
     info_frame: caps.Frame = .{},
 };

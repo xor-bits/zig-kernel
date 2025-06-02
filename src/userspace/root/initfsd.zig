@@ -79,6 +79,7 @@ pub fn init() !void {
     log.info("starting initfs thread", .{});
     initfs_tar_gz = std.io.fixedBufferStream(initfs);
 
+    initfs_recv = try caps.Receiver.create();
     initfs_ready = try caps.Notify.create();
 
     const stack = try caps.Frame.create(1024 * 256);
@@ -130,33 +131,32 @@ fn runMain() !void {
 
     _ = try initfs_ready.notify();
 
-    // initfs_recv = try main.alloc(caps.Receiver);
-    // _ = try initfs_set_ready.notify();
-
-    // log.info("initfs ready", .{});
-    // var server = abi.InitfsProtocol.Server(.{
-    //     .scope = if (abi.conf.LOG_SERVERS) .initfs else null,
-    // }, .{
-    //     .openFile = openFileHandler,
-    //     .fileSize = fileSizeHandler,
-    //     .list = listHandler,
-    // }).init({}, initfs_recv);
-    // try server.run();
+    log.info("initfs ready", .{});
+    var server = abi.InitfsProtocol.Server(.{
+        .scope = if (abi.conf.LOG_SERVERS) .initfs else null,
+    }, .{
+        .openFile = openFileHandler,
+        .fileSize = fileSizeHandler,
+        .list = listHandler,
+    }).init({}, initfs_recv);
+    try server.run();
 }
 
 fn openFileHandler(_: void, _: u32, req: struct { [32:0]u8, caps.Frame }) struct { Error!void, caps.Frame } {
     const frame: caps.Frame = req.@"1";
     const path: []const u8 = std.mem.sliceTo(&req.@"0", 0);
 
-    const frame_size: abi.ChunkSize = frame.sizeOf() catch |err| return .{ err, frame };
+    const frame_size = frame.getSize() catch unreachable;
 
     const file_id: usize = openFile(path) orelse return .{ Error.NotFound, frame };
     const file: []const u8 = readFile(file_id);
-    const size: usize = @min(file.len, frame_size.sizeBytes());
+    const size: usize = @min(file.len, frame_size);
 
-    main.map(
+    caps.ROOT_SELF_VMEM.map(
         frame,
+        0,
         main.INITFS_TMP,
+        frame_size,
         .{ .writable = true },
         .{},
     ) catch |err| return .{ err, frame };
@@ -167,9 +167,9 @@ fn openFileHandler(_: void, _: u32, req: struct { [32:0]u8, caps.Frame }) struct
         file[0..size],
     );
 
-    main.unmap(
-        frame,
+    caps.ROOT_SELF_VMEM.unmap(
         main.INITFS_TMP,
+        frame_size,
     ) catch |err| return .{ err, frame };
 
     return .{ {}, frame };
@@ -202,15 +202,17 @@ fn listHandler(_: void, _: u32, _: void) struct { Error!void, caps.Frame, usize 
     const text_size = size;
     size += @sizeOf(abi.Stat) * entries;
 
-    const frame = main.allocSized(caps.Frame, abi.ChunkSize.of(size).?) catch unreachable;
+    const frame = caps.Frame.create(size) catch unreachable;
     const frame_entries = @as([*]abi.Stat, @ptrFromInt(main.INITFS_LIST))[0..entries];
     const frame_names = @as([*]u8, @ptrFromInt(main.INITFS_LIST + @sizeOf(abi.Stat) * entries))[0..text_size];
 
-    main.map(
+    caps.ROOT_SELF_VMEM.map(
         frame,
+        0,
         main.INITFS_LIST,
-        abi.sys.Rights{ .writable = true },
-        abi.sys.MapFlags{},
+        size,
+        .{ .writable = true },
+        .{},
     ) catch unreachable;
 
     entries = 0;
@@ -251,9 +253,9 @@ fn listHandler(_: void, _: u32, _: void) struct { Error!void, caps.Frame, usize 
         @as(*volatile u8, &frame_names[size - 1]).* = 0; // null terminator, should already be there but just making sure
     }
 
-    main.unmap(
-        frame,
+    caps.ROOT_SELF_VMEM.unmap(
         main.INITFS_LIST,
+        size,
     ) catch unreachable;
 
     return .{ {}, frame, entries };

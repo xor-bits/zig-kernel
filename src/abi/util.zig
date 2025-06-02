@@ -6,61 +6,6 @@ const sys = @import("sys.zig");
 
 //
 
-pub const FrameVector = std.EnumArray(abi.ChunkSize, caps.Frame);
-
-//
-
-pub fn allocVector(mem: caps.Memory, size: usize) !FrameVector {
-    if (size > abi.ChunkSize.@"1GiB".sizeBytes()) return error.SegmentTooBig;
-    var frames: FrameVector = .initFill(.{ .cap = 0 });
-
-    inline for (std.meta.fields(abi.ChunkSize)) |f| {
-        const variant: abi.ChunkSize = @enumFromInt(f.value);
-        const specific_size: usize = variant.sizeBytes();
-
-        if (size & specific_size != 0) {
-            const frame = try mem.allocSized(caps.Frame, variant);
-            frames.set(variant, frame);
-        }
-    }
-
-    return frames;
-}
-
-pub fn mapVector(v: *const FrameVector, vmem: caps.Vmem, _vaddr: usize, rights: sys.Rights, flags: sys.MapFlags) !void {
-    var vaddr = _vaddr;
-
-    var iter = @constCast(v).iterator();
-    while (iter.next()) |e| {
-        if (e.value.*.cap == 0) continue;
-
-        try vmem.map(
-            e.value.*,
-            vaddr,
-            rights,
-            flags,
-        );
-
-        vaddr += e.key.sizeBytes();
-    }
-}
-
-pub fn unmapVector(v: *const FrameVector, vmem: caps.Vmem, _vaddr: usize) !void {
-    var vaddr = _vaddr;
-
-    var iter = @constCast(v).iterator();
-    while (iter.next()) |e| {
-        if (e.value.*.cap == 0) continue;
-
-        try vmem.unmap(
-            e.value.*,
-            vaddr,
-        );
-
-        vaddr += e.key.sizeBytes();
-    }
-}
-
 pub fn fillVolatile(comptime T: type, dest: []volatile T, val: T) void {
     for (dest) |*d| d.* = val;
 }
@@ -258,7 +203,7 @@ pub fn Protocol(comptime spec: type) type {
                     // hopefully gets converted into a switch
                     inline for (&variants_const, 0..) |v, i| {
                         if (i == @intFromEnum(variant)) {
-                            const sender = msg.cap;
+                            const sender = msg.cap_or_stamp;
                             const input = v.input_converter.deserialize(msg) orelse {
                                 // FIXME: handle invalid input
                                 std.log.err("invalid input", .{});
@@ -277,15 +222,15 @@ pub fn Protocol(comptime spec: type) type {
                 pub fn reply(rx: caps.Receiver, comptime id: MessageVariant, output: VariantOf(id).output_ty) sys.Error!void {
                     var msg: sys.Message = undefined;
                     variants_const[@intFromEnum(id)].output_converter.serialize(&msg, output);
-                    try rx.reply(&msg);
+                    try rx.reply(msg);
                 }
 
                 pub fn run(self: @This()) !void {
-                    var msg: sys.Message = undefined;
-                    try self.rx.recv(&msg);
+                    var msg: sys.Message = try self.rx.recv();
                     while (true) {
+                        std.log.info("got msg: {}", .{msg});
                         self.process(&msg);
-                        try self.rx.replyRecv(&msg);
+                        msg = try self.rx.replyRecv(msg);
                     }
                 }
             };

@@ -32,6 +32,8 @@ pub const Thread = struct {
     next: ?*Thread = null,
     /// scheduler linked list
     prev: ?*Thread = null,
+    /// IPC reply target
+    reply: ?*Thread = null,
 
     pub fn init(from_proc: *caps.Process) !*@This() {
         errdefer from_proc.deinit();
@@ -54,6 +56,7 @@ pub const Thread = struct {
 
         if (self.next) |next| next.deinit();
         if (self.prev) |prev| prev.deinit();
+        if (self.reply) |reply| reply.deinit();
 
         self.proc.deinit();
 

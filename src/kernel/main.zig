@@ -222,6 +222,8 @@ fn handle_syscall(
 ) Error!void {
     const log = std.log.scoped(.syscall);
 
+    errdefer log.warn("syscall error", .{});
+
     _ = locals;
 
     switch (id) {
@@ -296,7 +298,10 @@ fn handle_syscall(
             defer vmem.deinit();
             const frame = try thread.proc.getObject(caps.Frame, @truncate(trap.arg1));
             // map takes ownership of the frame
-            const pages: u32 = @truncate(std.math.divCeil(usize, trap.arg4, 0x1000) catch unreachable);
+            const pages: u32 = if (trap.arg4 == 0)
+                @intCast(@max(frame.pages.len, frame_first_page) - frame_first_page)
+            else
+                @truncate(std.math.divCeil(usize, trap.arg4, 0x1000) catch unreachable);
             const rights, const flags = abi.sys.unpackRightsFlags(@truncate(trap.arg5));
 
             // TODO: search, maybe
@@ -379,7 +384,7 @@ fn handle_syscall(
         },
         .thread_start => {
             const target_thread = try thread.proc.getObject(caps.Thread, @truncate(trap.arg0));
-            defer target_thread.deinit();
+            errdefer target_thread.deinit();
 
             {
                 target_thread.lock.lock();
@@ -414,6 +419,42 @@ fn handle_syscall(
             target_thread.priority = @truncate(trap.arg1);
         },
 
+        .receiver_create => {
+            const recv = try caps.Receiver.init();
+            errdefer recv.deinit();
+
+            const handle = try thread.proc.pushCapability(caps.Capability.init(recv));
+            trap.syscall_id = abi.sys.encode(handle);
+        },
+        .receiver_recv => {
+            const recv = try thread.proc.getObject(caps.Receiver, @truncate(trap.arg0));
+            defer recv.deinit();
+
+            recv.recv(thread, trap);
+        },
+        .receiver_reply => {
+            var msg = trap.readMessage();
+            msg.cap_or_stamp = 0; // call doesnt get to know the Receiver capability id
+
+            try caps.Receiver.reply(thread, msg);
+
+            trap.syscall_id = abi.sys.encode(0);
+        },
+        .receiver_reply_recv => {
+            var msg = trap.readMessage();
+            const recv = try thread.proc.getObject(caps.Receiver, msg.cap_or_stamp);
+            defer recv.deinit();
+            msg.cap_or_stamp = 0; // call doesnt get to know the Receiver capability id
+
+            try recv.replyRecv(thread, trap, msg);
+        },
+
+        .reply_create => {},
+        .reply_reply => {},
+
+        .sender_create => {},
+        .sender_call => {},
+
         .notify_create => {
             const notify = try caps.Notify.init();
             errdefer notify.deinit();
@@ -426,9 +467,7 @@ fn handle_syscall(
             defer notify.deinit();
 
             trap.syscall_id = abi.sys.encode(0);
-            if (notify.wait(thread, trap)) {
-                proc.switchNow(trap, null);
-            }
+            notify.wait(thread, trap);
         },
         .notify_poll => {
             const notify = try thread.proc.getObject(caps.Notify, @truncate(trap.arg0));

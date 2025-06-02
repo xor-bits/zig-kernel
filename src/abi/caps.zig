@@ -18,16 +18,6 @@ pub const Memory = extern struct {
     cap: u32 = 0,
 
     pub const Type: abi.ObjectType = .memory;
-
-    pub fn alloc(self: @This(), comptime T: type) sys.Error!T {
-        const cap = try sys.alloc(self.cap, T.Type, null);
-        return .{ .cap = cap };
-    }
-
-    pub fn allocSized(self: @This(), comptime T: type, size: abi.ChunkSize) sys.Error!T {
-        const cap = try sys.alloc(self.cap, T.Type, size);
-        return .{ .cap = cap };
-    }
 };
 
 /// capability to manage a single process
@@ -100,6 +90,7 @@ pub const Vmem = extern struct {
         return .{ .cap = cap };
     }
 
+    /// if length is zero, the rest of the frame is mapped
     pub fn map(
         this: @This(),
         frame: Frame,
@@ -136,9 +127,13 @@ pub const Frame = extern struct {
         return .{ .cap = cap };
     }
 
-    pub fn frameGetSize(self: @This()) sys.Error!usize {
+    pub fn getSize(self: @This()) sys.Error!usize {
         return try sys.frameGetSize(self.cap);
     }
+
+    // pub fn read(self: @This(), dst: []u8) sys.Error!void {}
+
+    // pub fn write(self: @This(), dst: []u8) sys.Error!void {}
 };
 
 /// capability to a MMIO physical memory region
@@ -146,18 +141,6 @@ pub const DeviceFrame = extern struct {
     cap: u32 = 0,
 
     pub const Type: abi.ObjectType = .device_frame;
-
-    pub fn addrOf(self: @This()) !usize {
-        return sys.deviceFrameAddrOf(self.cap);
-    }
-
-    pub fn sizeOf(self: @This()) !abi.ChunkSize {
-        return sys.deviceFrameSizeOf(self.cap);
-    }
-
-    pub fn subframe(self: @This(), paddr: usize, size: abi.ChunkSize) !DeviceFrame {
-        return .{ .cap = try sys.deviceFrameSubframe(self.cap, paddr, size) };
-    }
 };
 
 /// capability to **the** receiver end of an endpoint,
@@ -167,16 +150,21 @@ pub const Receiver = extern struct {
 
     pub const Type: abi.ObjectType = .receiver;
 
-    pub fn recv(self: @This(), msg: *sys.Message) sys.Error!void {
-        return sys.recv(self.cap, msg);
+    pub fn create() sys.Error!@This() {
+        const cap = try sys.receiverCreate();
+        return .{ .cap = cap };
     }
 
-    pub fn reply(self: @This(), msg: *sys.Message) sys.Error!void {
-        return sys.reply(self.cap, msg);
+    pub fn recv(self: @This()) sys.Error!sys.Message {
+        return try sys.receiverRecv(self.cap);
     }
 
-    pub fn replyRecv(self: @This(), msg: *sys.Message) sys.Error!void {
-        return sys.replyRecv(self.cap, msg);
+    pub fn reply(self: @This(), msg: sys.Message) sys.Error!void {
+        return try sys.receiverReply(self.cap, msg);
+    }
+
+    pub fn replyRecv(self: @This(), msg: sys.Message) sys.Error!sys.Message {
+        return try sys.receiverReplyRecv(self.cap, msg);
     }
 
     pub fn saveCaller(self: @This()) sys.Error!Reply {
@@ -184,12 +172,7 @@ pub const Receiver = extern struct {
     }
 
     pub fn loadCaller(self: @This(), reply_cap: Reply) sys.Error!void {
-        return sys.receiverLoadCaller(self.cap, reply_cap.cap);
-    }
-
-    pub fn subscribe(self: @This()) sys.Error!Sender {
-        const cap = try sys.receiverSubscribe(self.cap);
-        return .{ .cap = cap };
+        return try sys.receiverLoadCaller(self.cap, reply_cap.cap);
     }
 };
 
@@ -200,8 +183,13 @@ pub const Sender = extern struct {
 
     pub const Type: abi.ObjectType = .sender;
 
-    pub fn call(self: @This(), msg: *sys.Message) sys.Error!void {
-        return sys.call(self.cap, msg);
+    pub fn create(recv: Receiver) sys.Error!@This() {
+        const cap = try sys.senderCreate(recv.cap);
+        return .{ .cap = cap };
+    }
+
+    pub fn call(self: @This(), msg: sys.Message) sys.Error!sys.Message {
+        return try sys.senderCall(self.cap, msg);
     }
 };
 
@@ -212,8 +200,13 @@ pub const Reply = extern struct {
 
     pub const Type: abi.ObjectType = .reply;
 
-    pub fn reply(self: @This(), msg: *sys.Message) sys.Error!void {
-        return sys.reply(self.cap, msg);
+    pub fn create() sys.Error!@This() {
+        const cap = try sys.replyCreate();
+        return .{ .cap = cap };
+    }
+
+    pub fn reply(self: @This(), msg: sys.Message) sys.Error!void {
+        return sys.replyReply(self.cap, msg);
     }
 };
 
