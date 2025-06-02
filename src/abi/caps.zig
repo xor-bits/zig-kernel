@@ -63,14 +63,25 @@ pub const Thread = extern struct {
         return .{ .cap = cap };
     }
 
-    pub fn setPrio(this: @This(), prio: u2) sys.Error!void {
-        _ = .{ this, prio };
-        // sys.threadSetPrio(thread_cap: u32, priority: u2)
+    pub fn readRegs(this: @This(), regs: *sys.ThreadRegs) sys.Error!void {
+        try sys.threadReadRegs(this.cap, regs);
     }
 
-    // pub fn writeRegs(this: @This(), regs: *const sys.ThreadRegs) sys.Error!void {}
+    pub fn writeRegs(this: @This(), regs: *const sys.ThreadRegs) sys.Error!void {
+        try sys.threadWriteRegs(this.cap, regs);
+    }
 
-    // pub fn readRegs(this: @This(), regs: *sys.ThreadRegs) sys.Error!void {}
+    pub fn start(this: @This()) sys.Error!void {
+        try sys.threadStart(this.cap);
+    }
+
+    pub fn stop(this: @This()) sys.Error!void {
+        try sys.threadStop(this.cap);
+    }
+
+    pub fn setPrio(this: @This(), prio: u2) sys.Error!void {
+        try sys.threadSetPrio(this.cap, prio);
+    }
 };
 
 /// capability to the virtual memory structure

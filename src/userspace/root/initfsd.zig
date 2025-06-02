@@ -91,11 +91,11 @@ pub fn init() !void {
 
     thread = try caps.Thread.create(caps.ROOT_SELF_PROC);
     // try thread.setPrio(0);
-    // try thread.writeRegs(&.{
-    //     .user_stack_ptr = main.INITFS_STACK_TOP - 0x100, // fixing a bug in Zig where @returnAddress() in noreturn underflows the stack
-    //     .user_instr_ptr = @intFromPtr(&run),
-    // });
-    // try thread.start();
+    try thread.writeRegs(&.{
+        .user_stack_ptr = main.INITFS_STACK_TOP - 0x100, // fixing a bug in Zig where @returnAddress() in noreturn underflows the stack
+        .user_instr_ptr = @intFromPtr(&run),
+    });
+    try thread.start();
 }
 
 pub fn wait() !void {
@@ -115,12 +115,12 @@ var initfs_get_ready: std.atomic.Value(bool) = .init(false);
 var initfs_recv: caps.Receiver = .{};
 
 fn run() callconv(.SysV) noreturn {
-    runMain() catch |err| {
-        log.err("initfs failed: {}", .{err});
-    };
+    // runMain() catch |err| {
+    //     log.err("initfs failed: {}", .{err});
+    // };
 
     log.info("initfs terminated", .{});
-    abi.sys.stop();
+    abi.sys.self_stop();
 }
 
 fn runMain() !void {

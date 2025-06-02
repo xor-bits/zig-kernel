@@ -33,6 +33,11 @@ pub const Id = enum(usize) {
 
     thread_create,
     thread_self,
+    thread_read_regs,
+    thread_write_regs,
+    thread_start,
+    thread_stop,
+    thread_set_prio,
 
     handle_identify,
     handle_duplicate,
@@ -271,16 +276,6 @@ pub fn alloc(mem_cap: u32, ty: abi.ObjectType, dyn_size: ?abi.ChunkSize) !u32 {
 
 // THREAD CAPABILITY CALLS
 
-pub const ThreadCallId = enum(u8) {
-    start,
-    stop,
-    read_regs,
-    write_regs,
-    set_vmem,
-    set_prio,
-    transfer_cap,
-};
-
 pub const ThreadRegs = extern struct {
     _r15: u64 = 0,
     _r14: u64 = 0,
@@ -309,60 +304,6 @@ pub const ThreadRegs = extern struct {
     /// rsp
     user_stack_ptr: u64 = 0,
 };
-
-pub fn threadStart(thread_cap: u32) !void {
-    var msg: Message = .{
-        .arg0 = @intFromEnum(ThreadCallId.start),
-    };
-    try call(thread_cap, &msg);
-}
-
-pub fn threadStop(thread_cap: u32) !void {
-    var msg: Message = .{
-        .arg0 = @intFromEnum(ThreadCallId.stop),
-    };
-    try call(thread_cap, &msg);
-}
-
-pub fn threadReadRegs(thread_cap: u32, regs: *ThreadRegs) !void {
-    var msg: Message = .{
-        .arg0 = @intFromEnum(ThreadCallId.read_regs),
-        .arg1 = @intFromPtr(regs),
-    };
-    try call(thread_cap, &msg);
-}
-
-pub fn threadWriteRegs(thread_cap: u32, regs: *const ThreadRegs) !void {
-    var msg: Message = .{
-        .arg0 = @intFromEnum(ThreadCallId.write_regs),
-        .arg1 = @intFromPtr(regs),
-    };
-    try call(thread_cap, &msg);
-}
-
-pub fn threadSetVmem(thread_cap: u32, vmem_cap: u32) !void {
-    var msg: Message = .{
-        .arg0 = @intFromEnum(ThreadCallId.set_vmem),
-        .arg1 = vmem_cap,
-    };
-    try call(thread_cap, &msg);
-}
-
-pub fn threadSetPrio(thread_cap: u32, priority: u2) !void {
-    var msg: Message = .{
-        .arg0 = @intFromEnum(ThreadCallId.set_prio),
-        .arg1 = priority,
-    };
-    try call(thread_cap, &msg);
-}
-
-pub fn threadTransferCap(thread_cap: u32, cap: u32) !void {
-    var msg: Message = .{
-        .arg0 = @intFromEnum(ThreadCallId.transfer_cap),
-        .arg1 = cap,
-    };
-    try call(thread_cap, &msg);
-}
 
 // FRAME CAPABILITY CALLS
 
@@ -746,6 +687,39 @@ pub fn threadCreate(proc: u32) Error!u32 {
 
 pub fn threadSelf() Error!u32 {
     return @intCast(try syscall(.thread_self, .{}));
+}
+
+pub fn threadReadRegs(thread: u32, dst: *ThreadRegs) Error!void {
+    _ = try syscall(.thread_read_regs, .{
+        thread,
+        @intFromPtr(dst),
+    });
+}
+
+pub fn threadWriteRegs(thread: u32, dst: *const ThreadRegs) Error!void {
+    _ = try syscall(.thread_write_regs, .{
+        thread,
+        @intFromPtr(dst),
+    });
+}
+
+pub fn threadStart(thread: u32) Error!void {
+    _ = try syscall(.thread_start, .{
+        thread,
+    });
+}
+
+pub fn threadStop(thread: u32) Error!void {
+    _ = try syscall(.thread_stop, .{
+        thread,
+    });
+}
+
+pub fn threadSetPrio(thread: u32, prio: u2) Error!void {
+    _ = try syscall(.thread_set_prio, .{
+        thread,
+        prio,
+    });
 }
 
 pub fn handleIdentify() void {}
