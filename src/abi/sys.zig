@@ -474,11 +474,92 @@ pub fn threadSetPrio(thread: u32, prio: u2) Error!void {
     });
 }
 
-pub fn handleIdentify() void {}
+pub fn receiverCreate() void {
+    @compileError("TODO");
+}
 
-pub fn handleDuplicate() void {}
+pub fn receiverRecv() void {
+    @compileError("TODO");
+}
 
-pub fn handleClose() void {}
+pub fn receiverReply() void {
+    @compileError("TODO");
+}
+
+pub fn receiverReplyRecv() void {
+    @compileError("TODO");
+}
+
+pub fn receiverSaveCaller() void {
+    @compileError("TODO");
+}
+
+pub fn replyReply() void {
+    @compileError("TODO");
+}
+
+pub fn senderCreate() void {
+    @compileError("TODO");
+}
+
+pub fn senderCall() void {
+    @compileError("TODO");
+}
+
+pub fn notifyCreate() Error!u32 {
+    return @intCast(try syscall(.notify_create, .{}));
+}
+
+pub fn notifyWait(notify: u32) Error!void {
+    _ = try syscall(.notify_wait, .{notify});
+}
+
+pub fn notifyPoll(notify: u32) Error!bool {
+    return try syscall(.notify_wait, .{notify}) != 0;
+}
+
+pub fn notifyNotify(notify: u32) void {
+    _ = try syscall(.notify_notify, .{notify});
+}
+
+pub fn x86IoportCreate() void {
+    @compileError("TODO");
+}
+
+pub fn x86IoportInb() void {
+    @compileError("TODO");
+}
+
+pub fn x86IoportOutb() void {
+    @compileError("TODO");
+}
+
+pub fn x86IrqCreate() void {
+    @compileError("TODO");
+}
+
+pub fn x86IrqSubscribe() void {
+    @compileError("TODO");
+}
+
+pub fn x86IrqUnsubscribe() void {
+    @compileError("TODO");
+}
+
+pub fn handleIdentify(cap: u32) Error!abi.ObjectType {
+    return std.meta.intToEnum(
+        abi.ObjectType,
+        try syscall(.handle_identify, .{cap}),
+    ) catch Error.Internal;
+}
+
+pub fn handleDuplicate(cap: u32) Error!u32 {
+    return @intCast(try syscall(.handle_duplicate, .{cap}));
+}
+
+pub fn handleClose(cap: u32) void {
+    syscall(.handle_close, .{cap}) catch unreachable;
+}
 
 pub fn self_yield() void {
     _ = syscall(.self_yield, .{}) catch unreachable;

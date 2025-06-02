@@ -414,9 +414,24 @@ fn handle_syscall(
             target_thread.priority = @truncate(trap.arg1);
         },
 
-        .handle_identify => {},
-        .handle_duplicate => {},
-        .handle_close => {},
+        .notify_create => {},
+
+        .handle_identify => {
+            const cap = try thread.proc.getCapability(@truncate(trap.arg0));
+            defer cap.deinit();
+
+            trap.syscall_id = abi.sys.encode(@intFromEnum(cap.type));
+        },
+        .handle_duplicate => {
+            const cap = try thread.proc.getCapability(@truncate(trap.arg0));
+            errdefer cap.deinit();
+
+            const handle = try thread.proc.pushCapability(cap);
+            trap.syscall_id = abi.sys.encode(handle);
+        },
+        .handle_close => {
+            // TODO:
+        },
 
         .self_yield => {
             proc.yield(trap);

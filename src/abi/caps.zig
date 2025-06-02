@@ -224,6 +224,11 @@ pub const Notify = extern struct {
 
     pub const Type: abi.ObjectType = .notify;
 
+    pub fn create() sys.Error!@This() {
+        const cap = try sys.notifyCreate();
+        return .{ .cap = cap };
+    }
+
     pub fn wait(self: @This()) sys.Error!u32 {
         return sys.notifyWait(self.cap);
     }
