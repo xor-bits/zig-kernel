@@ -35,7 +35,7 @@ pub fn init() void {
 /// forgets the current thread and jumps into the main syscall loop
 pub fn enter() noreturn {
     var trap: arch.SyscallRegs = undefined;
-    yield(&trap);
+    switchNow(&trap, null);
     arch.sysret(&trap);
 }
 

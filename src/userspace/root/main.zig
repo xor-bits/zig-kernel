@@ -57,7 +57,13 @@ pub fn main() !void {
     log.info("boot info mapped", .{});
 
     try initfsd.init();
+    try initfsd.wait();
 }
+
+const alloc = 0;
+const allocSized = 0;
+const map = 0;
+const unmap = 0;
 
 pub fn _main() !void {
     const recv = try alloc(abi.caps.Receiver);
@@ -126,42 +132,6 @@ pub fn _main() !void {
         else
             try server.rx.recv(&msg);
     }
-}
-
-pub fn map(frame: caps.Frame, vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
-    self_vmem_lock.lock();
-    defer self_vmem_lock.unlock();
-    return caps.ROOT_SELF_VMEM.map(frame, vaddr, rights, flags);
-}
-
-pub fn unmap(frame: caps.Frame, vaddr: usize) Error!void {
-    self_vmem_lock.lock();
-    defer self_vmem_lock.unlock();
-    return caps.ROOT_SELF_VMEM.unmap(frame, vaddr);
-}
-
-pub fn mapDevice(frame: caps.DeviceFrame, vaddr: usize, rights: abi.sys.Rights, flags: abi.sys.MapFlags) Error!void {
-    self_vmem_lock.lock();
-    defer self_vmem_lock.unlock();
-    return caps.ROOT_SELF_VMEM.mapDevice(frame, vaddr, rights, flags);
-}
-
-pub fn unmapDevice(frame: caps.DeviceFrame, vaddr: usize) Error!void {
-    self_vmem_lock.lock();
-    defer self_vmem_lock.unlock();
-    return caps.ROOT_SELF_VMEM.unmapDevice(frame, vaddr);
-}
-
-pub fn alloc(comptime T: type) Error!T {
-    self_memory_lock.lock();
-    defer self_memory_lock.unlock();
-    return caps.ROOT_MEMORY.alloc(T);
-}
-
-pub fn allocSized(comptime T: type, size: abi.ChunkSize) Error!T {
-    self_memory_lock.lock();
-    defer self_memory_lock.unlock();
-    return caps.ROOT_MEMORY.allocSized(T, size);
 }
 
 fn binBytes(path: []const u8) ![]const u8 {

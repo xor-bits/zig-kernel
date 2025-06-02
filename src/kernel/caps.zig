@@ -379,12 +379,17 @@ pub const Frame = struct {
             self.lock.lock();
             defer self.lock.unlock();
 
-            if (limit >= self.pages.len)
+            if (limit > self.pages.len)
                 return Error.OutOfBounds;
         }
 
         var it = self.data(offset_bytes, false);
         while (try it.next()) |src_chunk| {
+            // log.info("chunk [ 0x{x}..0x{x} ]", .{
+            //     @intFromPtr(src_chunk.ptr),
+            //     @intFromPtr(src_chunk.ptr) + src_chunk.len,
+            // });
+
             if (src_chunk.len == bytes.len) {
                 @memcpy(bytes, src_chunk);
                 break;
@@ -415,7 +420,7 @@ pub const Frame = struct {
 
             return addr.Phys.fromParts(.{ .page = page })
                 .toHhdm()
-                .toPtr([*]volatile u8)[0 .. self.offset_within_first orelse 0x1000];
+                .toPtr([*]volatile u8)[self.offset_within_first orelse 0 .. 0x1000];
         }
     };
 
@@ -587,6 +592,104 @@ pub const Vmem = struct {
 
         self.refcnt.inc();
         return self;
+    }
+
+    pub fn write(self: *@This(), vaddr: addr.Virt, source: []const volatile u8) Error!void {
+        if (conf.LOG_OBJ_CALLS)
+            log.info("Vmem.write", .{});
+
+        var bytes: []const volatile u8 = source;
+
+        if (bytes.len == 0)
+            return;
+
+        self.lock.lock();
+        defer self.lock.unlock();
+
+        const idx_beg, const idx_end = try self.data(vaddr, bytes.len);
+
+        for (idx_beg..idx_end) |idx| {
+            std.debug.assert(bytes.len != 0);
+            const mapping = &self.mappings.items[idx];
+
+            const offset_bytes: usize = if (idx == idx_beg)
+                vaddr.raw - mapping.getVaddr().raw
+            else
+                0;
+            const limit = @min(mapping.pages * 0x1000 - offset_bytes, bytes.len);
+
+            try mapping.frame.write(
+                mapping.frame_first_page * 0x1000 + offset_bytes,
+                bytes[0..limit],
+            );
+            bytes = bytes[limit..];
+        }
+    }
+
+    pub fn read(self: *@This(), vaddr: addr.Virt, dest: []volatile u8) Error!void {
+        if (conf.LOG_OBJ_CALLS)
+            log.info("Vmem.read vaddr=0x{x} dest.len={}", .{ vaddr.raw, dest.len });
+
+        var bytes: []volatile u8 = dest;
+
+        if (bytes.len == 0)
+            return;
+
+        self.lock.lock();
+        defer self.lock.unlock();
+
+        const idx_beg, const idx_end = try self.data(vaddr, bytes.len);
+
+        for (idx_beg..idx_end) |idx| {
+            std.debug.assert(bytes.len != 0);
+            const mapping = &self.mappings.items[idx];
+
+            // log.info("mapping [ 0x{x}..0x{x} ]", .{
+            //     mapping.getVaddr().raw,
+            //     mapping.getVaddr().raw + mapping.pages * 0x1000,
+            // });
+
+            const offset_bytes: usize = if (idx == idx_beg)
+                vaddr.raw - mapping.getVaddr().raw
+            else
+                0;
+            const limit = @min(mapping.pages * 0x1000 - offset_bytes, bytes.len);
+
+            try mapping.frame.read(
+                mapping.frame_first_page * 0x1000 + offset_bytes,
+                bytes[0..limit],
+            );
+            bytes = bytes[limit..];
+        }
+    }
+
+    /// assumes `self` is locked
+    fn data(self: *@This(), vaddr: addr.Virt, len: usize) Error!struct { usize, usize } {
+        std.debug.assert(len != 0);
+
+        if (self.mappings.items.len == 0)
+            return Error.InvalidAddress;
+
+        const vaddr_end_exclusive = try addr.Virt.fromUser(vaddr.raw + len);
+        const vaddr_end_inclusive = try addr.Virt.fromUser(vaddr.raw + len - 1);
+
+        const idx_beg: usize = self.find(vaddr) orelse return Error.InvalidAddress;
+        const idx_end: usize = 1 + (self.find(vaddr_end_exclusive) orelse (self.mappings.items.len - 1));
+
+        std.debug.assert(self.mappings.items[idx_beg].overlaps(vaddr, 0));
+        std.debug.assert(self.mappings.items[idx_end - 1].overlaps(vaddr_end_inclusive, 0));
+
+        // make sure the mappings are contiguous (no unmapped holes)
+        for (idx_beg..@max(idx_beg, idx_end - 1)) |idx| {
+            const prev_mapping = &self.mappings.items[idx];
+            const next_mapping = &self.mappings.items[idx + 1];
+
+            errdefer log.warn("Vmem.write memory not contiguous", .{});
+            if (prev_mapping.getVaddr().raw + prev_mapping.pages * 0x1000 != next_mapping.getVaddr().raw)
+                return Error.InvalidAddress;
+        }
+
+        return .{ idx_beg, idx_end };
     }
 
     pub fn switchTo(self: *@This()) void {
@@ -1044,6 +1147,30 @@ pub const Thread = struct {
 
         self.refcnt.inc();
         return self;
+    }
+
+    pub fn unhandledPageFault(
+        _: *@This(),
+        target_addr: usize,
+        caused_by: arch.FaultCause,
+        ip: usize,
+        sp: usize,
+        reason: anyerror,
+    ) noreturn {
+        log.warn(
+            \\page fault 0x{x} (user) ({})
+            \\ - caused by: {}
+            \\ - ip: 0x{x}
+            \\ - sp: 0x{x}
+        , .{
+            target_addr,
+            reason,
+            caused_by,
+            ip,
+            sp,
+        });
+
+        proc.enter();
     }
 };
 

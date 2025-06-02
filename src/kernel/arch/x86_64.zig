@@ -861,22 +861,6 @@ pub const Idt = extern struct {
 
                 if (conf.LOG_EVERYTHING) log.debug("general protection fault interrupt", .{});
 
-                // log.warn(
-                //     \\page fault 0x{x}
-                //     \\ - user: {any}
-                //     \\ - caused by write: {any}
-                //     \\ - instruction fetch: {any}
-                //     \\ - ip: 0x{x}
-                //     \\ - sp: 0x{x}
-                // , .{
-                //     target_addr,
-                //     pfec.user_mode,
-                //     pfec.caused_by_write,
-                //     pfec.instruction_fetch,
-                //     interrupt_stack_frame.ip,
-                //     interrupt_stack_frame.sp,
-                // });
-
                 const caused_by: FaultCause = if (pfec.caused_by_write)
                     .write
                 else if (pfec.instruction_fetch)
@@ -884,38 +868,50 @@ pub const Idt = extern struct {
                 else
                     .read;
 
+                const thread = cpuLocal().current_thread.?;
+
                 const vaddr = addr.Virt.fromUser(target_addr) catch |err| {
-                    std.debug.panic("TODO: handle {}", .{err});
+                    thread.unhandledPageFault(
+                        target_addr,
+                        caused_by,
+                        interrupt_stack_frame.ip,
+                        interrupt_stack_frame.sp,
+                        err,
+                    );
                 };
 
                 if (pfec.user_mode and !conf.KERNEL_PANIC_ON_USER_FAULT) {
-                    const thread = cpuLocal().current_thread.?;
                     thread.proc.vmem.pageFault(caused_by, vaddr) catch |err| {
-                        std.debug.panic("TODO: handle {}", .{err});
+                        thread.unhandledPageFault(
+                            target_addr,
+                            caused_by,
+                            interrupt_stack_frame.ip,
+                            interrupt_stack_frame.sp,
+                            err,
+                        );
                     };
 
-                    // cpuLocal().current_thread.?.status = .stopped;
-                    // proc.enter();
-                } else {
-                    std.debug.panic(
-                        \\unhandled page fault 0x{x}
-                        \\ - user: {any}
-                        \\ - caused by write: {any}
-                        \\ - instruction fetch: {any}
-                        \\ - ip: 0x{x}
-                        \\ - sp: 0x{x}
-                        \\ - line:
-                        \\{}
-                    , .{
-                        target_addr,
-                        pfec.user_mode,
-                        pfec.caused_by_write,
-                        pfec.instruction_fetch,
-                        interrupt_stack_frame.ip,
-                        interrupt_stack_frame.sp,
-                        logs.Addr2Line{ .addr = interrupt_stack_frame.ip },
-                    });
+                    return;
                 }
+
+                std.debug.panic(
+                    \\unhandled page fault 0x{x}
+                    \\ - user: {any}
+                    \\ - caused by write: {any}
+                    \\ - instruction fetch: {any}
+                    \\ - ip: 0x{x}
+                    \\ - sp: 0x{x}
+                    \\ - line:
+                    \\{}
+                , .{
+                    target_addr,
+                    pfec.user_mode,
+                    pfec.caused_by_write,
+                    pfec.instruction_fetch,
+                    interrupt_stack_frame.ip,
+                    interrupt_stack_frame.sp,
+                    logs.Addr2Line{ .addr = interrupt_stack_frame.ip },
+                });
             }
         }).withStack(1).asInt();
         // reserved

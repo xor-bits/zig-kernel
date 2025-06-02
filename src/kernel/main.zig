@@ -188,10 +188,10 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
     const locals = arch.cpuLocal();
     const thread = locals.current_thread.?;
 
-    if (conf.LOG_SYSCALLS)
-        log.debug("syscall: {s}      cap_id={}", .{ @tagName(id), trap.arg0 });
-    defer if (conf.LOG_SYSCALLS)
-        log.debug("syscall: {s} done cap_id={}", .{ @tagName(id), trap.arg0 });
+    if (conf.LOG_SYSCALLS and id != .self_yield)
+        log.debug("syscall: {s}", .{@tagName(id)});
+    defer if (conf.LOG_SYSCALLS and id != .self_yield)
+        log.debug("syscall: {s} done", .{@tagName(id)});
 
     if (conf.LOG_SYSCALL_STATS) {
         _ = syscall_stats.getPtr(id).fetchAdd(1, .monotonic);
@@ -350,6 +350,68 @@ fn handle_syscall(
 
             const handle = try thread.proc.pushCapability(caps.Capability.init(thread_self));
             trap.syscall_id = abi.sys.encode(handle);
+        },
+        .thread_read_regs => {
+            const regs_ptr = try addr.Virt.fromUser(trap.arg1);
+            const target_thread = try thread.proc.getObject(caps.Thread, @truncate(trap.arg0));
+            defer target_thread.deinit();
+
+            var regs: abi.sys.ThreadRegs = undefined;
+
+            target_thread.lock.lock();
+            regs = @bitCast(target_thread.trap);
+            target_thread.lock.unlock();
+
+            try thread.proc.vmem.write(regs_ptr, std.mem.asBytes(&regs));
+        },
+        .thread_write_regs => {
+            const regs_ptr = try addr.Virt.fromUser(trap.arg1);
+            const target_thread = try thread.proc.getObject(caps.Thread, @truncate(trap.arg0));
+            defer target_thread.deinit();
+
+            var regs: abi.sys.ThreadRegs = undefined;
+
+            try thread.proc.vmem.read(regs_ptr, std.mem.asBytes(&regs));
+
+            target_thread.lock.lock();
+            target_thread.trap = @bitCast(regs);
+            target_thread.lock.unlock();
+        },
+        .thread_start => {
+            const target_thread = try thread.proc.getObject(caps.Thread, @truncate(trap.arg0));
+            defer target_thread.deinit();
+
+            {
+                target_thread.lock.lock();
+                defer target_thread.lock.unlock();
+                if (target_thread.status != .stopped)
+                    return Error.NotStopped;
+            }
+
+            proc.start(target_thread);
+        },
+        .thread_stop => {
+            const target_thread = try thread.proc.getObject(caps.Thread, @truncate(trap.arg0));
+            defer target_thread.deinit();
+
+            {
+                target_thread.lock.lock();
+                defer target_thread.lock.unlock();
+                // FIXME: atomic status, because the scheduler might be reading/writing this
+                if (target_thread.status == .stopped)
+                    return Error.IsStopped;
+            }
+
+            proc.stop(target_thread);
+        },
+        .thread_set_prio => {
+            const target_thread = try thread.proc.getObject(caps.Thread, @truncate(trap.arg0));
+            defer target_thread.deinit();
+
+            target_thread.lock.lock();
+            defer target_thread.lock.unlock();
+
+            target_thread.priority = @truncate(trap.arg1);
         },
 
         .handle_identify => {},

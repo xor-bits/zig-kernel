@@ -54,10 +54,12 @@ fn vmmVectorFree(_: *anyopaque, _: []u8, _: std.mem.Alignment, _: usize) void {}
 
 fn vmmVectorGrow(top: *usize, n_pages: usize) !void {
     for (0..n_pages) |_| {
-        const frame = try main.allocSized(abi.caps.Frame, .@"64KiB");
-        try main.map(
+        const frame = try caps.Frame.create(0x10000);
+        try caps.ROOT_SELF_VMEM.map(
             frame,
+            0,
             top.*,
+            0x10000,
             .{ .writable = true },
             .{},
         );
@@ -90,7 +92,7 @@ pub fn init() !void {
     );
 
     thread = try caps.Thread.create(caps.ROOT_SELF_PROC);
-    // try thread.setPrio(0);
+    try thread.setPrio(0);
     try thread.writeRegs(&.{
         .user_stack_ptr = main.INITFS_STACK_TOP - 0x100, // fixing a bug in Zig where @returnAddress() in noreturn underflows the stack
         .user_instr_ptr = @intFromPtr(&run),
@@ -100,7 +102,7 @@ pub fn init() !void {
 
 pub fn wait() !void {
     while (initfs_get_ready.load(.acquire) == false) {
-        abi.sys.yield();
+        abi.sys.self_yield();
     }
 }
 
@@ -115,9 +117,9 @@ var initfs_get_ready: std.atomic.Value(bool) = .init(false);
 var initfs_recv: caps.Receiver = .{};
 
 fn run() callconv(.SysV) noreturn {
-    // runMain() catch |err| {
-    //     log.err("initfs failed: {}", .{err});
-    // };
+    runMain() catch |err| {
+        log.err("initfs failed: {}", .{err});
+    };
 
     log.info("initfs terminated", .{});
     abi.sys.self_stop();
@@ -129,18 +131,18 @@ fn runMain() !void {
     std.debug.assert(std.mem.eql(u8, initfs_tar.items[257..][0..8], "ustar\x20\x20\x00"));
     log.info("decompressed initfs size: 0x{x}", .{initfs_tar.items.len});
 
-    initfs_recv = try main.alloc(caps.Receiver);
-    _ = try initfs_set_ready.notify();
+    // initfs_recv = try main.alloc(caps.Receiver);
+    // _ = try initfs_set_ready.notify();
 
-    log.info("initfs ready", .{});
-    var server = abi.InitfsProtocol.Server(.{
-        .scope = if (abi.conf.LOG_SERVERS) .initfs else null,
-    }, .{
-        .openFile = openFileHandler,
-        .fileSize = fileSizeHandler,
-        .list = listHandler,
-    }).init({}, initfs_recv);
-    try server.run();
+    // log.info("initfs ready", .{});
+    // var server = abi.InitfsProtocol.Server(.{
+    //     .scope = if (abi.conf.LOG_SERVERS) .initfs else null,
+    // }, .{
+    //     .openFile = openFileHandler,
+    //     .fileSize = fileSizeHandler,
+    //     .list = listHandler,
+    // }).init({}, initfs_recv);
+    // try server.run();
 }
 
 fn openFileHandler(_: void, _: u32, req: struct { [32:0]u8, caps.Frame }) struct { Error!void, caps.Frame } {
