@@ -227,15 +227,15 @@ fn createInitfsTarGz(
     abi: *std.Build.Module,
 ) std.Build.LazyPath {
     const initfs_processes = .{
-        "vm",
-        "pm",
-        "rm",
-        "vfs",
-        "timer",
-        "hpet",
-        "input",
-        "ps2",
-        "init",
+        // "vm",
+        // "pm",
+        // "rm",
+        // "vfs",
+        // "timer",
+        // "hpet",
+        // "input",
+        // "ps2",
+        // "init",
     };
 
     // create virtual initfs.tar.gz root

@@ -268,6 +268,12 @@ fn handle_syscall(
             const handle = try thread.proc.pushCapability(caps.Capability.init(frame));
             trap.syscall_id = abi.sys.encode(handle);
         },
+        .frame_get_size => {
+            const frame = try thread.proc.getObject(caps.Frame, @truncate(trap.arg0));
+            defer frame.deinit();
+
+            trap.syscall_id = abi.sys.encode(@as(u32, @intCast(frame.pages.len)));
+        },
 
         .vmem_create => {
             const vmem = try caps.Vmem.init();
@@ -290,7 +296,7 @@ fn handle_syscall(
             const frame = try thread.proc.getObject(caps.Frame, @truncate(trap.arg1));
             // map takes ownership of the frame
             const pages: u32 = @truncate(std.math.divCeil(usize, trap.arg4, 0x1000) catch unreachable);
-            const rights = abi.sys.Rights.fromInt(@truncate(trap.arg5));
+            const rights, const flags = abi.sys.unpackRightsFlags(@truncate(trap.arg5));
 
             // TODO: search, maybe
             try vmem.map(
@@ -299,6 +305,7 @@ fn handle_syscall(
                 vaddr,
                 pages,
                 rights,
+                flags,
             );
 
             trap.syscall_id = abi.sys.encode(0);

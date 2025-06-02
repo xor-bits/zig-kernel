@@ -21,6 +21,7 @@ pub const Id = enum(usize) {
     set_extra,
 
     frame_create,
+    frame_get_size,
 
     vmem_create,
     vmem_self,
@@ -109,17 +110,17 @@ pub const CacheType = enum(u8) {
     }
 };
 
-pub const MapFlags = extern struct {
-    protection_key: u8 = 0,
+pub const MapFlags = packed struct {
+    // protection_key: u8 = 0,
     cache: CacheType = .write_back,
-    global: bool = false,
+    // global: bool = false,
 
     pub fn asInt(self: MapFlags) u64 {
-        return @as(u24, @bitCast(self));
+        return @as(u8, @bitCast(self));
     }
 
     pub fn fromInt(i: u64) MapFlags {
-        return @as(MapFlags, @bitCast(@as(u24, @truncate(i))));
+        return @as(MapFlags, @bitCast(@as(u8, @truncate(i))));
     }
 };
 
@@ -716,6 +717,10 @@ pub fn frameCreate(size_bytes: usize) Error!u32 {
     return @intCast(try syscall(.frame_create, .{size_bytes}));
 }
 
+pub fn frameGetSize(frame: u32) Error!usize {
+    return try syscall(.frame_get_size, .{frame}) * 0x1000;
+}
+
 pub fn vmemCreate() Error!u32 {
     return @intCast(try syscall(.vmem_create, .{}));
 }
@@ -724,16 +729,27 @@ pub fn vmemSelf() Error!u32 {
     return @intCast(try syscall(.vmem_self, .{}));
 }
 
+pub fn packRightsFlags(rights: Rights, flags: MapFlags) u16 {
+    const val: packed struct { r: Rights, f: MapFlags } = .{ .r = rights, .f = flags };
+    return @bitCast(val);
+}
+
+pub fn unpackRightsFlags(v: u16) struct { Rights, MapFlags } {
+    const val: packed struct { r: Rights, f: MapFlags } = @bitCast(v);
+    return .{ val.r, val.f };
+}
+
 pub fn vmemMap2(
     vmem: u32,
     frame: u32,
     frame_offset: usize,
     vaddr: usize,
     length: usize,
-    rights: abi.sys.Rights,
+    rights: Rights,
+    flags: MapFlags,
 ) Error!void {
     _ = try syscall(.vmem_map, .{
-        vmem, frame, frame_offset, vaddr, length, rights.asInt(),
+        vmem, frame, frame_offset, vaddr, length, packRightsFlags(rights, flags),
     });
 }
 

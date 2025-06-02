@@ -494,12 +494,13 @@ pub const Vmem = struct {
         /// number of bytes (rounded up to pages) mapped
         pages: u32,
         target: packed struct {
-            /// mapping flags
+            /// mapping rights
             rights: abi.sys.Rights,
-            _: u4 = 0,
+            /// mapping flags
+            flags: abi.sys.MapFlags,
             /// virtual address destination of the mapping
             /// `mappings` is sorted by this
-            page: u52,
+            page: u48,
         },
 
         fn init(
@@ -508,6 +509,7 @@ pub const Vmem = struct {
             vaddr: addr.Virt,
             pages: u32,
             rights: abi.sys.Rights,
+            flags: abi.sys.MapFlags,
         ) @This() {
             return .{
                 .frame = frame,
@@ -515,6 +517,7 @@ pub const Vmem = struct {
                 .pages = pages,
                 .target = .{
                     .rights = rights,
+                    .flags = flags,
                     .page = @truncate(vaddr.raw >> 12),
                 },
             };
@@ -610,16 +613,18 @@ pub const Vmem = struct {
         vaddr: addr.Virt,
         pages: u32,
         rights: abi.sys.Rights,
+        flags: abi.sys.MapFlags,
     ) Error!void {
         errdefer frame.deinit();
 
         if (conf.LOG_OBJ_CALLS)
-            log.info("Vmem.map frame={*} frame_first_page={} vaddr=0x{x} pages={} rights={}", .{
+            log.info("Vmem.map frame={*} frame_first_page={} vaddr=0x{x} pages={} rights={} flags={}", .{
                 frame,
                 frame_first_page,
                 vaddr.raw,
                 pages,
                 rights,
+                flags,
             });
 
         if (pages == 0 or vaddr.raw == 0)
@@ -641,6 +646,7 @@ pub const Vmem = struct {
             vaddr,
             pages,
             rights,
+            flags,
         );
 
         self.lock.lock();
@@ -839,7 +845,7 @@ pub const Vmem = struct {
                     addr.Phys.fromParts(.{ .page = wanted_page_index }),
                     vaddr,
                     mapping.target.rights,
-                    .{},
+                    mapping.target.flags,
                 );
 
                 return;
@@ -858,7 +864,7 @@ pub const Vmem = struct {
                     addr.Phys.fromParts(.{ .page = wanted_page_index }),
                     vaddr,
                     mapping.target.rights,
-                    .{},
+                    mapping.target.flags,
                 );
 
                 return;
@@ -1053,7 +1059,7 @@ test "new VmemObject and FrameObject" {
         .readable = true,
         .writable = true,
         .executable = true,
-    });
+    }, .{});
     try vmem.start();
     vmem.switchTo();
     vmem.pageFault(

@@ -715,9 +715,9 @@ pub const Entry = packed struct {
             .write_through = pwt,
             .cache_disable = pcd,
             .huge_page_or_pat = huge_page_or_pat,
-            .global = @intFromBool(flags.global),
+            .global = 0,
             .page_index = page_index,
-            .protection_key = @truncate(flags.protection_key),
+            .protection_key = 0,
             .no_execute = @intFromBool(!rights.executable),
         };
     }

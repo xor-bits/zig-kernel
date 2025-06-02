@@ -44,6 +44,18 @@ pub var self_vmem_lock: abi.lock.YieldMutex = .new();
 pub fn main() !void {
     log.info("I am root", .{});
 
+    const len = try abi.sys.frameGetSize(abi.caps.ROOT_BOOT_INFO.cap);
+
+    try abi.sys.vmemMap2(
+        abi.caps.ROOT_SELF_VMEM.cap,
+        abi.caps.ROOT_BOOT_INFO.cap,
+        0,
+        BOOT_INFO,
+        len,
+        .{},
+        .{},
+    );
+
     try map(
         abi.caps.ROOT_BOOT_INFO,
         BOOT_INFO,
@@ -633,6 +645,7 @@ fn mapStack() !void {
         STACK_BOTTOM,
         1024 * 256,
         .{ .writable = true },
+        .{},
     );
 
     log.info("stack mapping complete 0x{x}..0x{x}", .{ STACK_BOTTOM, STACK_TOP });

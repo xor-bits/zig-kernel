@@ -107,6 +107,7 @@ fn mapRoot(thread: *caps.Thread, vmem: *caps.Vmem, boot_info: *caps.Frame, a: ar
             .executable = true,
             .user_accessible = true,
         },
+        .{},
     );
 
     arch.flushTlb();
