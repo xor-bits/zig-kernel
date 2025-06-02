@@ -77,26 +77,31 @@ pub fn init() !void {
     log.info("starting initfs thread", .{});
     initfs_tar_gz = std.io.fixedBufferStream(initfs);
 
-    initfs_get_ready = try main.alloc(caps.Notify);
-    initfs_set_ready = try initfs_get_ready.clone();
+    // TODO: notify cap
 
-    const stack = try main.allocSized(caps.Frame, .@"256KiB");
-    try main.map(stack, main.INITFS_STACK_BOTTOM, .{ .writable = true }, .{});
+    const stack = try caps.Frame.create(1024 * 256);
+    try caps.ROOT_SELF_VMEM.map(
+        stack,
+        0,
+        main.INITFS_STACK_BOTTOM,
+        1024 * 256,
+        .{ .writable = true },
+        .{},
+    );
 
-    thread = try main.alloc(caps.Thread);
-    try thread.setPrio(0);
-    main.self_vmem_lock.lock();
-    defer main.self_vmem_lock.unlock();
-    try thread.setVmem(caps.ROOT_SELF_VMEM);
-    try thread.writeRegs(&.{
-        .user_stack_ptr = main.INITFS_STACK_TOP - 0x100, // fixing a bug in Zig where @returnAddress() in noreturn underflows the stack
-        .user_instr_ptr = @intFromPtr(&run),
-    });
-    try thread.start();
+    thread = try caps.Thread.create(caps.ROOT_SELF_PROC);
+    // try thread.setPrio(0);
+    // try thread.writeRegs(&.{
+    //     .user_stack_ptr = main.INITFS_STACK_TOP - 0x100, // fixing a bug in Zig where @returnAddress() in noreturn underflows the stack
+    //     .user_instr_ptr = @intFromPtr(&run),
+    // });
+    // try thread.start();
 }
 
 pub fn wait() !void {
-    _ = try initfs_get_ready.wait();
+    while (initfs_get_ready.load(.acquire) == false) {
+        abi.sys.yield();
+    }
 }
 
 pub fn getSender() !caps.Sender {
@@ -106,7 +111,7 @@ pub fn getSender() !caps.Sender {
 var thread: caps.Thread = undefined;
 var initfs_tar_gz: std.io.FixedBufferStream([]const u8) = undefined;
 var initfs_set_ready: caps.Notify = .{};
-var initfs_get_ready: caps.Notify = .{};
+var initfs_get_ready: std.atomic.Value(bool) = .init(false);
 var initfs_recv: caps.Receiver = .{};
 
 fn run() callconv(.SysV) noreturn {

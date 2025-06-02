@@ -732,13 +732,21 @@ pub fn vmemUnmap(vmem: u32, vaddr: usize, length: usize) void {
     });
 }
 
-pub fn procCreate() void {}
+pub fn procCreate(vmem: u32) Error!u32 {
+    return @intCast(try syscall(.proc_create, .{vmem}));
+}
 
-pub fn procSelf() void {}
+pub fn procSelf() Error!u32 {
+    return @intCast(try syscall(.proc_self, .{}));
+}
 
-pub fn threadCreate() void {}
+pub fn threadCreate(proc: u32) Error!u32 {
+    return @intCast(try syscall(.thread_create, .{proc}));
+}
 
-pub fn threadSelf() void {}
+pub fn threadSelf() Error!u32 {
+    return @intCast(try syscall(.thread_self, .{}));
+}
 
 pub fn handleIdentify() void {}
 
@@ -746,11 +754,11 @@ pub fn handleDuplicate() void {}
 
 pub fn handleClose() void {}
 
-pub fn yield() void {
+pub fn self_yield() void {
     _ = syscall(.self_yield, .{}) catch unreachable;
 }
 
-pub fn stop() noreturn {
+pub fn self_stop() noreturn {
     _ = syscall(.self_stop, .{}) catch {};
     asm volatile ("mov 0, %rax"); // read from nullptr to kill the process for sure
     unreachable;

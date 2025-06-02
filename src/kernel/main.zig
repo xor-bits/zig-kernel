@@ -283,9 +283,10 @@ fn handle_syscall(
             trap.syscall_id = abi.sys.encode(handle);
         },
         .vmem_self => {
-            const vmem = thread.proc.vmem.clone();
+            const vmem_self = thread.proc.vmem.clone();
+            errdefer vmem_self.deinit();
 
-            const handle = try thread.proc.pushCapability(caps.Capability.init(vmem));
+            const handle = try thread.proc.pushCapability(caps.Capability.init(vmem_self));
             trap.syscall_id = abi.sys.encode(handle);
         },
         .vmem_map => {
@@ -319,11 +320,37 @@ fn handle_syscall(
             try vmem.unmap(vaddr, pages);
         },
 
-        .proc_create => {},
-        .proc_self => {},
+        .proc_create => {
+            const from_vmem = try thread.proc.getObject(caps.Vmem, @truncate(trap.arg0));
+            const new_proc = try caps.Process.init(from_vmem);
+            errdefer new_proc.deinit();
 
-        .thread_create => {},
-        .thread_self => {},
+            const handle = try thread.proc.pushCapability(caps.Capability.init(new_proc));
+            trap.syscall_id = abi.sys.encode(handle);
+        },
+        .proc_self => {
+            const proc_self = thread.proc.clone();
+            errdefer proc_self.deinit();
+
+            const handle = try thread.proc.pushCapability(caps.Capability.init(proc_self));
+            trap.syscall_id = abi.sys.encode(handle);
+        },
+
+        .thread_create => {
+            const from_proc = try thread.proc.getObject(caps.Process, @truncate(trap.arg0));
+            const new_thread = try caps.Thread.init(from_proc);
+            errdefer new_thread.deinit();
+
+            const handle = try thread.proc.pushCapability(caps.Capability.init(new_thread));
+            trap.syscall_id = abi.sys.encode(handle);
+        },
+        .thread_self => {
+            const thread_self = thread.clone();
+            errdefer thread_self.deinit();
+
+            const handle = try thread.proc.pushCapability(caps.Capability.init(thread_self));
+            trap.syscall_id = abi.sys.encode(handle);
+        },
 
         .handle_identify => {},
         .handle_duplicate => {},

@@ -920,6 +920,8 @@ pub const Process = struct {
     caps: std.ArrayList(CapabilitySlot), // TODO: unmanaged
 
     pub fn init(from_vmem: *Vmem) !*@This() {
+        errdefer from_vmem.deinit();
+
         if (conf.LOG_OBJ_CALLS)
             log.info("Process.init", .{});
 
@@ -1013,6 +1015,8 @@ pub const Thread = struct {
     prev: ?*Thread = null,
 
     pub fn init(from_proc: *Process) !*@This() {
+        errdefer from_proc.deinit();
+
         if (conf.LOG_OBJ_CALLS)
             log.info("Thread.init", .{});
 

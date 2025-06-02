@@ -5,7 +5,7 @@ const sys = @import("sys.zig");
 
 pub const ROOT_SELF_VMEM: Vmem = .{ .cap = 1 };
 pub const ROOT_SELF_THREAD: Thread = .{ .cap = 2 };
-pub const ROOT_SELF_PROC: Memory = .{ .cap = 3 };
+pub const ROOT_SELF_PROC: Process = .{ .cap = 3 };
 pub const ROOT_BOOT_INFO: Frame = .{ .cap = 4 };
 pub const ROOT_MEMORY: Memory = .{ .cap = 5 };
 pub const ROOT_X86_IOPORT_ALLOCATOR: X86IoPortAllocator = .{ .cap = 5 };
@@ -30,39 +30,47 @@ pub const Memory = extern struct {
     }
 };
 
+/// capability to manage a single process
+pub const Process = extern struct {
+    cap: u32 = 0,
+
+    pub const Type: abi.ObjectType = .process;
+
+    pub fn create(vmem: Vmem) sys.Error!@This() {
+        const cap = try sys.procCreate(vmem.cap);
+        return .{ .cap = cap };
+    }
+
+    pub fn self() sys.Error!@This() {
+        const cap = try sys.procSelf();
+        return .{ .cap = cap };
+    }
+};
+
 /// capability to manage a single thread control block (TCB)
 pub const Thread = extern struct {
     cap: u32 = 0,
 
     pub const Type: abi.ObjectType = .thread;
 
-    pub fn start(self: @This()) sys.Error!void {
-        return sys.threadStart(self.cap);
+    pub fn create(proc: Process) sys.Error!@This() {
+        const cap = try sys.threadCreate(proc.cap);
+        return .{ .cap = cap };
     }
 
-    pub fn stop(self: @This()) sys.Error!void {
-        return sys.threadStop(self.cap);
+    pub fn self() sys.Error!@This() {
+        const cap = try sys.threadSelf();
+        return .{ .cap = cap };
     }
 
-    pub fn readRegs(self: @This(), regs: *sys.ThreadRegs) sys.Error!void {
-        return sys.threadReadRegs(self.cap, regs);
+    pub fn setPrio(this: @This(), prio: u2) sys.Error!void {
+        _ = .{ this, prio };
+        // sys.threadSetPrio(thread_cap: u32, priority: u2)
     }
 
-    pub fn writeRegs(self: @This(), regs: *const sys.ThreadRegs) sys.Error!void {
-        return sys.threadWriteRegs(self.cap, regs);
-    }
+    // pub fn writeRegs(this: @This(), regs: *const sys.ThreadRegs) sys.Error!void {}
 
-    pub fn setVmem(self: @This(), vmem: Vmem) sys.Error!void {
-        return sys.threadSetVmem(self.cap, vmem.cap);
-    }
-
-    pub fn setPrio(self: @This(), priority: u2) sys.Error!void {
-        return sys.threadSetPrio(self.cap, priority);
-    }
-
-    pub fn transferCap(self: @This(), cap: u32) sys.Error!void {
-        return sys.threadTransferCap(self.cap, cap);
-    }
+    // pub fn readRegs(this: @This(), regs: *sys.ThreadRegs) sys.Error!void {}
 };
 
 /// capability to the virtual memory structure

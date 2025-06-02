@@ -55,11 +55,11 @@ pub fn main() !void {
         .{},
     );
     log.info("boot info mapped", .{});
+
+    try initfsd.init();
 }
 
 pub fn _main() !void {
-    try initfsd.init();
-
     const recv = try alloc(abi.caps.Receiver);
     var system: System = .{ .recv = recv };
 
@@ -618,12 +618,11 @@ export fn zigMain() noreturn {
     };
 
     asm volatile (
-        \\ call zigMainRealstack
+        \\ jmp zigMainRealstack
         :
         : [sp] "{rsp}" (STACK_TOP),
     );
-
-    abi.sys.stop();
+    unreachable;
 }
 
 fn mapStack() !void {
@@ -646,5 +645,5 @@ export fn zigMainRealstack() noreturn {
     main() catch |err| {
         std.debug.panic("{}", .{err});
     };
-    abi.sys.stop();
+    abi.sys.self_stop();
 }

@@ -50,7 +50,7 @@ pub fn panic(msg: []const u8, _: ?*std.builtin.StackTrace, _: ?usize) noreturn {
         log.warn("  0x{x}", .{addr});
     }
 
-    sys.stop();
+    sys.self_stop();
 }
 
 //
