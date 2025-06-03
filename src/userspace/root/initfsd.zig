@@ -82,23 +82,11 @@ pub fn init() !void {
     initfs_recv = try caps.Receiver.create();
     initfs_ready = try caps.Notify.create();
 
-    const stack = try caps.Frame.create(1024 * 256);
-    _ = try caps.ROOT_SELF_VMEM.map(
-        stack,
-        0,
-        main.INITFS_STACK_BOTTOM,
-        1024 * 256,
-        .{ .writable = true },
-        .{ .fixed = true },
+    try abi.loader.spawn(
+        caps.ROOT_SELF_VMEM,
+        caps.ROOT_SELF_PROC,
+        @intFromPtr(&run),
     );
-
-    thread = try caps.Thread.create(caps.ROOT_SELF_PROC);
-    try thread.setPrio(0);
-    try thread.writeRegs(&.{
-        .user_stack_ptr = main.INITFS_STACK_TOP - 0x100, // fixing a bug in Zig where @returnAddress() in noreturn underflows the stack
-        .user_instr_ptr = @intFromPtr(&run),
-    });
-    try thread.start();
 }
 
 pub fn wait() !void {
