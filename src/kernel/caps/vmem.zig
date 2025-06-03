@@ -66,6 +66,14 @@ pub const Vmem = struct {
             return addr.Virt.fromInt(self.target.page << 12);
         }
 
+        fn start(self: *const @This()) addr.Virt {
+            return self.getVaddr();
+        }
+
+        fn end(self: *const @This()) addr.Virt {
+            return addr.Virt.fromInt(self.getVaddr().raw + self.pages * 0x1000);
+        }
+
         /// this is a `any(self AND other)`
         fn overlaps(self: *const @This(), vaddr: addr.Virt, bytes: u32) bool {
             const a_beg: usize = self.getVaddr().raw;
@@ -247,7 +255,7 @@ pub const Vmem = struct {
         pages: u32,
         rights: abi.sys.Rights,
         flags: abi.sys.MapFlags,
-    ) Error!void {
+    ) Error!addr.Virt {
         errdefer frame.deinit();
         std.debug.assert(self.check());
         defer std.debug.assert(self.check());
@@ -270,8 +278,7 @@ pub const Vmem = struct {
                 flags,
             });
 
-        if (pages == 0 or vaddr.raw == 0)
-            return Error.InvalidArgument;
+        if (pages == 0) return Error.InvalidArgument;
 
         std.debug.assert(vaddr.toParts().offset == 0);
         try @This().assert_userspace(vaddr, pages);
@@ -283,32 +290,70 @@ pub const Vmem = struct {
                 return Error.OutOfBounds;
         }
 
+        self.lock.lock();
+        defer self.lock.unlock();
+
+        const mapped_vaddr: addr.Virt = if (flags.fixed) b: {
+            break :b try self.mapFixed(
+                frame,
+                frame_first_page,
+                vaddr,
+                pages,
+                rights,
+                flags,
+            );
+        } else b: {
+            break :b try self.mapHint(
+                frame,
+                frame_first_page,
+                vaddr,
+                pages,
+                rights,
+                flags,
+            );
+        };
+
+        if (conf.LOG_OBJ_CALLS)
+            log.info("Vmem.map returned 0x{x}", .{mapped_vaddr.raw});
+
+        return mapped_vaddr;
+    }
+
+    pub fn mapFixed(
+        self: *@This(),
+        frame: *caps.Frame,
+        frame_first_page: u32,
+        fixed_vaddr: addr.Virt,
+        pages: u32,
+        rights: abi.sys.Rights,
+        flags: abi.sys.MapFlags,
+    ) Error!addr.Virt {
+        if (fixed_vaddr.raw == 0)
+            return Error.InvalidAddress;
+
         const mapping = Mapping.init(
             frame,
             frame_first_page,
-            vaddr,
+            fixed_vaddr,
             pages,
             rights,
             flags,
         );
 
-        self.lock.lock();
-        defer self.lock.unlock();
-
-        if (self.find(vaddr)) |idx| {
+        if (self.find(fixed_vaddr)) |idx| {
             const old_mapping = &self.mappings.items[idx];
-            if (old_mapping.overlaps(vaddr, 1)) {
+            if (old_mapping.overlaps(fixed_vaddr, pages * 0x1000)) {
                 // FIXME: unmap only the specific part
                 // log.debug("replace old mapping", .{});
                 // replace old mapping
                 old_mapping.frame.deinit();
                 old_mapping.* = mapping;
-            } else if (old_mapping.getVaddr().raw < vaddr.raw) {
+            } else if (old_mapping.getVaddr().raw < fixed_vaddr.raw) {
                 // log.debug("insert new mapping after 0x{x}", .{old_mapping.getVaddr().raw});
                 // insert new mapping
                 try self.mappings.insert(idx + 1, mapping);
             } else {
-                // log.debug("insert new mapping before 0x{x}", .{old_mapping.getVaddr().raw});
+                // log.debug("insert new mapping before {} 0x{x}", .{ idx, old_mapping.getVaddr().raw });
                 // insert new mapping
                 try self.mappings.insert(idx, mapping);
             }
@@ -317,6 +362,81 @@ pub const Vmem = struct {
             // push new mapping
             try self.mappings.append(mapping);
         }
+
+        return fixed_vaddr;
+    }
+
+    pub fn mapHint(
+        self: *@This(),
+        frame: *caps.Frame,
+        frame_first_page: u32,
+        hint_vaddr: addr.Virt,
+        pages: u32,
+        rights: abi.sys.Rights,
+        flags: abi.sys.MapFlags,
+    ) Error!addr.Virt {
+        if (self.mappings.items.len == 0) {
+            return try self.mapFixed(
+                frame,
+                frame_first_page,
+                hint_vaddr,
+                pages,
+                rights,
+                flags,
+            );
+        }
+
+        const mid_idx = self.find(hint_vaddr) orelse 0;
+        // log.info("map with hint, mid_idx={}", .{mid_idx});
+        // self.dump();
+
+        for (mid_idx..self.mappings.items.len) |idx| {
+            const slot = self.mappings.items[idx].end();
+            const slot_size = nextBoundry(self.mappings.items, idx).raw - slot.raw;
+
+            // log.info("trying slot 0x{x}", .{slot.raw});
+            if (slot_size < pages * 0x1000) continue;
+
+            return try self.mapFixed(
+                frame,
+                frame_first_page,
+                slot,
+                pages,
+                rights,
+                flags,
+            );
+        }
+
+        for (0..mid_idx) |idx| {
+            const slot = prevBoundry(self.mappings.items, idx);
+            const slot_size = slot.raw - self.mappings.items[idx].start().raw;
+
+            // log.info("trying slot 0x{x}", .{slot.raw});
+            if (slot_size < pages * 0x1000) continue;
+
+            return try self.mapFixed(
+                frame,
+                frame_first_page,
+                slot,
+                pages,
+                rights,
+                flags,
+            );
+        }
+
+        return Error.OutOfVirtualMemory;
+    }
+
+    /// previous mapping, or a fake mapping that represents the address space boundry
+    fn prevBoundry(mappings: []const Mapping, idx: usize) addr.Virt {
+        if (idx == 0) return addr.Virt.fromInt(0x1000);
+        return mappings[idx - 1].end();
+    }
+
+    /// next mapping, or a fake mapping that represents the address space boundry
+    fn nextBoundry(mappings: []const Mapping, idx: usize) addr.Virt {
+        if (idx + 1 == mappings.len) return addr.Virt.fromInt(0x8000_0000_0000);
+        return mappings[idx + 1].start();
     }
 
     pub fn unmap(self: *@This(), vaddr: addr.Virt, pages: u32) Error!void {
@@ -588,7 +708,7 @@ pub const Vmem = struct {
             }.pred,
         );
 
-        if (idx == self.mappings.items.len)
+        if (idx >= self.mappings.items.len)
             return null;
 
         return idx;

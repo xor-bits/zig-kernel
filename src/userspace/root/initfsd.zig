@@ -55,7 +55,7 @@ fn vmmVectorFree(_: *anyopaque, _: []u8, _: std.mem.Alignment, _: usize) void {}
 fn vmmVectorGrow(top: *usize, n_pages: usize) !void {
     for (0..n_pages) |_| {
         const frame = try caps.Frame.create(0x10000);
-        try caps.ROOT_SELF_VMEM.map(
+        _ = try caps.ROOT_SELF_VMEM.map(
             frame,
             0,
             top.*,
@@ -83,7 +83,7 @@ pub fn init() !void {
     initfs_ready = try caps.Notify.create();
 
     const stack = try caps.Frame.create(1024 * 256);
-    try caps.ROOT_SELF_VMEM.map(
+    _ = try caps.ROOT_SELF_VMEM.map(
         stack,
         0,
         main.INITFS_STACK_BOTTOM,
@@ -152,7 +152,7 @@ fn openFileHandler(_: void, _: u32, req: struct { [32:0]u8, caps.Frame }) struct
     const file: []const u8 = readFile(file_id);
     const size: usize = @min(file.len, frame_size);
 
-    caps.ROOT_SELF_VMEM.map(
+    _ = caps.ROOT_SELF_VMEM.map(
         frame,
         0,
         main.INITFS_TMP,
@@ -206,7 +206,7 @@ fn listHandler(_: void, _: u32, _: void) struct { Error!void, caps.Frame, usize 
     const frame_entries = @as([*]abi.Stat, @ptrFromInt(main.INITFS_LIST))[0..entries];
     const frame_names = @as([*]u8, @ptrFromInt(main.INITFS_LIST + @sizeOf(abi.Stat) * entries))[0..text_size];
 
-    caps.ROOT_SELF_VMEM.map(
+    _ = caps.ROOT_SELF_VMEM.map(
         frame,
         0,
         main.INITFS_LIST,

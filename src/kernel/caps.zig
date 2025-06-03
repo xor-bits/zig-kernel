@@ -314,7 +314,7 @@ fn debugType(comptime T: type) void {
 test "new VmemObject and FrameObject" {
     const vmem = try Vmem.init();
     const frame = try Frame.init(0x8000);
-    try vmem.map(frame.clone(), 1, addr.Virt.fromInt(0x1000), 6, .{
+    _ = try vmem.map(frame.clone(), 1, addr.Virt.fromInt(0x1000), 6, .{
         .readable = true,
         .writable = true,
         .executable = true,
@@ -352,7 +352,7 @@ test "consecutive maps" {
     const frame0 = try Frame.init(0x10000);
     const frame1 = try Frame.init(0x10000);
 
-    try vmem.map(
+    _ = try vmem.map(
         frame0.clone(),
         0,
         addr.Virt.fromInt(0x10000),
@@ -360,7 +360,7 @@ test "consecutive maps" {
         .{},
         .{},
     );
-    try vmem.map(
+    _ = try vmem.map(
         frame1.clone(),
         0,
         addr.Virt.fromInt(0x20000),

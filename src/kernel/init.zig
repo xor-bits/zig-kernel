@@ -96,7 +96,7 @@ fn mapRoot(thread: *caps.Thread, vmem: *caps.Vmem, boot_info: *caps.Frame, a: ar
     try root_frame.write(i, a.initfs_path);
 
     log.info("mapping root", .{});
-    try vmem.map(
+    _ = try vmem.map(
         root_frame,
         0,
         addr.Virt.fromInt(abi.ROOT_EXE),

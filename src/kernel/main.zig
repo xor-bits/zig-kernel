@@ -305,7 +305,7 @@ fn handle_syscall(
             const rights, const flags = abi.sys.unpackRightsFlags(@truncate(trap.arg5));
 
             // TODO: search, maybe
-            try vmem.map(
+            const mapped_vaddr = try vmem.map(
                 frame,
                 frame_first_page,
                 vaddr,
@@ -314,7 +314,8 @@ fn handle_syscall(
                 flags,
             );
 
-            trap.syscall_id = abi.sys.encode(0);
+            std.debug.assert(mapped_vaddr.raw < 0x8000_0000_0000);
+            trap.syscall_id = abi.sys.encode(mapped_vaddr.raw);
         },
         .vmem_unmap => {
             const pages: u32 = @truncate(trap.arg2);

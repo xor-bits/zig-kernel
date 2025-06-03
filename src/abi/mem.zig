@@ -20,14 +20,21 @@ var slab_allocator_inst: SlabAllocator = .init(server_page_allocator);
 
 const ServerPageAllocator = struct {
     fn alloc(_: *anyopaque, len: usize, _: std.mem.Alignment, _: usize) ?[*]u8 {
-        const vm_client = abi.VmProtocol.Client().init(rt.vm_ipc);
-        const res, const addr = vm_client.call(.mapAnon, .{
-            rt.vmem_handle,
-            len,
-            abi.sys.Rights{ .writable = true },
-            abi.sys.MapFlags{},
-        }) catch return null;
-        res catch return null;
+        const vmem = abi.caps.Vmem.self() catch return null;
+        defer vmem.close();
+
+        const frame = abi.caps.Frame.create(std.mem.alignForward(usize, len, 0x1000)) catch return null;
+        defer frame.close();
+
+        const addr = vmem.map(
+            frame,
+            0,
+            0,
+            0,
+            .{ .writable = true },
+            .{ .fixed = false },
+        ) catch return null;
+
         return @ptrFromInt(addr);
     }
 

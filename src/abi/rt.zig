@@ -26,5 +26,5 @@ fn _start(rdi: u64, rsi: u64, rdx: u64) callconv(.SysV) noreturn {
         std.debug.panic("{}", .{err});
     };
 
-    sys.stop();
+    sys.self_stop();
 }

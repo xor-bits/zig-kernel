@@ -12,6 +12,7 @@ pub const ring = @import("ring.zig");
 pub const rt = @import("rt.zig");
 pub const sys = @import("sys.zig");
 pub const util = @import("util.zig");
+pub const loader = @import("loader.zig");
 
 //
 

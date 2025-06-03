@@ -13,24 +13,30 @@ const Error = abi.sys.Error;
 
 //
 
-pub export var manifest: Manifest = .{
-    .magic = .{
-        0x5b9061e5c940d983,
-        0xc47d27b79d2c8bb9,
-        0x40299f5bb0c53988,
-        0x3e49068027c442fb,
-    },
-    .name = ("root" ++ .{'\x00'} ** 60).*,
-};
+pub export var manifest = abi.loader.Manifest.new(.{
+    .name = "pm",
+});
 
-pub const Manifest = extern struct {
-    magic: [4]u64,
-    name: [64]u8,
-};
+pub export var import_recv = abi.loader.Resource.new(.{
+    .name = "hiillos.pm.receiver",
+    .ty = .receiver,
+});
+
+pub export var import_send = abi.loader.Resource.new(.{
+    .name = "hiillos.pm.sender",
+    .ty = .sender,
+});
+
+pub export var export_vfs = abi.loader.Resource.new(.{
+    .name = "hiillos.vfs.sender",
+    .ty = .sender,
+});
 
 //
 
-pub fn main() !void {
+pub fn main() !void {}
+
+pub fn _main() !void {
     log.info("hello from pm", .{});
 
     const root = abi.RootProtocol.Client().init(abi.rt.root_ipc);
@@ -273,5 +279,5 @@ fn newSenderHandler(ctx: *System, sender: u32, _: void) struct { Error!void, cap
 }
 
 comptime {
-    // abi.rt.installRuntime();
+    abi.rt.installRuntime();
 }

@@ -178,6 +178,8 @@ pub const CacheType = enum(u8) {
 pub const MapFlags = packed struct {
     // protection_key: u8 = 0,
     cache: CacheType = .write_back,
+    fixed: bool = true,
+    _: u7 = 0,
     // global: bool = false,
 
     pub fn asInt(self: MapFlags) u64 {
@@ -199,6 +201,7 @@ pub const Error = error{
     InvalidCapability,
     InvalidSyscall,
     OutOfMemory,
+    OutOfVirtualMemory,
     EntryNotPresent,
     EntryIsHuge,
     NotStopped,
@@ -241,36 +244,37 @@ pub fn encodeVoid(result: Error!void) usize {
 
 fn encodeError(err: Error) usize {
     return @bitCast(-@as(isize, switch (err) {
-        error.Unimplemented => 1,
-        error.InvalidAddress => 2,
-        error.InvalidFlags => 3,
-        error.InvalidType => 4,
-        error.InvalidArgument => 5,
-        error.InvalidCapability => 6,
-        error.InvalidSyscall => 7,
-        error.OutOfMemory => 8,
-        error.EntryNotPresent => 9,
-        error.EntryIsHuge => 10,
-        error.NotStopped => 11,
-        error.IsStopped => 12,
-        error.NoVmem => 13,
-        error.ThreadSafety => 14,
-        error.AlreadyMapped => 15,
-        error.NotMapped => 16,
-        error.MappingOverlap => 17,
-        error.PermissionDenied => 18,
-        error.Internal => 19,
-        error.NoReplyTarget => 20,
-        error.NotifyAlreadySubscribed => 21,
-        error.IrqAlreadySubscribed => 22,
-        error.TooManyIrqs => 23,
-        error.OutOfBounds => 24,
-        error.NotFound => 25,
-        error.ReadFault => 26,
-        error.WriteFault => 27,
-        error.ExecFault => 28,
+        Error.Unimplemented => 1,
+        Error.InvalidAddress => 2,
+        Error.InvalidFlags => 3,
+        Error.InvalidType => 4,
+        Error.InvalidArgument => 5,
+        Error.InvalidCapability => 6,
+        Error.InvalidSyscall => 7,
+        Error.OutOfMemory => 8,
+        Error.OutOfVirtualMemory => 9,
+        Error.EntryNotPresent => 10,
+        Error.EntryIsHuge => 11,
+        Error.NotStopped => 12,
+        Error.IsStopped => 13,
+        Error.NoVmem => 14,
+        Error.ThreadSafety => 15,
+        Error.AlreadyMapped => 16,
+        Error.NotMapped => 17,
+        Error.MappingOverlap => 18,
+        Error.PermissionDenied => 19,
+        Error.Internal => 20,
+        Error.NoReplyTarget => 21,
+        Error.NotifyAlreadySubscribed => 22,
+        Error.IrqAlreadySubscribed => 23,
+        Error.TooManyIrqs => 24,
+        Error.OutOfBounds => 25,
+        Error.NotFound => 26,
+        Error.ReadFault => 27,
+        Error.WriteFault => 28,
+        Error.ExecFault => 29,
 
-        error.UnknownError => std.debug.panic("unknown error shouldn't be encoded", .{}),
+        Error.UnknownError => std.debug.panic("unknown error shouldn't be encoded", .{}),
     }));
 }
 
@@ -280,36 +284,37 @@ pub fn decode(v: usize) Error!usize {
 
     return switch (err) {
         std.math.minInt(isize)...0 => v,
-        1 => error.Unimplemented,
-        2 => error.InvalidAddress,
-        3 => error.InvalidFlags,
-        4 => error.InvalidType,
-        5 => error.InvalidArgument,
-        6 => error.InvalidCapability,
-        7 => error.InvalidSyscall,
-        8 => error.OutOfMemory,
-        9 => error.EntryNotPresent,
-        10 => error.EntryIsHuge,
-        11 => error.NotStopped,
-        12 => error.IsStopped,
-        13 => error.NoVmem,
-        14 => error.ThreadSafety,
-        15 => error.AlreadyMapped,
-        16 => error.NotMapped,
-        17 => error.MappingOverlap,
-        18 => error.PermissionDenied,
-        19 => error.Internal,
-        20 => error.NoReplyTarget,
-        21 => error.NotifyAlreadySubscribed,
-        22 => error.IrqAlreadySubscribed,
-        23 => error.TooManyIrqs,
-        24 => error.OutOfBounds,
-        25 => error.NotFound,
-        26 => error.ReadFault,
-        27 => error.WriteFault,
-        28 => error.ExecFault,
+        1 => Error.Unimplemented,
+        2 => Error.InvalidAddress,
+        3 => Error.InvalidFlags,
+        4 => Error.InvalidType,
+        5 => Error.InvalidArgument,
+        6 => Error.InvalidCapability,
+        7 => Error.InvalidSyscall,
+        8 => Error.OutOfMemory,
+        9 => Error.OutOfVirtualMemory,
+        10 => Error.EntryNotPresent,
+        11 => Error.EntryIsHuge,
+        12 => Error.NotStopped,
+        13 => Error.IsStopped,
+        14 => Error.NoVmem,
+        15 => Error.ThreadSafety,
+        16 => Error.AlreadyMapped,
+        17 => Error.NotMapped,
+        18 => Error.MappingOverlap,
+        19 => Error.PermissionDenied,
+        20 => Error.Internal,
+        21 => Error.NoReplyTarget,
+        22 => Error.NotifyAlreadySubscribed,
+        23 => Error.IrqAlreadySubscribed,
+        24 => Error.TooManyIrqs,
+        25 => Error.OutOfBounds,
+        26 => Error.NotFound,
+        27 => Error.ReadFault,
+        28 => Error.WriteFault,
+        29 => Error.ExecFault,
 
-        else => return error.UnknownError,
+        else => return Error.UnknownError,
     };
 }
 
@@ -405,12 +410,12 @@ pub fn vmemSelf() Error!u32 {
     return @intCast(try syscall(.vmem_self, .{}));
 }
 
-pub fn packRightsFlags(rights: Rights, flags: MapFlags) u16 {
+pub fn packRightsFlags(rights: Rights, flags: MapFlags) u24 {
     const val: packed struct { r: Rights, f: MapFlags } = .{ .r = rights, .f = flags };
     return @bitCast(val);
 }
 
-pub fn unpackRightsFlags(v: u16) struct { Rights, MapFlags } {
+pub fn unpackRightsFlags(v: u24) struct { Rights, MapFlags } {
     const val: packed struct { r: Rights, f: MapFlags } = @bitCast(v);
     return .{ val.r, val.f };
 }
@@ -424,8 +429,8 @@ pub fn vmemMap(
     length: usize,
     rights: Rights,
     flags: MapFlags,
-) Error!void {
-    _ = try syscall(.vmem_map, .{
+) Error!usize {
+    return try syscall(.vmem_map, .{
         vmem, frame, frame_offset, vaddr, length, packRightsFlags(rights, flags),
     });
 }
@@ -687,7 +692,7 @@ pub fn handleDuplicate(cap: u32) Error!u32 {
 }
 
 pub fn handleClose(cap: u32) void {
-    syscall(.handle_close, .{cap}) catch unreachable;
+    _ = syscall(.handle_close, .{cap}) catch unreachable;
 }
 
 pub fn self_yield() void {

@@ -90,6 +90,10 @@ pub const Vmem = extern struct {
         return .{ .cap = cap };
     }
 
+    pub fn close(this: @This()) void {
+        sys.handleClose(this.cap);
+    }
+
     /// if length is zero, the rest of the frame is mapped
     pub fn map(
         this: @This(),
@@ -99,7 +103,7 @@ pub const Vmem = extern struct {
         length: usize,
         rights: abi.sys.Rights,
         flags: abi.sys.MapFlags,
-    ) sys.Error!void {
+    ) sys.Error!usize {
         return sys.vmemMap(
             this.cap,
             frame.cap,
@@ -125,6 +129,10 @@ pub const Frame = extern struct {
     pub fn create(size_bytes: usize) sys.Error!@This() {
         const cap = try sys.frameCreate(size_bytes);
         return .{ .cap = cap };
+    }
+
+    pub fn close(this: @This()) void {
+        sys.handleClose(this.cap);
     }
 
     pub fn getSize(self: @This()) sys.Error!usize {

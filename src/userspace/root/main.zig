@@ -13,21 +13,6 @@ pub const std_options = abi.std_options;
 pub const panic = abi.panic;
 pub const name = "root";
 
-pub export var manifest: Manifest = .{
-    .magic = .{
-        0x5b9061e5c940d983,
-        0xc47d27b79d2c8bb9,
-        0x40299f5bb0c53988,
-        0x3e49068027c442fb,
-    },
-    .name = ("root" ++ .{'\x00'} ** 60).*,
-};
-
-pub const Manifest = extern struct {
-    magic: [4]u64,
-    name: [64]u8,
-};
-
 //
 
 /// elf loader temporary mapping location
@@ -61,7 +46,7 @@ pub fn main() !void {
 
     const len = try abi.sys.frameGetSize(abi.caps.ROOT_BOOT_INFO.cap);
 
-    try abi.caps.ROOT_SELF_VMEM.map(
+    _ = try abi.caps.ROOT_SELF_VMEM.map(
         abi.caps.ROOT_BOOT_INFO,
         0,
         BOOT_INFO,
@@ -90,6 +75,35 @@ pub fn main() !void {
     });
 
     try initfsd.wait();
+
+    var servers = std.ArrayList(abi.loader.Elf).init(abi.mem.slab_allocator);
+    try servers.append(try abi.loader.Elf.init(try binBytes("/sbin/pm")));
+
+    for (servers.items) |*server| {
+        const manifest = (try server.manifest()).?;
+
+        log.info("name: {s}", .{manifest.getName()});
+        log.info("imports:", .{});
+        var imports = try server.imports();
+        while (try imports.next()) |imp|
+            log.info(" - {}({}) @0x{x}: {s}", .{ imp.val.ty, imp.val.handle, imp.addr, imp.val.getName() });
+        log.info("exports:", .{});
+        var exports = try server.exports();
+        while (try exports.next()) |exp|
+            log.info(" - {}({}) @0x{x}: {s}", .{ exp.val.ty, exp.val.handle, exp.addr, exp.val.getName() });
+    }
+
+    // log.info("finding manifest", .{});
+    // const index = std.mem.indexOf(u8, pm, std.mem.asBytes(&[4]usize{
+    //     0x5b9061e5c940d983,
+    //     0xc47d27b79d2c8bb9,
+    //     0x40299f5bb0c53988,
+    //     0x3e49068027c442fb,
+    // }));
+    // log.info("found manifest: {any}", .{index});
+
+    // const v = std.mem.bytesAsValue(Manifest, pm[index.?..]);
+    // log.info("found manifest: {s}", .{v.name});
 
     // virtual memory manager (system) (server)
     // maps new processes to memory and manages page faults,
@@ -321,7 +335,7 @@ fn mapStack() !void {
     log.info("mapping stack", .{});
 
     const frame = try caps.Frame.create(1024 * 256);
-    try caps.ROOT_SELF_VMEM.map(
+    _ = try caps.ROOT_SELF_VMEM.map(
         frame,
         0,
         STACK_BOTTOM,
