@@ -55,6 +55,7 @@ fn vmmVectorFree(_: *anyopaque, _: []u8, _: std.mem.Alignment, _: usize) void {}
 fn vmmVectorGrow(top: *usize, n_pages: usize) !void {
     for (0..n_pages) |_| {
         const frame = try caps.Frame.create(0x10000);
+        defer frame.close();
         _ = try caps.ROOT_SELF_VMEM.map(
             frame,
             0,
