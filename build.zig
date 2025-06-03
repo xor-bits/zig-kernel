@@ -227,9 +227,7 @@ fn createInitfsTarGz(
     abi: *std.Build.Module,
 ) std.Build.LazyPath {
     const initfs_processes = .{
-        // "vm",
-        // "pm",
-        // "rm",
+        "pm",
         // "vfs",
         // "timer",
         // "hpet",

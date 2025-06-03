@@ -72,7 +72,7 @@ pub const Thread = struct {
     }
 
     pub fn unhandledPageFault(
-        _: *@This(),
+        self: *@This(),
         target_addr: usize,
         caused_by: arch.FaultCause,
         ip: usize,
@@ -91,6 +91,8 @@ pub const Thread = struct {
             ip,
             sp,
         });
+
+        self.proc.vmem.dump();
 
         proc.enter();
     }

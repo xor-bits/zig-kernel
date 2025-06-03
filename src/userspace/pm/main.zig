@@ -13,6 +13,23 @@ const Error = abi.sys.Error;
 
 //
 
+pub export var manifest: Manifest = .{
+    .magic = .{
+        0x5b9061e5c940d983,
+        0xc47d27b79d2c8bb9,
+        0x40299f5bb0c53988,
+        0x3e49068027c442fb,
+    },
+    .name = ("root" ++ .{'\x00'} ** 60).*,
+};
+
+pub const Manifest = extern struct {
+    magic: [4]u64,
+    name: [64]u8,
+};
+
+//
+
 pub fn main() !void {
     log.info("hello from pm", .{});
 
@@ -26,7 +43,7 @@ pub fn main() !void {
 
     // endpoint for pm server <-> unix app communication
     log.debug("allocating pm endpoint", .{});
-    const pm_recv = try memory.alloc(caps.Receiver);
+    const pm_recv = try caps.Receiver.create();
     const pm_send = try pm_recv.subscribe();
 
     log.debug("requesting initfs sender", .{});
@@ -256,5 +273,5 @@ fn newSenderHandler(ctx: *System, sender: u32, _: void) struct { Error!void, cap
 }
 
 comptime {
-    abi.rt.installRuntime();
+    // abi.rt.installRuntime();
 }

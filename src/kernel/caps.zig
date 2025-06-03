@@ -345,3 +345,35 @@ test "new VmemObject and FrameObject" {
     frame.deinit();
     vmem.deinit();
 }
+
+test "consecutive maps" {
+    const vmem = try Vmem.init();
+
+    const frame0 = try Frame.init(0x10000);
+    const frame1 = try Frame.init(0x10000);
+
+    try vmem.map(
+        frame0.clone(),
+        0,
+        addr.Virt.fromInt(0x10000),
+        0x10,
+        .{},
+        .{},
+    );
+    try vmem.map(
+        frame1.clone(),
+        0,
+        addr.Virt.fromInt(0x20000),
+        0x10,
+        .{},
+        .{},
+    );
+
+    try std.testing.expect(vmem.mappings.items[0].frame == frame0);
+    try std.testing.expect(vmem.mappings.items[1].frame == frame1);
+
+    frame0.deinit();
+    frame1.deinit();
+
+    vmem.deinit();
+}

@@ -67,11 +67,11 @@ pub const Vmem = struct {
         }
 
         /// this is a `any(self AND other)`
-        fn overlaps(self: *const @This(), vaddr: addr.Virt, pages: u32) bool {
+        fn overlaps(self: *const @This(), vaddr: addr.Virt, bytes: u32) bool {
             const a_beg: usize = self.getVaddr().raw;
             const a_end: usize = self.getVaddr().raw + self.pages * 0x1000;
             const b_beg: usize = vaddr.raw;
-            const b_end: usize = vaddr.raw + pages * 0x1000;
+            const b_end: usize = vaddr.raw + bytes;
 
             if (a_end <= b_beg)
                 return false;
@@ -206,8 +206,8 @@ pub const Vmem = struct {
         const idx_beg: usize = self.find(vaddr) orelse return Error.InvalidAddress;
         const idx_end: usize = 1 + (self.find(vaddr_end_exclusive) orelse (self.mappings.items.len - 1));
 
-        std.debug.assert(self.mappings.items[idx_beg].overlaps(vaddr, 0));
-        std.debug.assert(self.mappings.items[idx_end - 1].overlaps(vaddr_end_inclusive, 0));
+        std.debug.assert(self.mappings.items[idx_beg].overlaps(vaddr, 1));
+        std.debug.assert(self.mappings.items[idx_end - 1].overlaps(vaddr_end_inclusive, 1));
 
         // make sure the mappings are contiguous (no unmapped holes)
         for (idx_beg..@max(idx_beg, idx_end - 1)) |idx| {
@@ -249,9 +249,19 @@ pub const Vmem = struct {
         flags: abi.sys.MapFlags,
     ) Error!void {
         errdefer frame.deinit();
+        std.debug.assert(self.check());
+        defer std.debug.assert(self.check());
 
         if (conf.LOG_OBJ_CALLS)
-            log.info("Vmem.map frame={*} frame_first_page={} vaddr=0x{x} pages={} rights={} flags={}", .{
+            log.info(
+                \\Vmem.map
+                \\ - frame={*}
+                \\ - frame_first_page={}
+                \\ - vaddr=0x{x}
+                \\ - pages={}
+                \\ - rights={}
+                \\ - flags={}"
+            , .{
                 frame,
                 frame_first_page,
                 vaddr.raw,
@@ -287,21 +297,32 @@ pub const Vmem = struct {
 
         if (self.find(vaddr)) |idx| {
             const old_mapping = &self.mappings.items[idx];
-            if (vaddr.raw == old_mapping.getVaddr().raw) {
+            if (old_mapping.overlaps(vaddr, 1)) {
+                // FIXME: unmap only the specific part
+                // log.debug("replace old mapping", .{});
                 // replace old mapping
                 old_mapping.frame.deinit();
                 old_mapping.* = mapping;
+            } else if (old_mapping.getVaddr().raw < vaddr.raw) {
+                // log.debug("insert new mapping after 0x{x}", .{old_mapping.getVaddr().raw});
+                // insert new mapping
+                try self.mappings.insert(idx + 1, mapping);
             } else {
+                // log.debug("insert new mapping before 0x{x}", .{old_mapping.getVaddr().raw});
                 // insert new mapping
                 try self.mappings.insert(idx, mapping);
             }
         } else {
+            // log.debug("push new mapping", .{});
             // push new mapping
             try self.mappings.append(mapping);
         }
     }
 
     pub fn unmap(self: *@This(), vaddr: addr.Virt, pages: u32) Error!void {
+        std.debug.assert(self.check());
+        defer std.debug.assert(self.check());
+
         if (conf.LOG_OBJ_CALLS)
             log.info("Vmem.unmap vaddr=0x{x} pages={}", .{ vaddr.raw, pages });
 
@@ -510,6 +531,36 @@ pub const Vmem = struct {
         unreachable;
     }
 
+    pub fn dump(self: *@This()) void {
+        for (self.mappings.items) |mapping| {
+            log.info("[ 0x{x:0>16} .. 0x{x:0>16} ]", .{
+                mapping.getVaddr().raw,
+                mapping.getVaddr().raw + mapping.pages * 0x1000,
+            });
+        }
+    }
+
+    pub fn check(self: *@This()) bool {
+        if (!conf.IS_DEBUG) return true;
+
+        var ok = true;
+
+        var prev: usize = 0;
+        // log.debug("checking vmem", .{});
+        for (self.mappings.items) |mapping| {
+            if (mapping.getVaddr().raw < prev) ok = false;
+            prev = mapping.getVaddr().raw + mapping.pages * 0x1000;
+
+            // log.debug("[ 0x{x:0>16} .. 0x{x:0>16} ] {s}", .{
+            //     mapping.getVaddr().raw,
+            //     mapping.getVaddr().raw + mapping.pages * 0x1000,
+            //     if (ok) "ok" else "err",
+            // });
+        }
+
+        return ok;
+    }
+
     fn assert_userspace(vaddr: addr.Virt, pages: u32) Error!void {
         const upper_bound: usize = std.math.add(
             usize,
@@ -532,7 +583,7 @@ pub const Vmem = struct {
             vaddr,
             struct {
                 fn pred(target_vaddr: addr.Virt, val: Mapping) bool {
-                    return (val.getVaddr().raw + 0x1000 * val.pages) < target_vaddr.raw;
+                    return (val.getVaddr().raw + 0x1000 * val.pages) <= target_vaddr.raw;
                 }
             }.pred,
         );

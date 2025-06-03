@@ -207,38 +207,6 @@ pub const Device = struct {
     info_frame: caps.Frame = .{},
 };
 
-pub const RootProtocol = util.Protocol(struct {
-    /// request a physical memory allocator capability
-    /// only system processes are allowed request this
-    memory: fn () struct { sys.Error!void, caps.Memory },
-
-    /// request a x86 ioport allocator capability
-    /// only rm can use this
-    ioports: fn () struct { sys.Error!void, caps.X86IoPortAllocator },
-
-    /// request a x86 irq allocator capability
-    /// only rm can use this
-    irqs: fn () struct { sys.Error!void, caps.X86IrqAllocator },
-
-    /// request a device physical frame and its info frame
-    /// only rm can use this
-    device: fn (kind: DeviceKind) struct { sys.Error!void, caps.DeviceFrame, caps.Frame },
-
-    /// inform root that the server is ready and provide a sender to the server
-    /// only servers can use this, and `kind` has to match the server
-    /// returns a vmem handle, if it isn't the vm server
-    serverReady: fn (kind: ServerKind, sender: caps.Sender) struct { sys.Error!void, void },
-
-    /// request a sender to the server
-    serverSender: fn (kind: ServerKind) struct { sys.Error!void, caps.Sender },
-
-    /// request a sender to the initfs server
-    initfs: fn () struct { sys.Error!void, caps.Sender },
-
-    /// create a new sender to the root
-    newSender: fn () struct { sys.Error!void, caps.Sender },
-});
-
 pub const InitfsProtocol = util.Protocol(struct {
     /// open a file from initfs, copy all of its content into
     /// the provided frame (and returns the same frame)

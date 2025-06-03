@@ -13,6 +13,21 @@ pub const std_options = abi.std_options;
 pub const panic = abi.panic;
 pub const name = "root";
 
+pub export var manifest: Manifest = .{
+    .magic = .{
+        0x5b9061e5c940d983,
+        0xc47d27b79d2c8bb9,
+        0x40299f5bb0c53988,
+        0x3e49068027c442fb,
+    },
+    .name = ("root" ++ .{'\x00'} ** 60).*,
+};
+
+pub const Manifest = extern struct {
+    magic: [4]u64,
+    name: [64]u8,
+};
+
 //
 
 /// elf loader temporary mapping location
@@ -58,10 +73,9 @@ pub fn main() !void {
 
     try initfsd.init();
 
-    const recv = try caps.Receiver.create();
-    var system: System = .{ .recv = recv };
-
     const boot_info = @as(*const volatile abi.BootInfo, @ptrFromInt(BOOT_INFO)).*;
+
+    var system: System = .{};
     system.devices.set(.hpet, .{
         .mmio_frame = boot_info.hpet,
         .info_frame = .{},
@@ -75,58 +89,39 @@ pub fn main() !void {
         .info_frame = boot_info.mcfg_info,
     });
 
-    const vm_sender = try caps.Sender.create(recv);
-
     try initfsd.wait();
 
     // virtual memory manager (system) (server)
     // maps new processes to memory and manages page faults,
     // heaps, lazy alloc, shared memory, swapping, etc.
-    system.servers.getPtr(.vm).bin = try binBytes("/sbin/vm");
+    // system.servers.getPtr(.vm).bin = try binBytes("/sbin/vm");
 
     // process manager (system) (server)
     // manages unix-like process stuff like permissions, cli args, etc.
-    system.servers.getPtr(.pm).bin = try binBytes("/sbin/pm");
+    // system.servers.getPtr(.pm).bin = try binBytes("/sbin/pm");
 
     // resource manager (system) (server)
     // manages ioports, irqs, device memory, etc. should also manage physical memory
-    system.servers.getPtr(.rm).bin = try binBytes("/sbin/rm");
+    // system.servers.getPtr(.rm).bin = try binBytes("/sbin/rm");
 
     // virtual filesystem (system) (server)
     // manages the main VFS tree, everything mounted into it and file descriptors
-    system.servers.getPtr(.vfs).bin = try binBytes("/sbin/vfs");
+    // system.servers.getPtr(.vfs).bin = try binBytes("/sbin/vfs");
 
     // timer (system) (server)
     // manages timer drivers and accepts sleep, sleepDeadline and timestamp calls
-    system.servers.getPtr(.timer).bin = try binBytes("/sbin/timer");
+    // system.servers.getPtr(.timer).bin = try binBytes("/sbin/timer");
 
     // input (system) (server)
     // manages input drivers
-    system.servers.getPtr(.input).bin = try binBytes("/sbin/input");
+    // system.servers.getPtr(.input).bin = try binBytes("/sbin/input");
 
-    const vm = system.servers.getPtr(.vm);
-    vm.thread = try execVm(vm.bin, vm_sender);
-    vm.endpoint = vm_sender.cap;
+    // const vm = system.servers.getPtr(.vm);
+    // vm.thread = try execVm(vm.bin, vm_sender);
+    // vm.endpoint = vm_sender.cap;
 
-    const server = Proto.init(&system, system.recv);
-
-    log.info("root waiting for messages", .{});
-    var msg: abi.sys.Message = try server.rx.recv();
-    while (true) {
-        server.ctx.dont_reply = false;
-        // server.process(&msg);
-
-        if (!server.ctx.dont_reply)
-            msg = try server.rx.replyRecv(msg)
-        else
-            msg = try server.rx.recv();
-    }
+    // TODO: wait for crashed servers
 }
-
-const alloc = 0;
-const allocSized = 0;
-const map = 0;
-const unmap = 0;
 
 fn binBytes(path: []const u8) ![]const u8 {
     return initfsd.readFile(initfsd.openFile(path) orelse {
@@ -135,277 +130,20 @@ fn binBytes(path: []const u8) ![]const u8 {
     });
 }
 
-const Proto = abi.RootProtocol.Server(.{
-    .Context = *System,
-    .scope = if (abi.conf.LOG_SERVERS) .root else null,
-}, .{
-    .memory = memoryHandler,
-    .ioports = ioportsHandler,
-    .irqs = irqsHandler,
-    .device = deviceHandler,
-    .serverReady = serverReadyHandler,
-    .serverSender = serverSenderHandler,
-    .initfs = initfsHandler,
-    .newSender = newSenderHandler,
-});
-
 const Server = struct {
     /// server thread
     thread: caps.Thread = .{},
     /// server ELF binary
     bin: []const u8 = "",
-    /// sender for communicating with the server
-    sender: caps.Sender = .{},
-    /// sender cap id, used for verifying that the sender is the system it says it is
-    endpoint: u32 = 0,
-    /// Reply objects to all callers waiting for a sender
-    ready_waiters: std.BoundedArray(caps.Reply, 8) =
-        std.BoundedArray(caps.Reply, 8).init(0) catch unreachable,
+    /// receiver for making new senders to the server
+    receiver: caps.Receiver = .{},
 };
 
 const System = struct {
-    recv: caps.Receiver,
-    dont_reply: bool = false,
-
     devices: std.EnumArray(abi.DeviceKind, abi.Device) = .initFill(.{}),
 
     servers: std.EnumArray(abi.ServerKind, Server) = .initFill(.{}),
-
-    fn expectIsSystem(ctx: *System, sender: u32) Error!void {
-        var it = ctx.servers.iterator();
-        while (it.next()) |next| {
-            if (next.value.endpoint == sender) return;
-        }
-        return Error.PermissionDenied;
-    }
 };
-
-fn memoryHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.Memory } {
-    ctx.expectIsSystem(sender) catch |err| return .{ err, .{} };
-
-    const memory = alloc(abi.caps.Memory) catch |err| {
-        return .{ err, .{} };
-    };
-
-    return .{ {}, memory };
-}
-
-fn ioportsHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.X86IoPortAllocator } {
-    if (ctx.servers.get(.rm).endpoint != sender) {
-        return .{ Error.PermissionDenied, .{} };
-    }
-
-    const ioports = caps.ROOT_X86_IOPORT_ALLOCATOR.clone() catch |err| {
-        return .{ err, .{} };
-    };
-
-    return .{ {}, ioports };
-}
-
-fn irqsHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.X86IrqAllocator } {
-    if (ctx.servers.get(.rm).endpoint != sender) {
-        return .{ Error.PermissionDenied, .{} };
-    }
-
-    const irqs = caps.ROOT_X86_IRQ_ALLOCATOR.clone() catch |err| {
-        return .{ err, .{} };
-    };
-
-    return .{ {}, irqs };
-}
-
-fn deviceHandler(ctx: *System, sender: u32, req: struct { abi.DeviceKind }) struct { Error!void, caps.DeviceFrame, caps.Frame } {
-    if (ctx.servers.get(.rm).endpoint != sender) {
-        return .{ Error.PermissionDenied, .{}, .{} };
-    }
-
-    const kind = req.@"0";
-    const device = ctx.devices.get(kind);
-    ctx.devices.set(kind, .{});
-
-    if (device.mmio_frame.cap == 0) return .{ Error.AlreadyMapped, .{}, .{} };
-
-    return .{ {}, device.mmio_frame, device.info_frame };
-}
-
-fn serverReadyHandler(ctx: *System, sender: u32, req: struct { abi.ServerKind, caps.Sender }) struct { Error!void, void } {
-    const kind = req.@"0";
-    const server = ctx.servers.getPtr(kind);
-
-    if (server.endpoint != sender) {
-        return .{ Error.PermissionDenied, {} };
-    }
-
-    // FIXME: verify that it is a cap
-    server.sender = req.@"1";
-
-    const is_vm = kind == .vm;
-    const is_requested = server.ready_waiters.len != 0;
-
-    if (is_vm or is_requested) {
-        ctx.dont_reply = true;
-        Proto.reply(ctx.recv, .serverReady, .{ {}, {} }) catch |err| {
-            log.info("failed to reply manually: {}", .{err});
-        };
-    }
-
-    if (is_vm) {
-        log.info("vm ready, exec all other servers", .{});
-
-        var it = ctx.servers.iterator();
-        while (it.next()) |next| {
-            if (next.key == .vm) continue;
-
-            next.value.endpoint = execWithVm(ctx, next.value.bin) catch |err| {
-                log.err("failed to exec {}: {}", .{ next.key, err });
-                return .{ {}, {} };
-            };
-        }
-    }
-
-    if (is_requested) {
-        log.info("server ready, handling waiting {} requests", .{kind});
-
-        for (server.ready_waiters.slice()) |caller| {
-            const msg = serverSenderHandler(ctx, server.endpoint, .{kind});
-            abi.RootProtocol.replyTo(caller, .serverSender, msg) catch |err| {
-                log.info("failed to reply manually: {}", .{err});
-            };
-        }
-        server.ready_waiters.clear();
-    }
-
-    return .{ {}, {} };
-}
-
-fn serverSenderHandler(ctx: *System, _: u32, req: struct { abi.ServerKind }) struct { Error!void, caps.Sender } {
-    // ctx.expectIsSystem(sender) catch |err| return .{ err, .{} };
-
-    const server = ctx.servers.getPtr(req.@"0");
-
-    if (server.sender.cap == 0) {
-        log.info("deferred serverSender call {}", .{req.@"0"});
-        const caller = ctx.recv.saveCaller() catch |err| {
-            log.err("failed to save caller: {}", .{err});
-            return .{ err, .{} };
-        };
-        ctx.dont_reply = true;
-        server.ready_waiters.append(caller) catch |err| {
-            log.err("too many active requests for servers before it is up: {}", .{err});
-            return .{ Error.Internal, .{} };
-        };
-        return .{ {}, .{} };
-    }
-    log.info("handling serverSender call {}", .{req.@"0"});
-
-    var result: Error!struct { Error!void, caps.Sender } = undefined;
-    switch (req.@"0") {
-        .vm => result = abi.VmProtocol.Client().init(server.sender).call(.newSender, {}),
-        .pm => result = abi.PmProtocol.Client().init(server.sender).call(.newSender, {}),
-        .rm => result = abi.RmProtocol.Client().init(server.sender).call(.newSender, {}),
-        .timer => result = abi.TimerProtocol.Client().init(server.sender).call(.newSender, {}),
-        .input => result = abi.InputProtocol.Client().init(server.sender).call(.newSender, {}),
-        .vfs => @panic("todo"),
-    }
-
-    const res: Error!void, const dupe_sender: caps.Sender = result catch |err| {
-        log.err("failed to communicate with {}: {}", .{ req.@"0", err });
-        return .{ err, .{} };
-    };
-    res catch |err| {
-        log.err("failed to communicate with {}: {}", .{ req.@"0", err });
-        return .{ err, .{} };
-    };
-
-    return .{ {}, dupe_sender };
-}
-
-fn initfsHandler(_: *System, _: u32, _: void) struct { Error!void, caps.Sender } {
-    // even init is allowed
-
-    const initfs_sender = initfsd.getSender() catch |err| {
-        log.err("failed to communicate with vm: {}", .{err});
-        return .{ err, .{} };
-    };
-
-    return .{ {}, initfs_sender };
-}
-
-fn newSenderHandler(ctx: *System, sender: u32, _: void) struct { Error!void, caps.Sender } {
-    ctx.expectIsSystem(sender) catch |err| return .{ err, .{} };
-
-    const root_sender = ctx.recv.subscribe() catch |err| {
-        log.err("failed to subscribe: {}", .{err});
-        return .{ err, .{} };
-    };
-
-    return .{ {}, root_sender };
-}
-
-/// returns the endpoint id of the server, used for verifying server identity
-fn execWithVm(ctx: *System, bin: []const u8) !u32 {
-    // send the file to vm server using shared memory IPC
-
-    const frame = try allocSized(
-        abi.caps.Frame,
-        abi.ChunkSize.of(bin.len) orelse {
-            log.err("binary too large", .{});
-            return error.BinaryTooLarge;
-        },
-    );
-
-    try map(
-        frame,
-        LOADER_TMP,
-        .{ .writable = true },
-        .{},
-    );
-    abi.util.copyForwardsVolatile(
-        u8,
-        @as([*]volatile u8, @ptrFromInt(LOADER_TMP))[0..bin.len],
-        bin,
-    );
-    try unmap(
-        frame,
-        LOADER_TMP,
-    );
-
-    const vm_sender = abi.VmProtocol.Client().init(ctx.servers.get(.vm).sender);
-    var res, const vmem_handle = try vm_sender.call(.newVmem, {});
-    try res;
-
-    const res1 = try vm_sender.call(.loadElf, .{
-        vmem_handle,
-        frame,
-        0,
-        bin.len,
-    });
-    _ = try res1.@"0";
-
-    res, const thread = try vm_sender.call(.newThread, .{ vmem_handle, 0, 0 });
-    try res;
-
-    res, const vm_sender_dupe: caps.Sender = try vm_sender.call(.newSender, {});
-    try res;
-
-    res, _ = try vm_sender.call(.moveOwner, .{ vmem_handle, vm_sender_dupe.cap });
-    try res;
-
-    const sender = try ctx.recv.subscribe();
-
-    try thread.setPrio(0);
-    try thread.transferCap(sender.cap);
-    try thread.transferCap(vm_sender_dupe.cap);
-    var regs: abi.sys.ThreadRegs = undefined;
-    try thread.readRegs(&regs);
-    regs.arg0 = sender.cap; // set RDI to the root client (sender cap)
-    regs.arg1 = vm_sender_dupe.cap; // set RSI to the vm server client (sender cap)
-    regs.arg2 = vmem_handle; // set RDX to the server's own vmem handle
-    try thread.writeRegs(&regs);
-    try thread.start();
-
-    return sender.cap;
-}
 
 fn execVm(elf_bytes: []const u8, sender: abi.caps.Sender) !caps.Thread {
     var elf = std.io.fixedBufferStream(elf_bytes);
