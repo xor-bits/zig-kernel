@@ -84,9 +84,25 @@ pub const Process = struct {
         defer self.lock.unlock();
 
         if (handle - 1 >= self.caps.items.len) return Error.InvalidCapability;
-        const cap = &self.caps.items[handle - 1];
+        const slot = &self.caps.items[handle - 1];
 
-        return cap.get() orelse return Error.InvalidCapability;
+        return slot.get() orelse return Error.InvalidCapability;
+    }
+
+    pub fn takeCapability(self: *@This(), handle: u32) Error!caps.Capability {
+        if (handle == 0) return Error.InvalidCapability;
+
+        // TODO: free list
+
+        self.lock.lock();
+        defer self.lock.unlock();
+
+        if (handle - 1 >= self.caps.items.len) return Error.InvalidCapability;
+        const slot = &self.caps.items[handle - 1];
+
+        const cap = slot.get() orelse return Error.InvalidCapability;
+        slot.* = .{};
+        return cap;
     }
 
     pub fn getObject(self: *@This(), comptime T: type, handle: u32) Error!*T {

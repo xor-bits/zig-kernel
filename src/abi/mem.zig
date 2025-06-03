@@ -47,8 +47,14 @@ const ServerPageAllocator = struct {
         return null;
     }
 
-    fn free(_: *anyopaque, _: []u8, _: std.mem.Alignment, _: usize) void {
-        std.log.scoped(.server_page_allocator).warn("TODO: free pages", .{});
+    fn free(_: *anyopaque, buf: []u8, _: std.mem.Alignment, _: usize) void {
+        const vmem = abi.caps.Vmem.self() catch return;
+        defer vmem.close();
+
+        vmem.unmap(
+            @intFromPtr(buf.ptr),
+            std.mem.alignForward(usize, buf.len, 0x1000),
+        ) catch return;
     }
 };
 

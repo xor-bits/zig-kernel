@@ -497,7 +497,10 @@ fn handle_syscall(
             trap.syscall_id = abi.sys.encode(handle);
         },
         .handle_close => {
-            // TODO:
+            const cap = try thread.proc.takeCapability(@truncate(trap.arg0));
+            cap.deinit();
+
+            trap.syscall_id = abi.sys.encode(0);
         },
 
         .self_yield => {
