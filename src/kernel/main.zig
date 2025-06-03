@@ -318,12 +318,17 @@ fn handle_syscall(
             trap.syscall_id = abi.sys.encode(mapped_vaddr.raw);
         },
         .vmem_unmap => {
-            const pages: u32 = @truncate(trap.arg2);
+            const pages: u32 = @truncate(std.math.divCeil(usize, trap.arg2, 0x1000) catch unreachable);
+            if (pages == 0) {
+                trap.syscall_id = abi.sys.encode(0);
+                return;
+            }
             const vaddr = try addr.Virt.fromUser(trap.arg1);
             const vmem = try thread.proc.getObject(caps.Vmem, @truncate(trap.arg0));
             defer vmem.deinit();
 
             try vmem.unmap(vaddr, pages);
+            trap.syscall_id = abi.sys.encode(0);
         },
 
         .proc_create => {
@@ -369,6 +374,7 @@ fn handle_syscall(
             target_thread.lock.unlock();
 
             try thread.proc.vmem.write(regs_ptr, std.mem.asBytes(&regs));
+            trap.syscall_id = abi.sys.encode(0);
         },
         .thread_write_regs => {
             const regs_ptr = try addr.Virt.fromUser(trap.arg1);
@@ -382,6 +388,7 @@ fn handle_syscall(
             target_thread.lock.lock();
             target_thread.trap = @bitCast(regs);
             target_thread.lock.unlock();
+            trap.syscall_id = abi.sys.encode(0);
         },
         .thread_start => {
             const target_thread = try thread.proc.getObject(caps.Thread, @truncate(trap.arg0));
@@ -394,7 +401,9 @@ fn handle_syscall(
                     return Error.NotStopped;
             }
 
+            try target_thread.proc.vmem.start();
             proc.start(target_thread);
+            trap.syscall_id = abi.sys.encode(0);
         },
         .thread_stop => {
             const target_thread = try thread.proc.getObject(caps.Thread, @truncate(trap.arg0));
@@ -409,6 +418,7 @@ fn handle_syscall(
             }
 
             proc.stop(target_thread);
+            trap.syscall_id = abi.sys.encode(0);
         },
         .thread_set_prio => {
             const target_thread = try thread.proc.getObject(caps.Thread, @truncate(trap.arg0));
@@ -418,6 +428,7 @@ fn handle_syscall(
             defer target_thread.lock.unlock();
 
             target_thread.priority = @truncate(trap.arg1);
+            trap.syscall_id = abi.sys.encode(0);
         },
 
         .receiver_create => {

@@ -17,11 +17,8 @@ pub fn installRuntime() void {
     });
 }
 
-fn _start(rdi: u64, rsi: u64, rdx: u64) callconv(.SysV) noreturn {
-    root_ipc = .{ .cap = @truncate(rdi) };
-    vm_ipc = .{ .cap = @truncate(rsi) };
-    vmem_handle = rdx;
-
+fn _start() callconv(.SysV) noreturn {
+    std.log.info("entry", .{});
     root.main() catch |err| {
         std.debug.panic("{}", .{err});
     };

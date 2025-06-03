@@ -35,6 +35,10 @@ pub const Process = extern struct {
         const cap = try sys.procSelf();
         return .{ .cap = cap };
     }
+
+    pub fn close(this: @This()) void {
+        sys.handleClose(this.cap);
+    }
 };
 
 /// capability to manage a single thread control block (TCB)
@@ -51,6 +55,10 @@ pub const Thread = extern struct {
     pub fn self() sys.Error!@This() {
         const cap = try sys.threadSelf();
         return .{ .cap = cap };
+    }
+
+    pub fn close(this: @This()) void {
+        sys.handleClose(this.cap);
     }
 
     pub fn readRegs(this: @This(), regs: *sys.ThreadRegs) sys.Error!void {
@@ -163,6 +171,10 @@ pub const Receiver = extern struct {
         return .{ .cap = cap };
     }
 
+    pub fn close(this: @This()) void {
+        sys.handleClose(this.cap);
+    }
+
     pub fn recv(self: @This()) sys.Error!sys.Message {
         return try sys.receiverRecv(self.cap);
     }
@@ -196,6 +208,10 @@ pub const Sender = extern struct {
         return .{ .cap = cap };
     }
 
+    pub fn close(this: @This()) void {
+        sys.handleClose(this.cap);
+    }
+
     pub fn call(self: @This(), msg: sys.Message) sys.Error!sys.Message {
         return try sys.senderCall(self.cap, msg);
     }
@@ -213,6 +229,10 @@ pub const Reply = extern struct {
         return .{ .cap = cap };
     }
 
+    pub fn close(this: @This()) void {
+        sys.handleClose(this.cap);
+    }
+
     pub fn reply(self: @This(), msg: sys.Message) sys.Error!void {
         return sys.replyReply(self.cap, msg);
     }
@@ -228,6 +248,10 @@ pub const Notify = extern struct {
     pub fn create() sys.Error!@This() {
         const cap = try sys.notifyCreate();
         return .{ .cap = cap };
+    }
+
+    pub fn close(this: @This()) void {
+        sys.handleClose(this.cap);
     }
 
     pub fn wait(self: @This()) sys.Error!void {

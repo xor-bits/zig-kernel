@@ -178,7 +178,7 @@ pub const CacheType = enum(u8) {
 pub const MapFlags = packed struct {
     // protection_key: u8 = 0,
     cache: CacheType = .write_back,
-    fixed: bool = true,
+    fixed: bool = false,
     _: u7 = 0,
     // global: bool = false,
 

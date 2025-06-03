@@ -61,7 +61,7 @@ fn vmmVectorGrow(top: *usize, n_pages: usize) !void {
             top.*,
             0x10000,
             .{ .writable = true },
-            .{},
+            .{ .fixed = true },
         );
         top.* += 0x10000;
     }
@@ -89,7 +89,7 @@ pub fn init() !void {
         main.INITFS_STACK_BOTTOM,
         1024 * 256,
         .{ .writable = true },
-        .{},
+        .{ .fixed = true },
     );
 
     thread = try caps.Thread.create(caps.ROOT_SELF_PROC);
@@ -158,7 +158,7 @@ fn openFileHandler(_: void, _: u32, req: struct { [32:0]u8, caps.Frame }) struct
         main.INITFS_TMP,
         frame_size,
         .{ .writable = true },
-        .{},
+        .{ .fixed = true },
     ) catch |err| return .{ err, frame };
 
     abi.util.copyForwardsVolatile(
@@ -212,7 +212,7 @@ fn listHandler(_: void, _: u32, _: void) struct { Error!void, caps.Frame, usize 
         main.INITFS_LIST,
         size,
         .{ .writable = true },
-        .{},
+        .{ .fixed = true },
     ) catch unreachable;
 
     entries = 0;

@@ -52,7 +52,7 @@ pub fn main() !void {
         BOOT_INFO,
         len,
         .{},
-        .{},
+        .{ .fixed = true },
     );
     log.info("boot info mapped", .{});
 
@@ -91,6 +91,8 @@ pub fn main() !void {
         var exports = try server.exports();
         while (try exports.next()) |exp|
             log.info(" - {}({}) @0x{x}: {s}", .{ exp.val.ty, exp.val.handle, exp.addr, exp.val.getName() });
+
+        try abi.loader.exec(server.data);
     }
 
     // log.info("finding manifest", .{});
@@ -159,153 +161,6 @@ const System = struct {
     servers: std.EnumArray(abi.ServerKind, Server) = .initFill(.{}),
 };
 
-fn execVm(elf_bytes: []const u8, sender: abi.caps.Sender) !caps.Thread {
-    var elf = std.io.fixedBufferStream(elf_bytes);
-
-    var crc: u32 = 0;
-    for (elf_bytes) |b| {
-        crc = @addWithOverflow(crc, @as(u32, b))[0];
-    }
-    log.info("xor crc of is {d}", .{crc});
-
-    const header = try std.elf.Header.read(&elf);
-    var program_headers = header.program_header_iterator(&elf);
-
-    const new_vmem = try caps.Vmem.create();
-
-    var heap_bottom: usize = 0;
-
-    // var frames: std.BoundedArray(u32, 1000) = .init(0);
-    // frames.append(item: T);
-
-    while (try program_headers.next()) |program_header| {
-        if (program_header.p_type != std.elf.PT_LOAD) {
-            continue;
-        }
-
-        if (program_header.p_memsz == 0) {
-            continue;
-        }
-
-        const bytes: []const u8 = elf.buffer[program_header.p_offset..][0..program_header.p_filesz];
-
-        const rights = abi.sys.Rights{
-            .writable = program_header.p_flags & std.elf.PF_W != 0,
-            .executable = program_header.p_flags & std.elf.PF_X != 0,
-        };
-
-        const segment_vaddr_bottom = std.mem.alignBackward(usize, program_header.p_vaddr, 0x1000);
-        const segment_vaddr_top = std.mem.alignForward(usize, program_header.p_vaddr + program_header.p_memsz, 0x1000);
-        const segment_data_bottom_offset = program_header.p_vaddr - segment_vaddr_bottom;
-        // const data_vaddr_bottom = program_header.p_vaddr;
-        // const data_vaddr_top = data_vaddr_bottom + program_header.p_filesz;
-        // const zero_vaddr_bottom = std.mem.alignForward(usize, data_vaddr_top, 0x1000);
-        // const zero_vaddr_top = segment_vaddr_top;
-
-        heap_bottom = @max(heap_bottom, segment_vaddr_top + 0x1000);
-
-        // log.info("flags: {}, segment_vaddr_bottom=0x{x} segment_vaddr_top=0x{x} data_vaddr_bottom=0x{x} data_vaddr_top=0x{x}", .{
-        //     rights,
-        //     segment_vaddr_bottom,
-        //     segment_vaddr_top,
-        //     data_vaddr_bottom,
-        //     data_vaddr_top,
-        // });
-
-        // FIXME: potential alignment errors when segments are bigger than 2MiB,
-        // because frame caps use huge and giant pages automatically
-
-        const size = segment_vaddr_top - segment_vaddr_bottom;
-        self_memory_lock.lock();
-        defer self_memory_lock.unlock();
-        const frame = try caps.Frame.create(size);
-
-        // TODO: Frame.write instead of Vmem.map + memcpy + Vmem.unmap
-        try abi.caps.ROOT_SELF_VMEM.map(
-            frame,
-            0,
-            LOADER_TMP,
-            size,
-            .{ .writable = true },
-            .{},
-        );
-
-        // log.info("copying to [ 0x{x}..0x{x} ]", .{
-        //     segment_vaddr_bottom + segment_data_bottom_offset,
-        //     segment_vaddr_bottom + segment_data_bottom_offset + program_header.p_filesz,
-        // });
-        abi.util.copyForwardsVolatile(u8, @as(
-            [*]volatile u8,
-            @ptrFromInt(LOADER_TMP + segment_data_bottom_offset),
-        )[0..program_header.p_filesz], bytes);
-
-        try abi.caps.ROOT_SELF_VMEM.unmap(
-            LOADER_TMP,
-            size,
-        );
-
-        try new_vmem.map(
-            frame,
-            0,
-            segment_vaddr_bottom,
-            size,
-            rights,
-            .{},
-        );
-    }
-
-    // map a stack
-    // log.info("mapping a stack", .{});
-    const stack = try caps.Frame.create(1024 * 256);
-    try new_vmem.map(
-        stack,
-        0,
-        0x7FFF_FFF0_0000,
-        1024 * 256,
-        .{ .writable = true },
-        .{},
-    );
-    // try new_vmem.map(
-    //     stack_copy,
-    //     0x7FFF_FFE0_0000,
-    //     .{ .writable = true },
-    //     .{},
-    // );
-
-    // map an initial heap
-    // log.info("mapping a heap", .{});
-    const heap = try caps.Frame.create(1024 * 256);
-    try new_vmem.map(
-        heap,
-        0,
-        heap_bottom,
-        1024 * 256,
-        .{ .writable = true },
-        .{},
-    );
-
-    const new_proc = try caps.Process.create(new_vmem);
-    _ = sender;
-    // const sender_there = new_proc.pushCapability(sender.cap);
-
-    // log.info("creating a new thread", .{});
-    const new_thread = try caps.Thread.create(new_proc);
-
-    try new_thread.setPrio(0);
-    try new_thread.writeRegs(&.{
-        // .arg0 = sender_there,
-        .user_instr_ptr = header.entry,
-        .user_stack_ptr = 0x7FFF_FFF4_0000 - 0x100,
-    });
-
-    // log.info("ip=0x{x} sp=0x{x}", .{ header.entry, 0x7FFF_FFF4_0000 });
-
-    log.info("everything ready, exec", .{});
-    try new_thread.start();
-
-    return new_thread;
-}
-
 pub extern var __stack_end: u8;
 pub extern var __thread_stack_end: u8;
 
@@ -341,7 +196,7 @@ fn mapStack() !void {
         STACK_BOTTOM,
         1024 * 256,
         .{ .writable = true },
-        .{},
+        .{ .fixed = true },
     );
 
     log.info("stack mapping complete 0x{x}..0x{x}", .{ STACK_BOTTOM, STACK_TOP });

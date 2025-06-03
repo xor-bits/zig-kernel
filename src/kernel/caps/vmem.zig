@@ -35,7 +35,7 @@ pub const Vmem = struct {
             flags: abi.sys.MapFlags,
             /// virtual address destination of the mapping
             /// `mappings` is sorted by this
-            page: u48,
+            page: u40,
         },
 
         fn init(
@@ -63,7 +63,7 @@ pub const Vmem = struct {
         }
 
         fn getVaddr(self: *const @This()) addr.Virt {
-            return addr.Virt.fromInt(self.target.page << 12);
+            return addr.Virt.fromInt(@as(u64, self.target.page) << 12);
         }
 
         fn start(self: *const @This()) addr.Virt {
@@ -179,7 +179,7 @@ pub const Vmem = struct {
         const idx_beg, const idx_end = try self.data(vaddr, bytes.len);
 
         for (idx_beg..idx_end) |idx| {
-            std.debug.assert(bytes.len != 0);
+            if (bytes.len == 0) break;
             const mapping = &self.mappings.items[idx];
 
             // log.info("mapping [ 0x{x}..0x{x} ]", .{
@@ -213,6 +213,16 @@ pub const Vmem = struct {
 
         const idx_beg: usize = self.find(vaddr) orelse return Error.InvalidAddress;
         const idx_end: usize = 1 + (self.find(vaddr_end_exclusive) orelse (self.mappings.items.len - 1));
+
+        if (!self.mappings.items[idx_beg].overlaps(vaddr, 1))
+            return Error.InvalidAddress;
+
+        // log.info("vaddr=0x{x} idx_beg={} idx_end={} mapping={}", .{
+        //     vaddr.raw,
+        //     idx_beg,
+        //     idx_end,
+        //     self.mappings.items[idx_beg],
+        // });
 
         std.debug.assert(self.mappings.items[idx_beg].overlaps(vaddr, 1));
         std.debug.assert(self.mappings.items[idx_end - 1].overlaps(vaddr_end_inclusive, 1));
@@ -445,6 +455,8 @@ pub const Vmem = struct {
 
         if (conf.LOG_OBJ_CALLS)
             log.info("Vmem.unmap vaddr=0x{x} pages={}", .{ vaddr.raw, pages });
+        defer if (conf.LOG_OBJ_CALLS)
+            log.info("Vmem.unmap returned", .{});
 
         if (pages == 0) return;
         std.debug.assert(vaddr.toParts().offset == 0);
@@ -470,12 +482,14 @@ pub const Vmem = struct {
             if (a_end <= b_beg or b_end <= a_beg) {
                 // case 0: no overlaps
 
+                // log.debug("unmap case 0", .{});
                 break;
             } else if (b_beg <= a_beg and b_end <= a_end) {
                 // case 1:
                 // b: |---------|
                 // a:      |=====-----|
 
+                // log.debug("unmap case 1", .{});
                 const shift: u32 = @intCast((b_end - a_beg) / 0x1000);
                 mapping.setVaddr(addr.Virt.fromInt(b_end));
                 mapping.pages -= shift;
@@ -486,12 +500,14 @@ pub const Vmem = struct {
                 // b: |---------------------|
                 // a:      |==========|
 
+                // log.debug("unmap case 2", .{});
                 mapping.pages = 0;
             } else if (b_beg >= a_beg and b_end >= a_end) {
                 // case 3:
                 // b:            |---------|
                 // a:      |-----=====|
 
+                // log.debug("unmap case 3", .{});
                 const trunc: u32 = @intCast((a_end - b_beg) / 0x1000);
                 mapping.pages -= trunc;
             } else {
@@ -502,6 +518,7 @@ pub const Vmem = struct {
                 // a: |----============-----|
                 // cases 1,2,3 already cover equal start/end bounds
 
+                // log.debug("unmap case 4", .{});
                 var cloned = mapping.*;
                 cloned.frame = mapping.frame.clone();
 
@@ -697,6 +714,9 @@ pub const Vmem = struct {
     }
 
     fn find(self: *@This(), vaddr: addr.Virt) ?usize {
+        // log.info("find 0x{x}", .{vaddr.raw});
+        // self.dump();
+
         const idx = std.sort.partitionPoint(
             Mapping,
             self.mappings.items,
@@ -710,6 +730,11 @@ pub const Vmem = struct {
 
         if (idx >= self.mappings.items.len)
             return null;
+
+        // log.info("found [ 0x{x:0>16} .. 0x{x:0>16} ]", .{
+        //     self.mappings.items[idx].start().raw,
+        //     self.mappings.items[idx].end().raw,
+        // });
 
         return idx;
     }

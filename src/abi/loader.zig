@@ -1,6 +1,65 @@
 const std = @import("std");
 const abi = @import("lib.zig");
 
+const caps = abi.caps;
+const log = std.log.scoped(.loader);
+
+//
+
+pub fn exec(elf: []const u8) !void {
+    log.debug("new vmem", .{});
+    const vmem = try caps.Vmem.create();
+    defer vmem.close();
+    log.debug("new proc", .{});
+    const proc = try caps.Process.create(vmem);
+    defer proc.close();
+
+    log.debug("loading", .{});
+    const entry = try load(vmem, elf);
+
+    log.debug("spawning", .{});
+    try spawn(vmem, proc, entry);
+
+    log.debug("done", .{});
+}
+
+pub fn load(vmem: caps.Vmem, elf: []const u8) !usize {
+    var loader = try Elf.init(elf);
+    const entry = try loader.loadInto(vmem);
+    return entry;
+}
+
+pub fn spawn(vmem: caps.Vmem, proc: caps.Process, entry: u64) !void {
+    const thread = try caps.Thread.create(proc);
+    defer thread.close();
+
+    // map a stack
+    const stack = try caps.Frame.create(1024 * 256);
+    defer stack.close();
+    const stack_ptr = try vmem.map(
+        stack,
+        0,
+        0,
+        1024 * 256,
+        .{ .writable = true },
+        .{},
+    );
+    // FIXME: protect the stack guard region as
+    // no read, no write, no exec and prevent mapping
+    try vmem.unmap(stack_ptr, 0x1000);
+
+    try thread.setPrio(0);
+    try thread.writeRegs(&.{
+        // .arg0 = sender_there,
+        .user_instr_ptr = entry,
+        .user_stack_ptr = stack_ptr + 1024 * 256 - 0x100,
+    });
+
+    log.info("spawn ip=0x{x} sp=0x{x}", .{ entry, stack_ptr });
+
+    try thread.start();
+}
+
 //
 
 /// general server info
@@ -67,6 +126,89 @@ pub const Elf = struct {
 
     pub fn init(elf: []const u8) !@This() {
         return .{ .data = elf };
+    }
+
+    pub fn crc32(self: *@This()) u32 {
+        var crc: u32 = 0;
+        for (self.data) |b| {
+            crc = @addWithOverflow(crc, @as(u32, b))[0];
+        }
+        return crc;
+    }
+
+    pub fn loadInto(self: *@This(), vmem: caps.Vmem) !usize {
+        // TODO: syscall to write directly into a `caps.Vmem`
+        // TODO: combine contiguous Frames
+
+        for (try self.getProgram()) |program_header| {
+            if (program_header.p_type != std.elf.PT_LOAD) continue;
+            if (program_header.p_memsz == 0) continue;
+
+            log.debug("loading phdr", .{});
+
+            const bytes = try getProgramData(self.data, program_header);
+
+            const rights = abi.sys.Rights{
+                .readable = program_header.p_flags & std.elf.PF_R != 0,
+                .writable = program_header.p_flags & std.elf.PF_W != 0,
+                .executable = program_header.p_flags & std.elf.PF_X != 0,
+            };
+
+            const segment_vaddr_bottom = std.mem.alignBackward(usize, program_header.p_vaddr, 0x1000);
+            const segment_vaddr_top = std.mem.alignForward(usize, program_header.p_vaddr + program_header.p_memsz, 0x1000);
+            const segment_data_bottom_offset = program_header.p_vaddr - segment_vaddr_bottom;
+            // const data_vaddr_bottom = program_header.p_vaddr;
+            // const data_vaddr_top = data_vaddr_bottom + program_header.p_filesz;
+            // const zero_vaddr_bottom = std.mem.alignForward(usize, data_vaddr_top, 0x1000);
+            // const zero_vaddr_top = segment_vaddr_top;
+
+            // log.info("flags: {}, segment_vaddr_bottom=0x{x} segment_vaddr_top=0x{x} data_vaddr_bottom=0x{x} data_vaddr_top=0x{x}", .{
+            //     rights,
+            //     segment_vaddr_bottom,
+            //     segment_vaddr_top,
+            //     data_vaddr_bottom,
+            //     data_vaddr_top,
+            // });
+
+            const size = segment_vaddr_top - segment_vaddr_bottom;
+            const frame = try caps.Frame.create(size);
+            defer frame.close();
+
+            // TODO: Frame.write instead of Vmem.map + memcpy + Vmem.unmap
+            const loader_tmp = try abi.caps.ROOT_SELF_VMEM.map(
+                frame,
+                0,
+                0,
+                size,
+                .{ .writable = true },
+                .{},
+            );
+
+            // log.info("copying to [ 0x{x}..0x{x} ]", .{
+            //     segment_vaddr_bottom + segment_data_bottom_offset,
+            //     segment_vaddr_bottom + segment_data_bottom_offset + program_header.p_filesz,
+            // });
+            abi.util.copyForwardsVolatile(u8, @as(
+                [*]volatile u8,
+                @ptrFromInt(loader_tmp + segment_data_bottom_offset),
+            )[0..program_header.p_filesz], bytes);
+
+            try abi.caps.ROOT_SELF_VMEM.unmap(
+                loader_tmp,
+                size,
+            );
+
+            _ = try vmem.map(
+                frame,
+                0,
+                segment_vaddr_bottom,
+                size,
+                rights,
+                .{ .fixed = true },
+            );
+        }
+
+        return (try self.getHeader()).entry;
     }
 
     pub fn ExternStructIterator(
@@ -195,7 +337,7 @@ pub const Elf = struct {
         return self.header.?;
     }
 
-    fn getProgram(self: *@This()) ![]const std.elf.Elf64_Shdr {
+    fn getProgram(self: *@This()) ![]const std.elf.Elf64_Phdr {
         if (self.program) |s| return s;
 
         const header = try self.getHeader();
@@ -261,6 +403,18 @@ pub const Elf = struct {
             return error.OutOfBounds;
 
         return std.mem.sliceTo(strtab[off..], 0);
+    }
+
+    fn getProgramData(bin: []const u8, phdr: std.elf.Elf64_Phdr) ![]const u8 {
+        // bounds checking
+        if (bin.len < std.math.add(
+            u64,
+            phdr.p_offset,
+            phdr.p_filesz,
+        ) catch return error.OutOfBounds)
+            return error.OutOfBounds;
+
+        return bin[phdr.p_offset..][0..phdr.p_filesz];
     }
 
     fn getSectionData(bin: []const u8, shdr: std.elf.Elf64_Shdr) ![]const u8 {

@@ -34,7 +34,9 @@ pub export var export_vfs = abi.loader.Resource.new(.{
 
 //
 
-pub fn main() !void {}
+pub fn main() !void {
+    log.info("hello from pm", .{});
+}
 
 pub fn _main() !void {
     log.info("hello from pm", .{});
