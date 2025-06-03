@@ -67,38 +67,44 @@ zig build run --prominent-compile-errors --summary none -freference-trace \
     - [x] multiple parallel calls to the same endpoint
   - [x] figure out userland interrupts (ps2 keyboard, ..)
   - [x] capabilities
+    - [ ] free list of capabilities
     - [x] allocate capabilities
-    - [ ] deallocate capabilities
+    - [x] deallocate capabilities
     - [x] map capabilities
     - [x] unmap capabilities
     - [x] send capabilities
     - [x] disallow mapping a frame twice without cloning the cap
     - [x] disallow overlapping maps
     - [ ] restrict capability rights, ex: read-only frame can only create read-only frames
-    - [ ] scrap the derivation tree, use refcounts like Zircon
-    - [ ] per process handle tables, allowing more dynamic kernel object metadata (user handle (u32) is an index to process local table, which holds a pointer (and rights) to a kernel object)
-    - [ ] objects
-      - [x] Memory
+    - [x] scrap the derivation tree, use refcounts like Zircon
+    - [x] per process handle tables, allowing more dynamic kernel object metadata (user handle (u32) is an index to process local table, which holds a pointer (and rights) to a kernel object)
+    - [x] objects
       - [x] Thread
       - [x] Vmem
       - [x] Frame
-        - [ ] multiple Frame caps to the same physical memory (for shared memory)
-        - [ ] lazy alloc
-      - [x] DeviceFrame
+        - [x] multiple Frame caps to the same physical memory (for shared memory)
+        - [x] lazy alloc
+        - [x] map into multiple `Vmem`s
       - [x] Receiver
-      - [x] Sender
       - [x] Reply
+      - [x] Sender
       - [x] Notify
   - [x] syscalls
-    - [ ] move all object methods to be syscalls
-    - [ ] syscall tracker
-    - [ ] method call tracker
+    - [x] move all object methods to be syscalls
+    - [x] syscall tracker
+    - [x] method call tracker
 
 - [x] user-space
   - [ ] stack traces with line info
 
 - [x] root + initfsd process
   - [x] decompress initfs.tar.gz
+  - [x] server manifest embedded into the ELF
+    - [x] name
+    - [x] imports
+    - [x] exports
+  - [x] execute servers
+  - [ ] grant server imports and exports
   - [ ] execute initfs:///sbin/init and give it a capability to IPC with the initfs
 
 - [x] initfs:///sbin/vm server process
