@@ -140,9 +140,12 @@ pub const Receiver = struct {
         return sender;
     }
 
-    pub fn replyRecv(self: *@This(), thread: *caps.Thread, trap: *arch.SyscallRegs, msg: abi.sys.Message) Error!void {
+    pub fn replyRecv(self: *@This(), thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
         if (conf.LOG_OBJ_CALLS)
             log.debug("Receiver.replyRecv", .{});
+
+        var msg = trap.readMessage();
+        msg.cap_or_stamp = 0; // call doesnt get to know the Receiver capability id
 
         const sender = try Receiver.replyGetSender(thread, msg);
         std.debug.assert(sender != thread);
@@ -166,7 +169,7 @@ pub const Sender = struct {
     refcnt: abi.epoch.RefCnt = .{},
 
     recv: *Receiver,
-    stamp: usize,
+    stamp: u32,
 
     pub fn init(recv: *Receiver, stamp: usize) !*@This() {
         errdefer recv.deinit(); // FIXME: errdefer in the caller instead
@@ -199,11 +202,13 @@ pub const Sender = struct {
         if (conf.LOG_OBJ_CALLS)
             log.debug("Sender.call", .{});
 
+        var msg = trap.readMessage();
+        msg.cap_or_stamp = self.stamp;
+
         // prepare cap transfer
-        const msg = trap.readMessage();
         if (conf.LOG_OBJ_CALLS)
             log.debug("sending {}", .{msg});
-        try thread.prelockExtras(@truncate(msg.extra)); // keep them locked even if a listener isn't ready
+        // try thread.prelockExtras(@truncate(msg.extra)); // keep them locked even if a listener isn't ready
 
         // acquire a listener or switch threads
         const listener = self.receiver.swap(null, .seq_cst) orelse {
@@ -223,7 +228,7 @@ pub const Sender = struct {
 
         // copy over the message
         listener.trap.writeMessage(msg);
-        thread.moveExtra(listener, @truncate(msg.extra));
+        // thread.moveExtra(listener, @truncate(msg.extra));
 
         // save the reply target
         std.debug.assert(listener.reply == null);

@@ -560,10 +560,8 @@ fn handle_syscall(
             trap.syscall_id = abi.sys.encode(0);
         },
         .receiver_reply_recv => {
-            var msg = trap.readMessage();
             const recv = try thread.proc.getObject(caps.Receiver, msg.cap_or_stamp);
             defer recv.deinit();
-            msg.cap_or_stamp = 0; // call doesnt get to know the Receiver capability id
 
             try recv.replyRecv(thread, trap, msg);
         },
@@ -576,7 +574,7 @@ fn handle_syscall(
             trap.syscall_id = abi.sys.encode(handle);
         },
         .reply_reply => {
-            unreachable;
+            trap.syscall_id = abi.sys.encode(Error.Unimplemented);
         },
 
         .sender_create => {
@@ -588,7 +586,10 @@ fn handle_syscall(
             trap.syscall_id = abi.sys.encode(handle);
         },
         .sender_call => {
-            unreachable;
+            const sender = try thread.proc.getObject(caps.Sender, @truncate(trap.arg0));
+            defer sender.deinit();
+
+            sender.call(thread, trap);
         },
 
         .notify_create => {
@@ -616,6 +617,26 @@ fn handle_syscall(
             defer notify.deinit();
 
             trap.syscall_id = abi.sys.encode(@intFromBool(notify.notify()));
+        },
+
+        .x86_ioport_create => {
+            trap.syscall_id = abi.sys.encode(Error.Unimplemented);
+        },
+        .x86_ioport_inb => {
+            trap.syscall_id = abi.sys.encode(Error.Unimplemented);
+        },
+        .x86_ioport_outb => {
+            trap.syscall_id = abi.sys.encode(Error.Unimplemented);
+        },
+
+        .x86_irq_create => {
+            trap.syscall_id = abi.sys.encode(Error.Unimplemented);
+        },
+        .x86_irq_subscribe => {
+            trap.syscall_id = abi.sys.encode(Error.Unimplemented);
+        },
+        .x86_irq_unsubscribe => {
+            trap.syscall_id = abi.sys.encode(Error.Unimplemented);
         },
 
         .handle_identify => {
