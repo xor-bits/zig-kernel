@@ -234,16 +234,14 @@ fn handle_syscall(
             if (trap.arg1 > 0x1000)
                 return Error.InvalidArgument;
 
-            const end = std.math.add(u64, trap.arg0, trap.arg1) catch
+            _ = std.math.add(u64, trap.arg0, trap.arg1) catch
                 return Error.InvalidArgument;
 
-            if (end >= 0x8000_0000_0000)
-                return Error.InvalidArgument;
+            const vaddr = try addr.Virt.fromUser(trap.arg0);
 
-            if (trap.arg0 == 0)
-                return Error.InvalidArgument;
-
-            const msg = @as([*]const u8, @ptrFromInt(trap.arg0))[0..trap.arg1];
+            var buf: [0x1000]u8 = undefined;
+            try thread.proc.vmem.read(vaddr, buf[0..trap.arg1]);
+            const msg = buf[0..trap.arg1];
 
             var lines = std.mem.splitAny(u8, msg, "\n\r");
             while (lines.next()) |line| {
