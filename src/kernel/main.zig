@@ -399,6 +399,16 @@ fn handle_syscall(
                     return Error.NotStopped;
             }
 
+            if (conf.LOG_ENTRYPOINT_CODE) {
+                // dump the entrypoint code
+                var buf: [50]u8 = undefined;
+                _ = target_thread.proc.vmem.read(addr.Virt.fromInt(target_thread.trap.user_instr_ptr), buf[0..]) catch {};
+                var it = std.mem.window(u8, buf[0..], 16, 16);
+                while (it.next()) |bytes| {
+                    log.info("{}", .{util.hex(bytes)});
+                }
+            }
+
             try target_thread.proc.vmem.start();
             proc.start(target_thread);
             trap.syscall_id = abi.sys.encode(0);

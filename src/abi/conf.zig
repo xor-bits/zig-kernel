@@ -14,6 +14,7 @@ pub const LOG_CTX_SWITCHES: bool = LOG_GENERIC or false;
 pub const LOG_WAITING: bool = LOG_GENERIC or false;
 pub const LOG_APIC: bool = LOG_GENERIC or false;
 pub const LOG_INTERRUPTS: bool = LOG_GENERIC or false;
+pub const LOG_ENTRYPOINT_CODE: bool = LOG_GENERIC or false;
 pub const LOG_SERVERS: bool = LOG_USER or false;
 
 /// parse DWARF info early, to make it functional in a OOM panic
