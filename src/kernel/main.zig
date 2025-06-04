@@ -205,6 +205,7 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
     }
 
     handle_syscall(locals, thread, id, trap) catch |err| {
+        @branchHint(.cold);
         trap.syscall_id = abi.sys.encode(err);
     };
 
@@ -561,6 +562,7 @@ fn handle_syscall(
             trap.syscall_id = abi.sys.encode(0);
         },
         .receiver_reply_recv => {
+            @branchHint(.likely);
             var msg = trap.readMessage();
 
             const recv = try thread.proc.getObject(caps.Receiver, msg.cap_or_stamp);
@@ -593,6 +595,7 @@ fn handle_syscall(
             trap.syscall_id = abi.sys.encode(handle);
         },
         .sender_call => {
+            @branchHint(.likely);
             var msg = trap.readMessage();
             trap.writeMessage(msg);
 

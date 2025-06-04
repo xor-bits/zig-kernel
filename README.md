@@ -157,16 +157,16 @@ zig build run --prominent-compile-errors --summary none -freference-trace \
 ## IPC performance
 
 Approximate synchronous IPC performance: `call` + `replyRecv`
-loop takes about 10µs (100 000 per second):
+loop takes about 323ns (3 091 603 per second) (in QEMU+KVM with Ryzen 9 5950X):
 
 ```zig
 // server
 while (true) {
-    try rx.replyRecv(&msg);
+    msg = try rx.replyRecv(msg);
 }
 // client
 while (true) {
-    try tx.call(&msg);
+    try tx.call(.{});
 }
 ```
 

@@ -45,7 +45,7 @@ pub fn main() !void {
     var i: usize = 0;
     while (true) : (i +%= 1) {
         msg = try recv.replyRecv(msg);
-        if (i % 100_000 == 0) {
+        if (i % 1_000_000 == 0) {
             log.info("{} calls", .{i});
         }
     }

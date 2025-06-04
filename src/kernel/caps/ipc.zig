@@ -151,6 +151,7 @@ pub const Receiver = struct {
             // if the receiver went to sleep, switch to the original caller thread
             proc.switchTo(trap, sender, thread);
         } else {
+            @branchHint(.cold);
             // return back to the server, which is prob more important
             // and keeps the TLB cache warm
             // + ready up the caller thread
