@@ -4,6 +4,8 @@ const abi = @import("lib.zig");
 const caps = @import("caps.zig");
 const sys = @import("sys.zig");
 
+const Error = sys.Error;
+
 //
 
 pub fn fillVolatile(comptime T: type, dest: []volatile T, val: T) void {
@@ -193,7 +195,7 @@ pub fn Protocol(comptime spec: type) type {
                     return .{ .ctx = ctx, .rx = rx };
                 }
 
-                pub fn process(self: @This(), msg: *sys.Message) void {
+                pub fn process(self: @This(), msg: *sys.Message) Error!void {
                     const variant = variants_const[0].input_converter.deserializeVariant(msg).?; // FIXME:
                     if (self.logger) |s|
                         std.log.scoped(s).debug("handling {s}", .{@tagName(variant)});
@@ -204,7 +206,7 @@ pub fn Protocol(comptime spec: type) type {
                     inline for (&variants_const, 0..) |v, i| {
                         if (i == @intFromEnum(variant)) {
                             const sender = msg.cap_or_stamp;
-                            const input = v.input_converter.deserialize(msg) orelse {
+                            const input = try v.input_converter.deserialize(msg) orelse {
                                 // FIXME: handle invalid input
                                 std.log.err("invalid input", .{});
                                 return;
@@ -214,7 +216,7 @@ pub fn Protocol(comptime spec: type) type {
                             // @compileLog(@TypeOf(tuplePopFirst(input)));
                             const output = handler(self.ctx, sender, tuplePopFirst(input));
 
-                            v.output_converter.serialize(msg, output);
+                            try v.output_converter.serialize(msg, output);
                         }
                     }
                 }
@@ -225,11 +227,11 @@ pub fn Protocol(comptime spec: type) type {
                     try rx.reply(msg);
                 }
 
-                pub fn run(self: @This()) !void {
+                pub fn run(self: @This()) Error!void {
                     var msg: sys.Message = try self.rx.recv();
                     while (true) {
                         std.log.info("got msg: {}", .{msg});
-                        self.process(&msg);
+                        try self.process(&msg);
                         msg = try self.rx.replyRecv(msg);
                     }
                 }
@@ -438,7 +440,7 @@ const MessageUsage = struct {
                 return extra_count;
             }
 
-            pub fn serialize(msg: *sys.Message, inputs: Io) void {
+            pub fn serialize(msg: *sys.Message, inputs: Io) Error!void {
                 var data: Struct = undefined;
 
                 // const input_fields: []const std.builtin.Type.StructField = @typeInfo(@TypeOf(inputs));
@@ -470,7 +472,7 @@ const MessageUsage = struct {
                 inline for (self.data[0 .. self.data_cnt - 1]) |f| {
                     if (f.encode_type == .cap) {
                         const cap_id = @field(inputs, f.name).cap;
-                        sys.setExtra(extra_idx, cap_id, cap_id != 0);
+                        try sys.selfSetExtra(extra_idx, cap_id, cap_id != 0);
                         extra_idx += 1;
                     }
                 }
@@ -487,7 +489,7 @@ const MessageUsage = struct {
                     } else if (i == 4) {
                         msg.arg4 = reg;
                     } else {
-                        sys.setExtra(extra_idx, reg, false);
+                        try sys.selfSetExtra(extra_idx, reg, false);
                         extra_idx += 1;
                     }
                 }
@@ -506,7 +508,7 @@ const MessageUsage = struct {
                 ) catch null;
             }
 
-            pub fn deserialize(msg: *const sys.Message) ?Io {
+            pub fn deserialize(msg: *const sys.Message) Error!?Io {
                 if (msg.extra != extraCount())
                     return null;
 
@@ -515,7 +517,10 @@ const MessageUsage = struct {
                 var extra_idx: u7 = 0;
                 inline for (self.data[0 .. self.data_cnt - 1]) |f| {
                     if (f.encode_type == .cap) {
-                        @field(ret, f.name) = .{ .cap = @truncate(sys.getExtra(extra_idx)) };
+                        const data = try sys.selfGetExtra(extra_idx);
+                        if (!data.is_cap) return null;
+
+                        @field(ret, f.name) = .{ .cap = @truncate(data.val) };
                         extra_idx += 1;
                     }
                 }
@@ -533,7 +538,10 @@ const MessageUsage = struct {
                     } else if (i == 4) {
                         reg.* = msg.arg4;
                     } else {
-                        reg.* = sys.getExtra(extra_idx);
+                        const data = try sys.selfGetExtra(extra_idx);
+                        if (data.is_cap) return null;
+
+                        reg.* = data.val;
                         extra_idx += 1;
                     }
                 }

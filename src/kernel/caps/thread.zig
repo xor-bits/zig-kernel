@@ -35,6 +35,26 @@ pub const Thread = struct {
     /// IPC reply target
     reply: ?*Thread = null,
 
+    // TODO: IPC buffer Frame where the userspace can write data freely
+    // and on send, the kernel copies it (with CoW) to the destination IPC buffer
+    // and replaces all handles with the target handles (u32 -> handle -> giveCap -> handle -> u32)
+
+    /// extra ipc registers
+    /// controlled by Receiver and Sender
+    extra_regs: std.MultiArrayList(CapOrVal) = .{},
+
+    pub const CapOrVal = union(enum) {
+        cap: caps.CapabilitySlot,
+        val: u64,
+
+        pub fn deinit(self: @This()) void {
+            switch (self) {
+                .cap => |cap| cap.deinit(),
+                else => {},
+            }
+        }
+    };
+
     pub fn init(from_proc: *caps.Process) !*@This() {
         errdefer from_proc.deinit();
 
@@ -60,6 +80,13 @@ pub const Thread = struct {
 
         self.proc.deinit();
 
+        if (self.extra_regs.len != 0) {
+            for (0..128) |i| {
+                self.getExtra(@truncate(i)).deinit();
+            }
+        }
+        self.extra_regs.deinit(caps.slab_allocator.allocator());
+
         caps.slab_allocator.allocator().destroy(self);
     }
 
@@ -69,6 +96,62 @@ pub const Thread = struct {
 
         self.refcnt.inc();
         return self;
+    }
+
+    pub fn prepareExtras(self: *@This()) Error!void {
+        self.lock.lock();
+        defer self.lock.unlock();
+
+        if (self.extra_regs.len == 0) {
+            @branchHint(.cold);
+            try self.extra_regs.resize(caps.slab_allocator.allocator(), 128);
+            for (0..128) |i| {
+                self.extra_regs.set(i, .{ .val = 0 });
+            }
+        }
+    }
+
+    pub fn getExtra(self: *@This(), idx: u7) CapOrVal {
+        self.lock.lock();
+        defer self.lock.unlock();
+
+        if (self.extra_regs.len == 0) {
+            @branchHint(.cold);
+            return .{ .val = 0 };
+        }
+
+        const val = self.extra_regs.get(idx);
+        self.extra_regs.set(idx, .{ .val = 0 });
+        return val;
+    }
+
+    /// cannot return an error if prepareExtras was already called successfully
+    pub fn setExtra(self: *@This(), idx: u7, data: CapOrVal) Error!void {
+        try self.prepareExtras();
+
+        self.lock.lock();
+        defer self.lock.unlock();
+
+        self.extra_regs.set(idx, data);
+    }
+
+    /// prepareExtras has to be called for `dst` first
+    pub fn moveExtra(src: *@This(), dst: *@This(), count: u7) void {
+        if (count == 0) {
+            return;
+        } else {
+            @branchHint(.cold);
+        }
+
+        src.lock.lock();
+        defer src.lock.unlock();
+        dst.lock.lock();
+        defer dst.lock.unlock();
+
+        for (0..count) |idx| {
+            const data = src.getExtra(@truncate(idx));
+            dst.setExtra(@truncate(idx), data) catch unreachable;
+        }
     }
 
     pub fn takeReply(self: *@This()) ?*Thread {

@@ -58,9 +58,11 @@ pub const Receiver = struct {
 
     /// block until something sends
     /// returns true if the current thread went to sleep
-    pub fn recv(self: *@This(), thread: *caps.Thread, trap: *arch.SyscallRegs) void {
+    pub fn recv(self: *@This(), thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
         if (conf.LOG_OBJ_CALLS)
             log.debug("Receiver.recv", .{});
+
+        try thread.prepareExtras();
 
         if (thread.reply) |discarded| discarded.deinit();
         thread.reply = null;
@@ -73,6 +75,7 @@ pub const Receiver = struct {
     // might block the user-space thread (kernel-space should only ever block after a syscall is complete)
     /// returns true if the current thread went to sleep
     fn recvNoFail(self: *@This(), thread: *caps.Thread, trap: *arch.SyscallRegs) bool {
+
         // stop the thread early to hold the lock for a shorter time
         thread.status = .waiting;
         thread.trap = trap.*;
@@ -88,7 +91,7 @@ pub const Receiver = struct {
             // copy over the message
             const msg = immediate.trap.readMessage();
             trap.writeMessage(msg);
-            // immediate.moveExtra(thread, @truncate(msg.extra)); // the caps are already locked in `Sender.call`
+            immediate.moveExtra(thread, @truncate(msg.extra));
 
             // save the reply target
             std.debug.assert(thread.reply == null);
@@ -123,17 +126,13 @@ pub const Receiver = struct {
         // prepare cap transfer
         if (conf.LOG_OBJ_CALLS)
             log.debug("replying {} from {*}", .{ msg, thread });
-        // try thread.prelockExtras(@truncate(msg.extra));
 
-        const sender = thread.takeReply() orelse {
-            @branchHint(.cold);
-            // thread.unlockExtras(@truncate(msg.extra));
+        const sender = thread.takeReply() orelse
             return Error.InvalidCapability;
-        };
 
         // copy over the reply message
         sender.trap.writeMessage(msg);
-        // thread.moveExtra(sender, @truncate(msg.extra));
+        thread.moveExtra(sender, @truncate(msg.extra));
 
         return sender;
     }
@@ -141,6 +140,8 @@ pub const Receiver = struct {
     pub fn replyRecv(self: *@This(), thread: *caps.Thread, trap: *arch.SyscallRegs, msg: abi.sys.Message) Error!void {
         if (conf.LOG_OBJ_CALLS)
             log.debug("Receiver.replyRecv", .{});
+
+        try thread.prepareExtras();
 
         const sender = try Receiver.replyGetSender(thread, msg);
         std.debug.assert(sender != thread);
@@ -196,12 +197,9 @@ pub const Sender = struct {
     // block until the receiver is free, then switch to the receiver
     pub fn call(self: *@This(), thread: *caps.Thread, trap: *arch.SyscallRegs, msg: abi.sys.Message) Error!void {
         if (conf.LOG_OBJ_CALLS)
-            log.debug("Sender.call", .{});
+            log.debug("Sender.call {}", .{msg});
 
-        // prepare cap transfer
-        if (conf.LOG_OBJ_CALLS)
-            log.debug("sending {}", .{msg});
-        // try thread.prelockExtras(@truncate(msg.extra)); // keep them locked even if a listener isn't ready
+        try thread.prepareExtras();
 
         // acquire a listener or switch threads
         const listener = self.recv.receiver.swap(null, .seq_cst) orelse {
@@ -227,7 +225,7 @@ pub const Sender = struct {
 
         // copy over the message
         listener.trap.writeMessage(msg);
-        // thread.moveExtra(listener, @truncate(msg.extra));
+        thread.moveExtra(listener, @truncate(msg.extra));
 
         // save the reply target
         std.debug.assert(listener.reply == null);

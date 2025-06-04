@@ -9,6 +9,7 @@ const Error = abi.sys.Error;
 
 //
 
+// TODO: move to abi.mem and add exponential growth
 const vmm_vector = std.mem.Allocator{
     .ptr = &vmm_vector_top,
     .vtable = &.{

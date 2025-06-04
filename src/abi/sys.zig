@@ -115,6 +115,10 @@ pub const Id = enum(usize) {
     self_yield,
     /// stop the active thread
     self_stop,
+    /// set an extra IPC register of this thread
+    self_set_extra,
+    /// get and zero an extra IPC register of this thread
+    self_get_extra,
 
     // TODO: maybe move all object call id's here to be syscall id's
 };
@@ -739,6 +743,34 @@ pub fn self_stop() noreturn {
     _ = syscall(.self_stop, .{}) catch {};
     asm volatile ("mov 0, %rax"); // read from nullptr to kill the process for sure
     unreachable;
+}
+
+pub fn selfSetExtra(idx: u7, val: u64, is_cap: bool) Error!void {
+    const res = asm volatile ("syscall"
+        : [ret] "={rax}" (-> usize),
+        : [id] "{rax}" (@intFromEnum(Id.self_set_extra)),
+          [arg0in] "{rdi}" (idx),
+          [arg1in] "{rsi}" (val),
+          [arg2in] "{rdx}" (@intFromBool(is_cap)),
+        : "rcx", "r11" // rcx becomes rip and r11 becomes rflags
+    );
+
+    _ = try decode(res);
+}
+
+pub fn selfGetExtra(idx: u7) Error!struct { val: u64, is_cap: bool } {
+    var val: u64 = undefined;
+    const res = asm volatile ("syscall"
+        : [ret] "={rax}" (-> usize),
+          [arg0out] "={rdi}" (val),
+        : [id] "{rax}" (@intFromEnum(Id.self_get_extra)),
+          [arg0in] "{rdi}" (idx),
+        : "rcx", "r11" // rcx becomes rip and r11 becomes rflags
+    );
+
+    const is_cap = try decode(res);
+
+    return .{ .val = val, .is_cap = is_cap != 0 };
 }
 
 //

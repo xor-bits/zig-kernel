@@ -163,14 +163,14 @@ pub const CapabilitySlot = packed struct {
         return self;
     }
 
-    pub fn deinit(self: *@This()) void {
+    pub fn deinit(self: @This()) void {
         if (self.get()) |cap| {
             cap.deinit();
         }
     }
 
     /// returns a Capability THAT IS NOT REF COUNTED
-    pub fn getBorrow(self: *@This()) ?Capability {
+    pub fn getBorrow(self: *const @This()) ?Capability {
         if (self.type == .null) return null;
 
         return Capability{
@@ -180,7 +180,7 @@ pub const CapabilitySlot = packed struct {
     }
 
     /// returns an owned ref counted Capability
-    pub fn get(self: *@This()) ?Capability {
+    pub fn get(self: *const @This()) ?Capability {
         const cap = self.getBorrow() orelse return null;
         cap.refcnt().inc();
         return cap;
@@ -198,6 +198,11 @@ pub const CapabilitySlot = packed struct {
         std.debug.assert((@intFromPtr(new.ptr) >> 56) == 0xFF);
         self.ptr = @truncate(@intFromPtr(new.ptr));
         self.type = new.type;
+    }
+
+    pub fn unwrap(self: @This()) ?Capability {
+        var s = self;
+        return s.take();
     }
 };
 
