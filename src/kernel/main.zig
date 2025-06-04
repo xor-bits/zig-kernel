@@ -569,14 +569,23 @@ fn handle_syscall(
         },
 
         .reply_create => {
-            unreachable;
+            const reply = try caps.Reply.init(thread);
+            errdefer reply.deinit();
+
+            const handle = try thread.proc.pushCapability(caps.Capability.init(reply));
+            trap.syscall_id = abi.sys.encode(handle);
         },
         .reply_reply => {
             unreachable;
         },
 
         .sender_create => {
-            unreachable;
+            const recv = try thread.proc.getObject(caps.Receiver, @truncate(trap.arg0));
+            defer recv.deinit();
+
+            const sender = try caps.Sender.init(recv, 0);
+            const handle = try thread.proc.pushCapability(caps.Capability.init(sender));
+            trap.syscall_id = abi.sys.encode(handle);
         },
         .sender_call => {
             unreachable;
