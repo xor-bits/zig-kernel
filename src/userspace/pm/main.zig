@@ -36,8 +36,9 @@ pub fn main() !void {
     });
 
     const sender = caps.Sender{ .cap = import_vfs.handle };
-    const reply = try sender.call(.{ .arg0 = 5, .arg2 = 6 });
-    log.info("pm got reply: {}", .{reply});
+    while (true) {
+        _ = try sender.call(.{ .arg0 = 5, .arg2 = 6 });
+    }
 }
 
 pub fn _main() !void {

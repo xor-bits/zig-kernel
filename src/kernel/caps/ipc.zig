@@ -125,13 +125,11 @@ pub const Receiver = struct {
             log.debug("replying {} from {*}", .{ msg, thread });
         // try thread.prelockExtras(@truncate(msg.extra));
 
-        const sender = thread.reply orelse {
+        const sender = thread.takeReply() orelse {
             @branchHint(.cold);
             // thread.unlockExtras(@truncate(msg.extra));
             return Error.InvalidCapability;
         };
-        std.debug.assert(sender.status == .waiting);
-        thread.reply = null;
 
         // copy over the reply message
         sender.trap.writeMessage(msg);
@@ -246,16 +244,20 @@ pub const Reply = struct {
     // TODO: this shouldn't be cloneable
     // FIXME: prevent reordering so that the offset would be same on all objects
     refcnt: abi.epoch.RefCnt = .{},
+    sender: *caps.Thread,
 
     /// only borrows `thread`
     pub fn init(thread: *caps.Thread) !*@This() {
         if (conf.LOG_OBJ_CALLS)
             log.info("Reply.init", .{});
 
-        _ = thread;
+        const sender = thread.takeReply() orelse {
+            @branchHint(.cold);
+            return Error.InvalidCapability;
+        };
 
         const obj: *@This() = try caps.slab_allocator.allocator().create(@This());
-        obj.* = .{};
+        obj.* = .{ .sender = sender };
 
         return obj;
     }

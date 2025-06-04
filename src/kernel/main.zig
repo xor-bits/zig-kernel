@@ -577,6 +577,9 @@ fn handle_syscall(
             trap.syscall_id = abi.sys.encode(handle);
         },
         .reply_reply => {
+            const reply = try thread.proc.getObject(caps.Reply, @truncate(trap.arg0));
+            defer reply.deinit();
+
             trap.syscall_id = abi.sys.encode(Error.Unimplemented);
         },
 

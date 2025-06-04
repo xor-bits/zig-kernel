@@ -71,6 +71,13 @@ pub const Thread = struct {
         return self;
     }
 
+    pub fn takeReply(self: *@This()) ?*Thread {
+        const sender = self.reply orelse return null;
+        std.debug.assert(sender.status == .waiting);
+        self.reply = null;
+        return sender;
+    }
+
     pub fn unhandledPageFault(
         self: *@This(),
         target_addr: usize,

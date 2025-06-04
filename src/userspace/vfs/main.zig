@@ -41,9 +41,14 @@ pub fn main() !void {
     });
 
     const recv = caps.Receiver{ .cap = export_vfs.handle };
-    const msg = try recv.recv();
-    log.info("vfs got: {}", .{msg});
-    try recv.reply(.{ .arg1 = 9, .arg3 = 7 });
+    var msg = try recv.recv();
+    var i: usize = 0;
+    while (true) : (i +%= 1) {
+        msg = try recv.replyRecv(msg);
+        if (i % 100_000 == 0) {
+            log.info("{} calls", .{i});
+        }
+    }
 }
 
 pub fn _main() !void {
