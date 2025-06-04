@@ -180,6 +180,7 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
     // just some few things need to be copied, but the page map(s) and stack(s) are already copied
 
     const id = std.meta.intToEnum(abi.sys.Id, trap.syscall_id) catch {
+        @branchHint(.cold);
         log.warn("invalid syscall: {x}", .{trap.syscall_id});
         trap.syscall_id = abi.sys.encode(abi.sys.Error.InvalidSyscall);
         return;
@@ -208,11 +209,6 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
         @branchHint(.cold);
         trap.syscall_id = abi.sys.encode(err);
     };
-
-    const thread_now = locals.current_thread.?;
-    if (thread_now.status == .stopped or thread_now.status == .waiting) {
-        proc.yield(trap);
-    }
 }
 
 fn handle_syscall(
@@ -527,6 +523,10 @@ fn handle_syscall(
 
             proc.stop(target_thread);
             trap.syscall_id = abi.sys.encode(0);
+
+            if (thread.status == .stopped) {
+                proc.yield(trap);
+            }
         },
         .thread_set_prio => {
             const target_thread = try thread.proc.getObject(caps.Thread, @truncate(trap.arg0));
@@ -680,6 +680,7 @@ fn handle_syscall(
         },
         .self_stop => {
             proc.stop(thread);
+            proc.yield(trap);
         },
     }
 }

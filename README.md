@@ -85,6 +85,7 @@ zig build run --prominent-compile-errors --summary none -freference-trace \
         - [x] multiple Frame caps to the same physical memory (for shared memory)
         - [x] lazy alloc
         - [x] map into multiple `Vmem`s
+        - [ ] use a multi-level tree to store the pages, like how hardware page tables do it
       - [x] Receiver
       - [x] Reply
       - [x] Sender
