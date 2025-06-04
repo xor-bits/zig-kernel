@@ -121,8 +121,13 @@ pub fn main() !void {
     // create all export resources
 
     for (servers.items) |*server| {
+        const manifest = (try server.bin.manifest()) orelse continue;
         var exports = try server.bin.exports();
         while (try exports.next()) |exp| {
+            log.info("found export '{s}' in '{s}' called '{s}'", .{
+                exp.val.getName(), manifest.getName(), exp.name,
+            });
+
             // FIXME: validate the data
             switch (exp.val.ty) {
                 .receiver => {},
@@ -157,6 +162,7 @@ pub fn main() !void {
     // grant all exports
 
     for (servers.items) |*server| {
+        const manifest = (try server.bin.manifest()) orelse continue;
         var exports = try server.bin.exports();
         while (try exports.next()) |exp| {
             // FIXME: validate the data
@@ -165,6 +171,10 @@ pub fn main() !void {
                 else => continue,
             }
 
+            log.info("granting export: '{s}' to '{s}'", .{
+                exp.val.getName(), manifest.getName(),
+            });
+
             const res = resources.getPtr(exp.val.name) orelse unreachable;
             std.debug.assert(res.given == 0);
             res.given += 1;
@@ -172,8 +182,54 @@ pub fn main() !void {
             // TODO: lower the root server privileges on the resource
             // to allow only creating new senders
 
-            _ = try server.proc.giveCap(res.handle);
+            const dupe = try abi.sys.handleDuplicate(res.handle);
+            const their_handle = try server.proc.giveCap(dupe);
+            try server.vmem.write(
+                exp.addr + @offsetOf(abi.loader.Resource, "handle"),
+                std.mem.asBytes(&their_handle)[0..],
+            );
         }
+    }
+
+    // grant all imports
+
+    for (servers.items) |*server| {
+        const manifest = (try server.bin.manifest()) orelse continue;
+        var imports = try server.bin.imports();
+        while (try imports.next()) |imp| {
+            // FIXME: validate the data
+            switch (imp.val.ty) {
+                .sender => {},
+                else => continue,
+            }
+
+            log.info("granting import: '{s}' to '{s}'", .{
+                imp.val.getName(), manifest.getName(),
+            });
+
+            const res = resources.getPtr(imp.val.name) orelse {
+                log.warn("unresolved import resource: '{s}'", .{imp.val.getName()});
+                continue;
+            };
+            res.given += 1;
+
+            log.info("new sender", .{});
+            const new_sender = try caps.Sender.create(caps.Receiver{ .cap = res.handle });
+
+            log.info("give cap {}", .{new_sender.cap});
+            const their_handle = try server.proc.giveCap(new_sender.cap);
+            log.info("write handle", .{});
+            try server.vmem.write(
+                imp.addr + @offsetOf(abi.loader.Resource, "handle"),
+                std.mem.asBytes(&their_handle)[0..],
+            );
+        }
+    }
+
+    // launch all servers
+
+    for (servers.items) |*server| {
+        try server.thread.start();
     }
 
     // log.info("finding manifest", .{});

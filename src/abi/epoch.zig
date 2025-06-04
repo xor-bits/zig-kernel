@@ -205,6 +205,10 @@ pub const RefCnt = struct {
 
         return true;
     }
+
+    pub fn load(self: *@This()) usize {
+        return self.refcnt.load(.seq_cst);
+    }
 };
 
 pub fn RefCntHandle(comptime T: type) type {

@@ -22,7 +22,7 @@ pub export var manifest = abi.loader.Manifest.new(.{
     .name = "vfs",
 });
 
-pub export var export_recv = abi.loader.Resource.new(.{
+pub export var export_vfs = abi.loader.Resource.new(.{
     .name = "hiillos.vfs.ipc",
     .ty = .receiver,
 });
@@ -36,7 +36,9 @@ var initfs_root: *DirNode = undefined;
 //
 
 pub fn main() !void {
-    log.info("hello from vfs", .{});
+    log.info("hello from vfs, export_vfs={}", .{
+        export_vfs.handle,
+    });
 }
 
 pub fn _main() !void {

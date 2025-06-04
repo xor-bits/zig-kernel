@@ -17,7 +17,7 @@ pub export var manifest = abi.loader.Manifest.new(.{
     .name = "pm",
 });
 
-pub export var export_recv = abi.loader.Resource.new(.{
+pub export var export_pm = abi.loader.Resource.new(.{
     .name = "hiillos.pm.ipc",
     .ty = .receiver,
 });
@@ -30,7 +30,10 @@ pub export var import_vfs = abi.loader.Resource.new(.{
 //
 
 pub fn main() !void {
-    log.info("hello from pm", .{});
+    log.info("hello from pm, export_pm={} import_vfs={}", .{
+        export_pm.handle,
+        import_vfs.handle,
+    });
 }
 
 pub fn _main() !void {
