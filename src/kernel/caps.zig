@@ -186,6 +186,13 @@ pub const CapabilitySlot = packed struct {
         return cap;
     }
 
+    /// returns an owned ref counted Capability, leaving the slot empty
+    pub fn take(self: *@This()) ?Capability {
+        const cap = self.getBorrow() orelse return null;
+        self.set(.{});
+        return cap;
+    }
+
     /// takes an owned ref counted Capability
     pub fn set(self: *@This(), new: Capability) void {
         std.debug.assert((@intFromPtr(new.ptr) >> 56) == 0xFF);
@@ -195,7 +202,7 @@ pub const CapabilitySlot = packed struct {
 };
 
 pub const Capability = struct {
-    ptr: *void,
+    ptr: *void = @ptrFromInt(0xFFFF_8000_0000_0000),
     type: abi.ObjectType = .null,
     // rights: abi.sys.Rights = .{},
 

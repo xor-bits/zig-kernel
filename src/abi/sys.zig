@@ -30,6 +30,8 @@ pub const Id = enum(usize) {
     proc_create,
     /// create a new handle to the current `Process`
     proc_self,
+    /// move a capability from the current process into the target process
+    proc_give_cap,
 
     /// create a new `Thread` object that handles a single thread within a single process
     thread_create,
@@ -447,6 +449,10 @@ pub fn procCreate(vmem: u32) Error!u32 {
 
 pub fn procSelf() Error!u32 {
     return @intCast(try syscall(.proc_self, .{}));
+}
+
+pub fn procGiveCap(proc: u32, cap: u32) Error!u32 {
+    return @intCast(try syscall(.proc_give_cap, .{ proc, cap }));
 }
 
 pub fn threadCreate(proc: u32) Error!u32 {

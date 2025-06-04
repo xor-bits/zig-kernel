@@ -344,6 +344,17 @@ fn handle_syscall(
             const handle = try thread.proc.pushCapability(caps.Capability.init(proc_self));
             trap.syscall_id = abi.sys.encode(handle);
         },
+        .proc_give_cap => {
+            const target_proc = try thread.proc.getObject(caps.Process, @truncate(trap.arg0));
+            defer target_proc.deinit();
+
+            const handle = try target_proc.pushCapability(.{});
+            const cap = try thread.proc.takeCapability(@truncate(trap.arg1));
+            const null_cap = target_proc.replaceCapability(handle, cap) catch unreachable;
+            std.debug.assert(null_cap == null);
+
+            trap.syscall_id = abi.sys.encode(handle);
+        },
 
         .thread_create => {
             const from_proc = try thread.proc.getObject(caps.Process, @truncate(trap.arg0));

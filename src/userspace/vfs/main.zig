@@ -22,14 +22,9 @@ pub export var manifest = abi.loader.Manifest.new(.{
     .name = "vfs",
 });
 
-pub export var import_recv = abi.loader.Resource.new(.{
-    .name = "hiillos.vfs.receiver",
+pub export var export_recv = abi.loader.Resource.new(.{
+    .name = "hiillos.vfs.ipc",
     .ty = .receiver,
-});
-
-pub export var export_send = abi.loader.Resource.new(.{
-    .name = "hiillos.vfs.sender",
-    .ty = .sender,
 });
 
 //

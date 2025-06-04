@@ -29,10 +29,7 @@ pub fn load(vmem: caps.Vmem, elf: []const u8) !usize {
     return entry;
 }
 
-pub fn spawn(vmem: caps.Vmem, proc: caps.Process, entry: u64) !void {
-    const thread = try caps.Thread.create(proc);
-    defer thread.close();
-
+pub fn prepareSpawn(vmem: caps.Vmem, thread: caps.Thread, entry: u64) !void {
     // map a stack
     const stack = try caps.Frame.create(1024 * 256);
     defer stack.close();
@@ -56,7 +53,13 @@ pub fn spawn(vmem: caps.Vmem, proc: caps.Process, entry: u64) !void {
     });
 
     log.info("spawn ip=0x{x} sp=0x{x}", .{ entry, stack_ptr });
+}
 
+pub fn spawn(vmem: caps.Vmem, proc: caps.Process, entry: u64) !void {
+    const thread = try caps.Thread.create(proc);
+    defer thread.close();
+
+    try prepareSpawn(vmem, thread, entry);
     try thread.start();
 }
 
@@ -224,6 +227,8 @@ pub const Elf = struct {
             pub const Next = struct {
                 val: T,
                 addr: usize,
+                /// lifetime tied to the ELF binary lifetime
+                name: []const u8,
             };
 
             pub fn next(self: *@This()) !?Next {
@@ -255,6 +260,7 @@ pub const Elf = struct {
                     return .{
                         .val = std.mem.bytesAsValue(T, bytes).*,
                         .addr = sym.st_value,
+                        .name = sym_name,
                     };
                 }
 

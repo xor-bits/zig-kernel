@@ -58,48 +58,122 @@ pub fn main() !void {
 
     try initfsd.init();
 
-    const boot_info = @as(*const volatile abi.BootInfo, @ptrFromInt(BOOT_INFO)).*;
-
-    var system: System = .{};
-    system.devices.set(.hpet, .{
-        .mmio_frame = boot_info.hpet,
-        .info_frame = .{},
-    });
-    system.devices.set(.framebuffer, .{
-        .mmio_frame = boot_info.framebuffer,
-        .info_frame = boot_info.framebuffer_info,
-    });
-    system.devices.set(.mcfg, .{
-        .mmio_frame = boot_info.mcfg,
-        .info_frame = boot_info.mcfg_info,
-    });
+    // const boot_info = @as(*const volatile abi.BootInfo, @ptrFromInt(BOOT_INFO)).*;
+    // var system: System = .{};
+    // system.devices.set(.hpet, .{
+    //     .mmio_frame = boot_info.hpet,
+    //     .info_frame = .{},
+    // });
+    // system.devices.set(.framebuffer, .{
+    //     .mmio_frame = boot_info.framebuffer,
+    //     .info_frame = boot_info.framebuffer_info,
+    // });
+    // system.devices.set(.mcfg, .{
+    //     .mmio_frame = boot_info.mcfg,
+    //     .info_frame = boot_info.mcfg_info,
+    // });
 
     try initfsd.wait();
 
-    var servers = std.ArrayList(abi.loader.Elf).init(abi.mem.slab_allocator);
-    try servers.append(try abi.loader.Elf.init(try binBytes("/sbin/pm")));
-    try servers.append(try abi.loader.Elf.init(try binBytes("/sbin/vfs")));
+    var servers = std.ArrayList(Server).init(abi.mem.slab_allocator);
+    try servers.append(.{ .bin = try abi.loader.Elf.init(try binBytes("/sbin/pm")) });
+    try servers.append(.{ .bin = try abi.loader.Elf.init(try binBytes("/sbin/vfs")) });
 
-    // create all export resources
-
-    // create all import resources
-
-    // launch all servers
+    // list all servers and their imports/exports
 
     for (servers.items) |*server| {
-        const manifest = (try server.manifest()).?;
+        const manifest = (try server.bin.manifest()).?;
 
         log.info("name: {s}", .{manifest.getName()});
         log.info("imports:", .{});
-        var imports = try server.imports();
+        var imports = try server.bin.imports();
         while (try imports.next()) |imp|
             log.info(" - {}({}) @0x{x}: {s}", .{ imp.val.ty, imp.val.handle, imp.addr, imp.val.getName() });
         log.info("exports:", .{});
-        var exports = try server.exports();
+        var exports = try server.bin.exports();
         while (try exports.next()) |exp|
             log.info(" - {}({}) @0x{x}: {s}", .{ exp.val.ty, exp.val.handle, exp.addr, exp.val.getName() });
+    }
 
-        try abi.loader.exec(server.data);
+    //
+
+    const Resource = struct {
+        handle: u32,
+        given: u32 = 0,
+    };
+
+    const StringContext = struct {
+        pub fn hash(_: @This(), s: [114]u8) u32 {
+            return std.array_hash_map.hashString(s[0..]);
+        }
+        pub fn eql(_: @This(), a: [114]u8, b: [114]u8, _: usize) bool {
+            return std.array_hash_map.eqlString(a[0..], b[0..]);
+        }
+    };
+
+    var resources = std.ArrayHashMap(
+        [114]u8,
+        Resource,
+        StringContext,
+        true,
+    ).init(abi.mem.slab_allocator);
+
+    // create all export resources
+
+    for (servers.items) |*server| {
+        var exports = try server.bin.exports();
+        while (try exports.next()) |exp| {
+            // FIXME: validate the data
+            switch (exp.val.ty) {
+                .receiver => {},
+                else => {
+                    log.warn("invalid resource export: '{s}'", .{exp.name});
+                    continue;
+                },
+            }
+
+            const result = try resources.getOrPut(exp.val.name);
+            if (result.found_existing) {
+                log.warn("export resource collision: '{s}'", .{exp.name});
+                continue;
+            }
+            result.value_ptr.* = Resource{
+                .handle = (try caps.Receiver.create()).cap,
+            };
+        }
+    }
+
+    // load all servers
+
+    for (servers.items) |*server| {
+        server.vmem = try caps.Vmem.create();
+        server.proc = try caps.Process.create(server.vmem);
+        server.thread = try caps.Thread.create(server.proc);
+
+        const entry = try server.bin.loadInto(server.vmem);
+        try abi.loader.prepareSpawn(server.vmem, server.thread, entry);
+    }
+
+    // grant all exports
+
+    for (servers.items) |*server| {
+        var exports = try server.bin.exports();
+        while (try exports.next()) |exp| {
+            // FIXME: validate the data
+            switch (exp.val.ty) {
+                .receiver => {},
+                else => continue,
+            }
+
+            const res = resources.getPtr(exp.val.name) orelse unreachable;
+            std.debug.assert(res.given == 0);
+            res.given += 1;
+
+            // TODO: lower the root server privileges on the resource
+            // to allow only creating new senders
+
+            _ = try server.proc.giveCap(res.handle);
+        }
     }
 
     // log.info("finding manifest", .{});
@@ -154,18 +228,14 @@ fn binBytes(path: []const u8) ![]const u8 {
 }
 
 const Server = struct {
-    /// server thread
+    /// server vmem
+    vmem: caps.Vmem = .{},
+    /// server proc
+    proc: caps.Process = .{},
+    /// server main thread
     thread: caps.Thread = .{},
     /// server ELF binary
-    bin: []const u8 = "",
-    /// receiver for making new senders to the server
-    receiver: caps.Receiver = .{},
-};
-
-const System = struct {
-    devices: std.EnumArray(abi.DeviceKind, abi.Device) = .initFill(.{}),
-
-    servers: std.EnumArray(abi.ServerKind, Server) = .initFill(.{}),
+    bin: abi.loader.Elf,
 };
 
 pub extern var __stack_end: u8;

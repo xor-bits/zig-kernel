@@ -17,18 +17,13 @@ pub export var manifest = abi.loader.Manifest.new(.{
     .name = "pm",
 });
 
-pub export var import_recv = abi.loader.Resource.new(.{
-    .name = "hiillos.pm.receiver",
+pub export var export_recv = abi.loader.Resource.new(.{
+    .name = "hiillos.pm.ipc",
     .ty = .receiver,
 });
 
-pub export var export_send = abi.loader.Resource.new(.{
-    .name = "hiillos.pm.sender",
-    .ty = .sender,
-});
-
 pub export var import_vfs = abi.loader.Resource.new(.{
-    .name = "hiillos.vfs.sender",
+    .name = "hiillos.vfs.ipc",
     .ty = .sender,
 });
 

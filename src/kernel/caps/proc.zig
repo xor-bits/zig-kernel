@@ -61,7 +61,7 @@ pub const Process = struct {
     }
 
     pub fn pushCapability(self: *@This(), cap: caps.Capability) Error!u32 {
-        std.debug.assert(cap.type != .null);
+        // std.debug.assert(cap.type != .null);
 
         // TODO: free list
 
@@ -100,9 +100,21 @@ pub const Process = struct {
         if (handle - 1 >= self.caps.items.len) return Error.InvalidCapability;
         const slot = &self.caps.items[handle - 1];
 
-        const cap = slot.get() orelse return Error.InvalidCapability;
-        slot.* = .{};
-        return cap;
+        return slot.take() orelse return Error.InvalidCapability;
+    }
+
+    pub fn replaceCapability(self: *@This(), handle: u32, cap: caps.Capability) Error!?caps.Capability {
+        if (handle == 0) return Error.InvalidCapability;
+
+        self.lock.lock();
+        defer self.lock.unlock();
+
+        if (handle - 1 >= self.caps.items.len) return Error.InvalidCapability;
+        const slot = &self.caps.items[handle - 1];
+
+        const old_cap = slot.take();
+        slot.set(cap);
+        return old_cap;
     }
 
     pub fn getObject(self: *@This(), comptime T: type, handle: u32) Error!*T {

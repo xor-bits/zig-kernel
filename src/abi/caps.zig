@@ -39,6 +39,10 @@ pub const Process = extern struct {
     pub fn close(this: @This()) void {
         sys.handleClose(this.cap);
     }
+
+    pub fn giveCap(this: @This(), handle: anytype) sys.Error!u32 {
+        return try sys.procGiveCap(this.cap, handle);
+    }
 };
 
 /// capability to manage a single thread control block (TCB)
