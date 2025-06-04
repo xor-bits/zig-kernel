@@ -232,6 +232,8 @@ pub const Error = error{
     ReadFault,
     WriteFault,
     ExecFault,
+    NullHandle,
+    BadHandle,
 
     UnknownError,
 };
@@ -283,6 +285,8 @@ fn encodeError(err: Error) usize {
         Error.ReadFault => 27,
         Error.WriteFault => 28,
         Error.ExecFault => 29,
+        Error.NullHandle => 30,
+        Error.BadHandle => 31,
 
         Error.UnknownError => std.debug.panic("unknown error shouldn't be encoded", .{}),
     }));
@@ -323,6 +327,8 @@ pub fn decode(v: usize) Error!usize {
         27 => Error.ReadFault,
         28 => Error.WriteFault,
         29 => Error.ExecFault,
+        30 => Error.NullHandle,
+        31 => Error.BadHandle,
 
         else => return Error.UnknownError,
     };

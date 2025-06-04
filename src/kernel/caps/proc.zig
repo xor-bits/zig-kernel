@@ -78,38 +78,38 @@ pub const Process = struct {
     }
 
     pub fn getCapability(self: *@This(), handle: u32) Error!caps.Capability {
-        if (handle == 0) return Error.InvalidCapability;
+        if (handle == 0) return Error.NullHandle;
 
         self.lock.lock();
         defer self.lock.unlock();
 
-        if (handle - 1 >= self.caps.items.len) return Error.InvalidCapability;
+        if (handle - 1 >= self.caps.items.len) return Error.BadHandle;
         const slot = &self.caps.items[handle - 1];
 
-        return slot.get() orelse return Error.InvalidCapability;
+        return slot.get() orelse return Error.BadHandle;
     }
 
     pub fn takeCapability(self: *@This(), handle: u32) Error!caps.Capability {
-        if (handle == 0) return Error.InvalidCapability;
+        if (handle == 0) return Error.NullHandle;
 
         // TODO: free list
 
         self.lock.lock();
         defer self.lock.unlock();
 
-        if (handle - 1 >= self.caps.items.len) return Error.InvalidCapability;
+        if (handle - 1 >= self.caps.items.len) return Error.BadHandle;
         const slot = &self.caps.items[handle - 1];
 
-        return slot.take() orelse return Error.InvalidCapability;
+        return slot.take() orelse return Error.BadHandle;
     }
 
     pub fn replaceCapability(self: *@This(), handle: u32, cap: caps.Capability) Error!?caps.Capability {
-        if (handle == 0) return Error.InvalidCapability;
+        if (handle == 0) return Error.NullHandle;
 
         self.lock.lock();
         defer self.lock.unlock();
 
-        if (handle - 1 >= self.caps.items.len) return Error.InvalidCapability;
+        if (handle - 1 >= self.caps.items.len) return Error.BadHandle;
         const slot = &self.caps.items[handle - 1];
 
         const old_cap = slot.take();
