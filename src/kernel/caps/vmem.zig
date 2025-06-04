@@ -558,6 +558,7 @@ pub const Vmem = struct {
             vmem.unmapFrame(page_vaddr) catch |err| {
                 log.warn("unmap err: {}, should be ok", .{err});
             };
+            arch.flushTlbAddr(page_vaddr.raw);
         }
     }
 
@@ -638,6 +639,7 @@ pub const Vmem = struct {
                     mapping.target.rights,
                     mapping.target.flags,
                 );
+                arch.flushTlbAddr(vaddr.raw);
 
                 return;
             },
@@ -657,6 +659,7 @@ pub const Vmem = struct {
                     mapping.target.rights,
                     mapping.target.flags,
                 );
+                arch.flushTlbAddr(vaddr.raw);
 
                 return;
 
