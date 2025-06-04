@@ -228,7 +228,7 @@ fn createInitfsTarGz(
 ) std.Build.LazyPath {
     const initfs_processes = .{
         "pm",
-        // "vfs",
+        "vfs",
         // "timer",
         // "hpet",
         // "input",

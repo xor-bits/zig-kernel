@@ -78,6 +78,13 @@ pub fn main() !void {
 
     var servers = std.ArrayList(abi.loader.Elf).init(abi.mem.slab_allocator);
     try servers.append(try abi.loader.Elf.init(try binBytes("/sbin/pm")));
+    try servers.append(try abi.loader.Elf.init(try binBytes("/sbin/vfs")));
+
+    // create all export resources
+
+    // create all import resources
+
+    // launch all servers
 
     for (servers.items) |*server| {
         const manifest = (try server.manifest()).?;

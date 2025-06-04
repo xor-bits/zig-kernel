@@ -18,7 +18,7 @@ pub fn installRuntime() void {
 }
 
 fn _start() callconv(.SysV) noreturn {
-    std.log.info("entry", .{});
+    // sys.log("entry");
     root.main() catch |err| {
         std.debug.panic("{}", .{err});
     };

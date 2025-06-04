@@ -22,12 +22,12 @@ pub export var import_recv = abi.loader.Resource.new(.{
     .ty = .receiver,
 });
 
-pub export var import_send = abi.loader.Resource.new(.{
+pub export var export_send = abi.loader.Resource.new(.{
     .name = "hiillos.pm.sender",
     .ty = .sender,
 });
 
-pub export var export_vfs = abi.loader.Resource.new(.{
+pub export var import_vfs = abi.loader.Resource.new(.{
     .name = "hiillos.vfs.sender",
     .ty = .sender,
 });

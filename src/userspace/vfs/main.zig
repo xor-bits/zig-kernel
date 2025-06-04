@@ -18,6 +18,22 @@ pub fn epoch_locals() *abi.epoch.Locals {
 
 //
 
+pub export var manifest = abi.loader.Manifest.new(.{
+    .name = "vfs",
+});
+
+pub export var import_recv = abi.loader.Resource.new(.{
+    .name = "hiillos.vfs.receiver",
+    .ty = .receiver,
+});
+
+pub export var export_send = abi.loader.Resource.new(.{
+    .name = "hiillos.vfs.sender",
+    .ty = .sender,
+});
+
+//
+
 var global_root: *DirNode = undefined;
 var fs_root: *DirNode = undefined;
 var initfs_root: *DirNode = undefined;
@@ -25,6 +41,10 @@ var initfs_root: *DirNode = undefined;
 //
 
 pub fn main() !void {
+    log.info("hello from vfs", .{});
+}
+
+pub fn _main() !void {
     log.info("hello from vfs", .{});
 
     const root = abi.RootProtocol.Client().init(abi.rt.root_ipc);
