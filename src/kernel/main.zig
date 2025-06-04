@@ -560,6 +560,9 @@ fn handle_syscall(
             trap.syscall_id = abi.sys.encode(0);
         },
         .receiver_reply_recv => {
+            var msg = trap.readMessage();
+            msg.cap_or_stamp = 0; // call doesnt get to know the Receiver capability id
+
             const recv = try thread.proc.getObject(caps.Receiver, msg.cap_or_stamp);
             defer recv.deinit();
 
@@ -586,10 +589,16 @@ fn handle_syscall(
             trap.syscall_id = abi.sys.encode(handle);
         },
         .sender_call => {
+            var msg = trap.readMessage();
+            trap.writeMessage(msg);
+
             const sender = try thread.proc.getObject(caps.Sender, @truncate(trap.arg0));
             defer sender.deinit();
 
-            sender.call(thread, trap);
+            // log.info("set stamp={}", .{sender.stamp});
+
+            msg.cap_or_stamp = sender.stamp;
+            try sender.call(thread, trap, msg);
         },
 
         .notify_create => {
@@ -665,7 +674,6 @@ fn handle_syscall(
         .self_stop => {
             proc.stop(thread);
         },
-        else => std.debug.panic("TODO: syscall {s}", .{@tagName(id)}),
     }
 }
 

@@ -76,7 +76,6 @@ pub const Receiver = struct {
         // stop the thread early to hold the lock for a shorter time
         thread.status = .waiting;
         thread.trap = trap.*;
-        arch.cpuLocal().current_thread = null;
 
         // check if a sender is already waiting
         self.queue_lock.lock();
@@ -105,6 +104,7 @@ pub const Receiver = struct {
         }
         self.queue_lock.unlock();
 
+        arch.cpuLocal().current_thread = null;
         return true;
     }
 
@@ -140,12 +140,9 @@ pub const Receiver = struct {
         return sender;
     }
 
-    pub fn replyRecv(self: *@This(), thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
+    pub fn replyRecv(self: *@This(), thread: *caps.Thread, trap: *arch.SyscallRegs, msg: abi.sys.Message) Error!void {
         if (conf.LOG_OBJ_CALLS)
             log.debug("Receiver.replyRecv", .{});
-
-        var msg = trap.readMessage();
-        msg.cap_or_stamp = 0; // call doesnt get to know the Receiver capability id
 
         const sender = try Receiver.replyGetSender(thread, msg);
         std.debug.assert(sender != thread);
@@ -171,7 +168,7 @@ pub const Sender = struct {
     recv: *Receiver,
     stamp: u32,
 
-    pub fn init(recv: *Receiver, stamp: usize) !*@This() {
+    pub fn init(recv: *Receiver, stamp: u32) !*@This() {
         errdefer recv.deinit(); // FIXME: errdefer in the caller instead
 
         if (conf.LOG_OBJ_CALLS)
@@ -198,12 +195,9 @@ pub const Sender = struct {
     }
 
     // block until the receiver is free, then switch to the receiver
-    pub fn call(self: *@This(), thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
+    pub fn call(self: *@This(), thread: *caps.Thread, trap: *arch.SyscallRegs, msg: abi.sys.Message) Error!void {
         if (conf.LOG_OBJ_CALLS)
             log.debug("Sender.call", .{});
-
-        var msg = trap.readMessage();
-        msg.cap_or_stamp = self.stamp;
 
         // prepare cap transfer
         if (conf.LOG_OBJ_CALLS)
@@ -211,17 +205,23 @@ pub const Sender = struct {
         // try thread.prelockExtras(@truncate(msg.extra)); // keep them locked even if a listener isn't ready
 
         // acquire a listener or switch threads
-        const listener = self.receiver.swap(null, .seq_cst) orelse {
+        const listener = self.recv.receiver.swap(null, .seq_cst) orelse {
             @branchHint(.cold);
 
             // first push the thread into the sleep queue
             if (conf.LOG_WAITING)
                 log.debug("IPC sleep {*}", .{thread});
-            self.queue_lock.lock();
-            self.queue.pushBack(thread);
-            self.queue_lock.unlock();
 
             thread.status = .waiting;
+            thread.trap = trap.*;
+            thread.trap.writeMessage(msg);
+            arch.cpuLocal().current_thread = null;
+
+            self.recv.queue_lock.lock();
+            self.recv.queue.pushBack(thread);
+            self.recv.queue_lock.unlock();
+
+            proc.switchNow(trap, null);
             return;
         };
         std.debug.assert(listener.status == .waiting);
@@ -237,6 +237,7 @@ pub const Sender = struct {
         // switch to the listener
         thread.status = .waiting;
         thread.trap = trap.*;
+
         proc.switchTo(trap, listener, thread);
     }
 };

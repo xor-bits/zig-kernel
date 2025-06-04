@@ -34,6 +34,10 @@ pub fn main() !void {
         export_pm.handle,
         import_vfs.handle,
     });
+
+    const sender = caps.Sender{ .cap = import_vfs.handle };
+    const reply = try sender.call(.{ .arg0 = 5, .arg2 = 6 });
+    log.info("pm got reply: {}", .{reply});
 }
 
 pub fn _main() !void {

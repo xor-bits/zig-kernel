@@ -39,6 +39,11 @@ pub fn main() !void {
     log.info("hello from vfs, export_vfs={}", .{
         export_vfs.handle,
     });
+
+    const recv = caps.Receiver{ .cap = export_vfs.handle };
+    const msg = try recv.recv();
+    log.info("vfs got: {}", .{msg});
+    try recv.reply(.{ .arg1 = 9, .arg3 = 7 });
 }
 
 pub fn _main() !void {
