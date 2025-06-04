@@ -54,6 +54,23 @@ pub fn NumberPrefix(comptime T: type, comptime base: Base) type {
     };
 }
 
+pub const Hex = struct {
+    bytes: []const u8,
+
+    pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        if (self.bytes.len == 0) return;
+
+        try std.fmt.format(writer, "{x:0>2}", .{self.bytes[0]});
+        for (self.bytes[1..]) |b| {
+            try std.fmt.format(writer, " {x:0>2}", .{b});
+        }
+    }
+};
+
+pub fn hex(bytes: []const u8) Hex {
+    return .{ .bytes = bytes };
+}
+
 /// print the offset of each field in hex
 pub fn debugFieldOffsets(comptime T: type) void {
     const s = @typeInfo(T).Struct;
