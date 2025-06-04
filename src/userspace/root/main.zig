@@ -73,14 +73,65 @@ pub fn main() !void {
     //     .info_frame = boot_info.mcfg_info,
     // });
 
+    var servers = std.ArrayList(Server).init(abi.mem.slab_allocator);
+
+    var resources = std.ArrayHashMap(
+        [114]u8,
+        Resource,
+        StringContext,
+        true,
+    ).init(abi.mem.slab_allocator);
+
     try initfsd.wait();
 
-    var servers = std.ArrayList(Server).init(abi.mem.slab_allocator);
+    // find all critical system servers in the initfs
+    try collectAllServers(&servers);
+
+    // create all export resources
+    try createAllExports(&servers, &resources);
+
+    // load all servers
+    try loadAllServers(&servers);
+
+    // grant all exports
+    try grantAllExports(&servers, &resources);
+
+    // grant all imports
+    try grantAllImports(&servers, &resources);
+
+    // launch all servers
+    for (servers.items) |*server| try server.thread.start();
+
+    // TODO: wait for crashed servers
+}
+
+fn collectAllServers(servers: *std.ArrayList(Server)) !void {
+    // virtual memory manager (system) (server)
+    // maps new processes to memory and manages page faults,
+    // heaps, lazy alloc, shared memory, swapping, etc.
+    // try servers.append(.{ .bin = try abi.loader.Elf.init(try binBytes("/sbin/vm")) });
+
+    // process manager (system) (server)
+    // manages unix-like process stuff like permissions, cli args, etc.
     try servers.append(.{ .bin = try abi.loader.Elf.init(try binBytes("/sbin/pm")) });
+
+    // resource manager (system) (server)
+    // manages ioports, irqs, device memory, etc. should also manage physical memory
+    // try servers.append(.{ .bin = try abi.loader.Elf.init(try binBytes("/sbin/rm")) });
+
+    // virtual filesystem (system) (server)
+    // manages the main VFS tree, everything mounted into it and file descriptors
     try servers.append(.{ .bin = try abi.loader.Elf.init(try binBytes("/sbin/vfs")) });
 
-    // list all servers and their imports/exports
+    // timer (system) (server)
+    // manages timer drivers and accepts sleep, sleepDeadline and timestamp calls
+    // try servers.append(.{ .bin = try abi.loader.Elf.init(try binBytes("/sbin/timer")) });
 
+    // input (system) (server)
+    // manages input drivers
+    // try servers.append(.{ .bin = try abi.loader.Elf.init(try binBytes("/sbin/input")) });
+
+    // debug print all servers and their imports/exports
     for (servers.items) |*server| {
         const manifest = (try server.bin.manifest()).?;
 
@@ -94,32 +145,12 @@ pub fn main() !void {
         while (try exports.next()) |exp|
             log.info(" - {}({}) @0x{x}: {s}", .{ exp.val.ty, exp.val.handle, exp.addr, exp.val.getName() });
     }
+}
 
-    //
-
-    const Resource = struct {
-        handle: u32,
-        given: u32 = 0,
-    };
-
-    const StringContext = struct {
-        pub fn hash(_: @This(), s: [114]u8) u32 {
-            return std.array_hash_map.hashString(s[0..]);
-        }
-        pub fn eql(_: @This(), a: [114]u8, b: [114]u8, _: usize) bool {
-            return std.array_hash_map.eqlString(a[0..], b[0..]);
-        }
-    };
-
-    var resources = std.ArrayHashMap(
-        [114]u8,
-        Resource,
-        StringContext,
-        true,
-    ).init(abi.mem.slab_allocator);
-
-    // create all export resources
-
+fn createAllExports(
+    servers: *std.ArrayList(Server),
+    resources: *std.ArrayHashMap([114]u8, Resource, StringContext, true),
+) !void {
     for (servers.items) |*server| {
         const manifest = (try server.bin.manifest()) orelse continue;
         var exports = try server.bin.exports();
@@ -147,9 +178,11 @@ pub fn main() !void {
             };
         }
     }
+}
 
-    // load all servers
-
+fn loadAllServers(
+    servers: *std.ArrayList(Server),
+) !void {
     for (servers.items) |*server| {
         server.vmem = try caps.Vmem.create();
         server.proc = try caps.Process.create(server.vmem);
@@ -158,9 +191,12 @@ pub fn main() !void {
         const entry = try server.bin.loadInto(server.vmem);
         try abi.loader.prepareSpawn(server.vmem, server.thread, entry);
     }
+}
 
-    // grant all exports
-
+fn grantAllExports(
+    servers: *std.ArrayList(Server),
+    resources: *std.ArrayHashMap([114]u8, Resource, StringContext, true),
+) !void {
     for (servers.items) |*server| {
         const manifest = (try server.bin.manifest()) orelse continue;
         var exports = try server.bin.exports();
@@ -190,9 +226,12 @@ pub fn main() !void {
             );
         }
     }
+}
 
-    // grant all imports
-
+fn grantAllImports(
+    servers: *std.ArrayList(Server),
+    resources: *std.ArrayHashMap([114]u8, Resource, StringContext, true),
+) !void {
     for (servers.items) |*server| {
         const manifest = (try server.bin.manifest()) orelse continue;
         var imports = try server.bin.imports();
@@ -213,67 +252,15 @@ pub fn main() !void {
             };
             res.given += 1;
 
-            log.info("new sender", .{});
             const new_sender = try caps.Sender.create(caps.Receiver{ .cap = res.handle });
 
-            log.info("give cap {}", .{new_sender.cap});
             const their_handle = try server.proc.giveCap(new_sender.cap);
-            log.info("write handle", .{});
             try server.vmem.write(
                 imp.addr + @offsetOf(abi.loader.Resource, "handle"),
                 std.mem.asBytes(&their_handle)[0..],
             );
         }
     }
-
-    // launch all servers
-
-    for (servers.items) |*server| {
-        try server.thread.start();
-    }
-
-    // log.info("finding manifest", .{});
-    // const index = std.mem.indexOf(u8, pm, std.mem.asBytes(&[4]usize{
-    //     0x5b9061e5c940d983,
-    //     0xc47d27b79d2c8bb9,
-    //     0x40299f5bb0c53988,
-    //     0x3e49068027c442fb,
-    // }));
-    // log.info("found manifest: {any}", .{index});
-
-    // const v = std.mem.bytesAsValue(Manifest, pm[index.?..]);
-    // log.info("found manifest: {s}", .{v.name});
-
-    // virtual memory manager (system) (server)
-    // maps new processes to memory and manages page faults,
-    // heaps, lazy alloc, shared memory, swapping, etc.
-    // system.servers.getPtr(.vm).bin = try binBytes("/sbin/vm");
-
-    // process manager (system) (server)
-    // manages unix-like process stuff like permissions, cli args, etc.
-    // system.servers.getPtr(.pm).bin = try binBytes("/sbin/pm");
-
-    // resource manager (system) (server)
-    // manages ioports, irqs, device memory, etc. should also manage physical memory
-    // system.servers.getPtr(.rm).bin = try binBytes("/sbin/rm");
-
-    // virtual filesystem (system) (server)
-    // manages the main VFS tree, everything mounted into it and file descriptors
-    // system.servers.getPtr(.vfs).bin = try binBytes("/sbin/vfs");
-
-    // timer (system) (server)
-    // manages timer drivers and accepts sleep, sleepDeadline and timestamp calls
-    // system.servers.getPtr(.timer).bin = try binBytes("/sbin/timer");
-
-    // input (system) (server)
-    // manages input drivers
-    // system.servers.getPtr(.input).bin = try binBytes("/sbin/input");
-
-    // const vm = system.servers.getPtr(.vm);
-    // vm.thread = try execVm(vm.bin, vm_sender);
-    // vm.endpoint = vm_sender.cap;
-
-    // TODO: wait for crashed servers
 }
 
 fn binBytes(path: []const u8) ![]const u8 {
@@ -282,6 +269,20 @@ fn binBytes(path: []const u8) ![]const u8 {
         return error.MissingSystem;
     });
 }
+
+const Resource = struct {
+    handle: u32,
+    given: u32 = 0,
+};
+
+const StringContext = struct {
+    pub fn hash(_: @This(), s: [114]u8) u32 {
+        return std.array_hash_map.hashString(s[0..]);
+    }
+    pub fn eql(_: @This(), a: [114]u8, b: [114]u8, _: usize) bool {
+        return std.array_hash_map.eqlString(a[0..], b[0..]);
+    }
+};
 
 const Server = struct {
     /// server vmem
@@ -293,6 +294,8 @@ const Server = struct {
     /// server ELF binary
     bin: abi.loader.Elf,
 };
+
+//
 
 pub extern var __stack_end: u8;
 pub extern var __thread_stack_end: u8;
