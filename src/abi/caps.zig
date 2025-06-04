@@ -128,7 +128,15 @@ pub const Vmem = extern struct {
     }
 
     pub fn unmap(this: @This(), vaddr: usize, length: usize) sys.Error!void {
-        return sys.vmemUnmap(this.cap, vaddr, length);
+        return try sys.vmemUnmap(this.cap, vaddr, length);
+    }
+
+    pub fn read(this: @This(), vaddr: usize, dst: []u8) sys.Error!void {
+        return try sys.vmemRead(this.cap, vaddr, dst);
+    }
+
+    pub fn write(this: @This(), vaddr: usize, src: []const u8) sys.Error!void {
+        return try sys.vmemWrite(this.cap, vaddr, src);
     }
 };
 
@@ -151,9 +159,13 @@ pub const Frame = extern struct {
         return try sys.frameGetSize(self.cap);
     }
 
-    // pub fn read(self: @This(), dst: []u8) sys.Error!void {}
+    pub fn read(this: @This(), offset_byte: usize, dst: []u8) sys.Error!void {
+        return try sys.frameRead(this.cap, offset_byte, dst);
+    }
 
-    // pub fn write(self: @This(), dst: []u8) sys.Error!void {}
+    pub fn write(this: @This(), offset_byte: usize, src: []const u8) sys.Error!void {
+        return try sys.frameWrite(this.cap, offset_byte, src);
+    }
 };
 
 /// capability to a MMIO physical memory region

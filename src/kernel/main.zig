@@ -274,6 +274,50 @@ fn handle_syscall(
 
             trap.syscall_id = abi.sys.encode(@as(u32, @intCast(frame.pages.len)));
         },
+        .frame_read => {
+            var vaddr = try addr.Virt.fromUser(trap.arg2);
+            var bytes = trap.arg3;
+            const frame = try thread.proc.getObject(caps.Frame, @truncate(trap.arg0));
+            defer frame.deinit();
+            var offset_bytes = trap.arg1;
+
+            // TODO: direct copy, instead of double copy
+            var buf: [0x1000]u8 = undefined;
+            while (bytes != 0) {
+                const limit = @min(0x1000, bytes);
+
+                try frame.read(offset_bytes, buf[0..limit]);
+                try thread.proc.vmem.write(vaddr, buf[0..limit]);
+
+                vaddr.raw += limit;
+                offset_bytes += limit;
+                bytes -= limit;
+            }
+
+            trap.syscall_id = abi.sys.encode(0);
+        },
+        .frame_write => {
+            var vaddr = try addr.Virt.fromUser(trap.arg2);
+            var bytes = trap.arg3;
+            const frame = try thread.proc.getObject(caps.Frame, @truncate(trap.arg0));
+            defer frame.deinit();
+            var offset_bytes = trap.arg1;
+
+            // TODO: direct copy, instead of double copy
+            var buf: [0x1000]u8 = undefined;
+            while (bytes != 0) {
+                const limit = @min(0x1000, bytes);
+
+                try thread.proc.vmem.read(vaddr, buf[0..limit]);
+                try frame.write(offset_bytes, buf[0..limit]);
+
+                vaddr.raw += limit;
+                offset_bytes += limit;
+                bytes -= limit;
+            }
+
+            trap.syscall_id = abi.sys.encode(0);
+        },
 
         .vmem_create => {
             const vmem = try caps.Vmem.init();
@@ -326,6 +370,50 @@ fn handle_syscall(
             defer vmem.deinit();
 
             try vmem.unmap(vaddr, pages);
+            trap.syscall_id = abi.sys.encode(0);
+        },
+        .vmem_read => {
+            var dst_vaddr = try addr.Virt.fromUser(trap.arg2);
+            var src_vaddr = try addr.Virt.fromUser(trap.arg1);
+            var bytes = trap.arg3;
+            const vmem = try thread.proc.getObject(caps.Vmem, @truncate(trap.arg0));
+            defer vmem.deinit();
+
+            // TODO: direct copy, instead of double copy
+            var buf: [0x1000]u8 = undefined;
+            while (bytes != 0) {
+                const limit = @min(0x1000, bytes);
+
+                try vmem.read(src_vaddr, buf[0..limit]);
+                try thread.proc.vmem.write(dst_vaddr, buf[0..limit]);
+
+                src_vaddr.raw += limit;
+                dst_vaddr.raw += limit;
+                bytes -= limit;
+            }
+
+            trap.syscall_id = abi.sys.encode(0);
+        },
+        .vmem_write => {
+            var src_vaddr = try addr.Virt.fromUser(trap.arg2);
+            var dst_vaddr = try addr.Virt.fromUser(trap.arg1);
+            var bytes = trap.arg3;
+            const vmem = try thread.proc.getObject(caps.Vmem, @truncate(trap.arg0));
+            defer vmem.deinit();
+
+            // TODO: direct copy, instead of double copy
+            var buf: [0x1000]u8 = undefined;
+            while (bytes != 0) {
+                const limit = @min(0x1000, bytes);
+
+                try thread.proc.vmem.read(src_vaddr, buf[0..limit]);
+                try vmem.write(dst_vaddr, buf[0..limit]);
+
+                src_vaddr.raw += limit;
+                dst_vaddr.raw += limit;
+                bytes -= limit;
+            }
+
             trap.syscall_id = abi.sys.encode(0);
         },
 
@@ -480,11 +568,19 @@ fn handle_syscall(
             try recv.replyRecv(thread, trap, msg);
         },
 
-        .reply_create => {},
-        .reply_reply => {},
+        .reply_create => {
+            unreachable;
+        },
+        .reply_reply => {
+            unreachable;
+        },
 
-        .sender_create => {},
-        .sender_call => {},
+        .sender_create => {
+            unreachable;
+        },
+        .sender_call => {
+            unreachable;
+        },
 
         .notify_create => {
             const notify = try caps.Notify.init();

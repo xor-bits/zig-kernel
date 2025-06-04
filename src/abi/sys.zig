@@ -15,6 +15,10 @@ pub const Id = enum(usize) {
     frame_create,
     /// get the `Frame` object's size in pages
     frame_get_size,
+    /// read from a `Frame` capability
+    frame_read,
+    /// write into a `Frame` capability
+    frame_write,
 
     /// create a new `Vmem` object that handles a single virtual address space
     vmem_create,
@@ -24,6 +28,10 @@ pub const Id = enum(usize) {
     vmem_map,
     /// unmap any virtual address space region from this `Vmem`
     vmem_unmap,
+    /// read from a `Vmem` capability
+    vmem_read,
+    /// write into a `Vmem` capability
+    vmem_write,
 
     /// create a new `Process` object that handles a single process
     /// capability handles are tied to processes
@@ -404,6 +412,14 @@ pub fn frameGetSize(frame: u32) Error!usize {
     return try syscall(.frame_get_size, .{frame}) * 0x1000;
 }
 
+pub fn frameRead(frame: u32, offset_byte: usize, dst: []u8) Error!void {
+    _ = try syscall(.frame_read, .{ frame, offset_byte, @intFromPtr(dst.ptr), dst.len });
+}
+
+pub fn frameWrite(frame: u32, offset_byte: usize, src: []const u8) Error!void {
+    _ = try syscall(.frame_write, .{ frame, offset_byte, @intFromPtr(src.ptr), src.len });
+}
+
 pub fn vmemCreate() Error!u32 {
     return @intCast(try syscall(.vmem_create, .{}));
 }
@@ -441,6 +457,14 @@ pub fn vmemUnmap(vmem: u32, vaddr: usize, length: usize) Error!void {
     _ = try syscall(.vmem_unmap, .{
         vmem, vaddr, length,
     });
+}
+
+pub fn vmemRead(vmem: u32, vaddr: usize, dst: []u8) Error!void {
+    _ = try syscall(.vmem_read, .{ vmem, vaddr, @intFromPtr(dst.ptr), dst.len });
+}
+
+pub fn vmemWrite(vmem: u32, vaddr: usize, src: []const u8) Error!void {
+    _ = try syscall(.vmem_write, .{ vmem, vaddr, @intFromPtr(src.ptr), src.len });
 }
 
 pub fn procCreate(vmem: u32) Error!u32 {
