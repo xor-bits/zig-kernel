@@ -222,7 +222,7 @@ fn handle_syscall(
 ) Error!void {
     const log = std.log.scoped(.syscall);
 
-    errdefer log.warn("syscall error", .{});
+    errdefer log.warn("syscall error {}", .{id});
 
     _ = locals;
 
@@ -549,23 +549,24 @@ fn handle_syscall(
             const recv = try thread.proc.getObject(caps.Receiver, @truncate(trap.arg0));
             defer recv.deinit();
 
+            trap.syscall_id = abi.sys.encode(0);
             recv.recv(thread, trap);
         },
         .receiver_reply => {
             var msg = trap.readMessage();
-            msg.cap_or_stamp = 0; // call doesnt get to know the Receiver capability id
 
+            msg.cap_or_stamp = 0; // call doesnt get to know the Receiver capability id
             try caps.Receiver.reply(thread, msg);
 
             trap.syscall_id = abi.sys.encode(0);
         },
         .receiver_reply_recv => {
             var msg = trap.readMessage();
-            msg.cap_or_stamp = 0; // call doesnt get to know the Receiver capability id
 
             const recv = try thread.proc.getObject(caps.Receiver, msg.cap_or_stamp);
             defer recv.deinit();
 
+            msg.cap_or_stamp = 0; // call doesnt get to know the Receiver capability id
             try recv.replyRecv(thread, trap, msg);
         },
 
