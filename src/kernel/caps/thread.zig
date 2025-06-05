@@ -149,8 +149,9 @@ pub const Thread = struct {
         defer dst.lock.unlock();
 
         for (0..count) |idx| {
-            const data = src.getExtra(@truncate(idx));
-            dst.setExtra(@truncate(idx), data) catch unreachable;
+            const val = src.extra_regs.get(@truncate(idx));
+            src.extra_regs.set(@truncate(idx), .{ .val = 0 });
+            dst.extra_regs.set(@truncate(idx), val);
         }
     }
 
