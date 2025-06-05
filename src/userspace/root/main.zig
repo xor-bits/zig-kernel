@@ -287,7 +287,7 @@ fn loadAllServers(
         server.proc = try caps.Process.create(server.vmem);
         server.thread = try caps.Thread.create(server.proc);
 
-        const entry = try server.bin.loadInto(server.vmem);
+        const entry = try server.bin.loadInto(caps.ROOT_SELF_VMEM, server.vmem);
         try abi.loader.prepareSpawn(server.vmem, server.thread, entry);
     }
 }

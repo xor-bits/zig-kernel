@@ -10,6 +10,7 @@ pub fn exec(elf: []const u8) !void {
     log.debug("new vmem", .{});
     const vmem = try caps.Vmem.create();
     defer vmem.close();
+
     log.debug("new proc", .{});
     const proc = try caps.Process.create(vmem);
     defer proc.close();
@@ -24,8 +25,11 @@ pub fn exec(elf: []const u8) !void {
 }
 
 pub fn load(vmem: caps.Vmem, elf: []const u8) !usize {
+    const self_vmem = try caps.Vmem.self();
+    defer self_vmem.close();
+
     var loader = try Elf.init(elf);
-    const entry = try loader.loadInto(vmem);
+    const entry = try loader.loadInto(self_vmem, vmem);
     return entry;
 }
 
@@ -142,7 +146,7 @@ pub const Elf = struct {
         return crc;
     }
 
-    pub fn loadInto(self: *@This(), vmem: caps.Vmem) !usize {
+    pub fn loadInto(self: *@This(), self_vmem: caps.Vmem, vmem: caps.Vmem) !usize {
         // TODO: syscall to write directly into a `caps.Vmem`
         // TODO: combine contiguous Frames
 
@@ -181,7 +185,7 @@ pub const Elf = struct {
             defer frame.close();
 
             // TODO: Frame.write instead of Vmem.map + memcpy + Vmem.unmap
-            const loader_tmp = try abi.caps.ROOT_SELF_VMEM.map(
+            const loader_tmp = try self_vmem.map(
                 frame,
                 0,
                 0,
@@ -199,7 +203,7 @@ pub const Elf = struct {
                 @ptrFromInt(loader_tmp + segment_data_bottom_offset),
             )[0..program_header.p_filesz], bytes);
 
-            try abi.caps.ROOT_SELF_VMEM.unmap(
+            try self_vmem.unmap(
                 loader_tmp,
                 size,
             );
