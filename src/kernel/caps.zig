@@ -29,10 +29,10 @@ pub const Receiver = caps_ipc.Receiver;
 pub const Reply = caps_ipc.Reply;
 pub const Sender = caps_ipc.Sender;
 pub const Notify = caps_ipc.Notify;
-// pub const X86IoPortAllocator = caps_x86.X86IoPortAllocator;
-// pub const X86IoPort = caps_x86.X86IoPort;
-// pub const X86IrqAllocator = caps_x86.X86IrqAllocator;
-// pub const X86Irq = caps_x86.X86Irq;
+pub const X86IoPortAllocator = caps_x86.X86IoPortAllocator;
+pub const X86IoPort = caps_x86.X86IoPort;
+pub const X86IrqAllocator = caps_x86.X86IrqAllocator;
+pub const X86Irq = caps_x86.X86Irq;
 
 pub const HalVmem = caps_x86.Vmem;
 
@@ -46,7 +46,6 @@ pub fn init() !void {
     const page = pmem.allocChunk(.@"4KiB") orelse return error.OutOfMemory;
     readonly_zero_page.store(page.toParts().page, .release);
 
-    debugType(AtomicCapabilitySlot);
     debugType(CapabilitySlot);
     debugType(Capability);
     debugType(Generic);
@@ -55,103 +54,15 @@ pub fn init() !void {
     debugType(Frame);
     debugType(Vmem);
     debugType(Vmem.Mapping);
-    // debugType(Object);
-    // debugType(Memory);
-    // debugType(Frame);
-    // debugType(DeviceFrame);
-    // debugType(Thread);
-    // debugType(Vmem);
-    // debugType(Receiver);
-    // debugType(Sender);
-    // debugType(Reply);
-    // debugType(Notify);
-    // debugType(X86IoPortAllocator);
-    // debugType(X86IoPort);
-    // debugType(X86IrqAllocator);
-    // debugType(X86Irq);
+    debugType(X86IoPortAllocator);
+    debugType(X86IoPort);
+    debugType(X86IrqAllocator);
+    debugType(X86Irq);
 }
 
 pub var obj_accesses: std.EnumArray(abi.ObjectType, std.atomic.Value(usize)) = .initFill(.init(0));
 
 //
-
-pub const AtomicCapabilitySlot = struct {
-    /// the actual kernel object data, possibly shared between multiple capabilities
-    object: std.atomic.Value(ObjectPointer) = .init(.{}),
-
-    const ObjectPointer = packed struct {
-        /// object pointer's low 56 bits, the upper 8 (actually 17) bits are always 1 in kernel space
-        ptr: u56 = 0,
-        /// object type
-        type: abi.ObjectType = .null,
-
-        fn fromHandle(handle: Capability) @This() {
-            std.debug.assert((@intFromPtr(handle.ptr) >> 56) == 0xFF);
-
-            return .{
-                .ptr = @truncate(@intFromPtr(handle.ptr)),
-                .type = handle.type,
-            };
-        }
-
-        fn getHandle(self: *const @This()) ?Capability {
-            if (self.type == .null) return null;
-
-            return .{
-                .ptr = @ptrFromInt(@as(u64, self.ptr) | 0xFF00_0000_0000_0000),
-                .type = self.type,
-            };
-        }
-    };
-
-    const Self = @This();
-
-    pub fn load(self: *Self) ?Capability {
-        const guard = abi.epoch.pin();
-        defer abi.epoch.unpin(guard);
-
-        const object = self.object.load(.monotonic);
-        const handle = object.getHandle() orelse return null;
-        handle.refcnt().inc();
-
-        return handle;
-    }
-
-    pub fn store(self: *Self, handle: Capability) !void {
-        const guard = abi.epoch.pin();
-        defer abi.epoch.unpin(guard);
-
-        const new_object = ObjectPointer.fromHandle(handle);
-
-        const old_object = self.object.swap(new_object, .seq_cst);
-        const old_handle = old_object.getHandle() orelse return;
-        if (!old_handle.refcnt().dec()) return;
-
-        switch (old_handle.type) {
-            .frame => try abi.epoch.deferCtxFunc(
-                guard,
-                old_handle.as(Frame).?,
-                Frame.deinit,
-            ),
-            .vmem => try abi.epoch.deferCtxFunc(
-                guard,
-                old_handle.as(Vmem).?,
-                Vmem.deinit,
-            ),
-            .process => try abi.epoch.deferCtxFunc(
-                guard,
-                old_handle.as(Process).?,
-                Process.deinit,
-            ),
-            .thread => try abi.epoch.deferCtxFunc(
-                guard,
-                old_handle.as(Thread).?,
-                Thread.deinit,
-            ),
-            else => unreachable,
-        }
-    }
-};
 
 pub const CapabilitySlot = packed struct {
     ptr: u56 = 0,
@@ -245,6 +156,22 @@ pub const Capability = struct {
                 .ptr = @ptrCast(obj),
                 .type = .notify,
             },
+            *X86IoPortAllocator => .{
+                .ptr = @ptrCast(obj),
+                .type = .x86_ioport_allocator,
+            },
+            *X86IoPort => .{
+                .ptr = @ptrCast(obj),
+                .type = .x86_ioport,
+            },
+            *X86IrqAllocator => .{
+                .ptr = @ptrCast(obj),
+                .type = .x86_irq_allocator,
+            },
+            *X86Irq => .{
+                .ptr = @ptrCast(obj),
+                .type = .x86_irq,
+            },
             else => @compileError("invalid type"),
         };
     }
@@ -259,6 +186,10 @@ pub const Capability = struct {
             .reply => self.as(Reply).?.deinit(),
             .sender => self.as(Sender).?.deinit(),
             .notify => self.as(Notify).?.deinit(),
+            .x86_ioport_allocator => self.as(X86IoPortAllocator).?.deinit(),
+            .x86_ioport => self.as(X86IoPort).?.deinit(),
+            .x86_irq_allocator => self.as(X86IrqAllocator).?.deinit(),
+            .x86_irq => self.as(X86Irq).?.deinit(),
             else => unreachable,
         }
     }
@@ -273,6 +204,10 @@ pub const Capability = struct {
             Reply => .reply,
             Sender => .sender,
             Notify => .notify,
+            X86IoPortAllocator => .x86_ioport_allocator,
+            X86IoPort => .x86_ioport,
+            X86IrqAllocator => .x86_irq_allocator,
+            X86Irq => .x86_irq,
             else => @compileError("invalid type"),
         };
 
@@ -291,18 +226,27 @@ pub const Capability = struct {
             0 != @offsetOf(Receiver, "refcnt") or
             0 != @offsetOf(Reply, "refcnt") or
             0 != @offsetOf(Sender, "refcnt") or
-            0 != @offsetOf(Notify, "refcnt"))
+            0 != @offsetOf(Notify, "refcnt") or
+            0 != @offsetOf(X86IoPortAllocator, "refcnt") or
+            0 != @offsetOf(X86IoPort, "refcnt") or
+            0 != @offsetOf(X86IrqAllocator, "refcnt") or
+            0 != @offsetOf(X86Irq, "refcnt"))
         {
+            log.warn("slow kernel object refcnt access", .{});
             // FIXME: prevent reordering so that the offset would be same on all objects
             return switch (self.type) {
                 .frame => &self.as(Frame).?.ptr.refcnt,
                 .vmem => &self.as(Vmem).?.ptr.refcnt,
                 .process => &self.as(Process).?.ptr.refcnt,
                 .thread => &self.as(Thread).?.ptr.refcnt,
-                .receiver => self.as(Receiver).?.ptr.refcnt,
-                .reply => self.as(Reply).?.ptr.refcnt,
-                .sender => self.as(Sender).?.ptr.refcnt,
-                .notify => self.as(Notify).?.ptr.refcnt,
+                .receiver => &self.as(Receiver).?.ptr.refcnt,
+                .reply => &self.as(Reply).?.ptr.refcnt,
+                .sender => &self.as(Sender).?.ptr.refcnt,
+                .notify => &self.as(Notify).?.ptr.refcnt,
+                .x86_ioport_allocator => &self.as(X86IoPortAllocator).?.ptr.refcnt,
+                .x86_ioport => &self.as(X86IoPort).?.ptr.refcnt,
+                .x86_irq_allocator => &self.as(X86IrqAllocator).?.ptr.refcnt,
+                .x86_irq => &self.as(X86Irq).?.ptr.refcnt,
             };
         }
 

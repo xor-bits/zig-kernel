@@ -55,7 +55,31 @@ var ioapic_lapic_lock: spin.Mutex = .{};
 //
 
 // pub const Handler = std.atomic.Value(?*caps.Notify);
-pub const Handler = std.atomic.Value(?*void);
+pub const Handler = struct {
+    lock: spin.Mutex = .newLocked(),
+    notify: ?*caps.Notify = null,
+
+    pub fn load(self: *@This()) ?*caps.Notify {
+        self.lock.lock();
+        defer self.lock.unlock();
+
+        const notify = self.notify orelse return null;
+        if (notify.refcnt.isUnique()) {
+            @branchHint(.cold);
+
+            // this handler is the only one holding the Notify cap
+            // so notifying it does nothing and its unobtainable
+            // => free it
+            notify.deinit();
+
+            self.notify = null;
+            return null;
+        }
+
+        notify.refcnt.inc();
+        return notify;
+    }
+};
 
 pub const ApicRegs = union(enum) {
     xapic: *LocalXApicRegs,
@@ -263,7 +287,9 @@ pub fn interProcessorInterrupt(target_lapic_id: u32, vector: u8) void {
 
 /// source IRQ would be the source like keyboard at 1
 /// destination IRQ would be the IDT handler index
-pub fn registerExternalInterrupt(source_irq: u8, notify: *caps.Notify) ?void {
+pub fn registerExternalInterrupt(
+    source_irq: u8,
+) !?*caps.Notify {
     // log.info("registering interrupt {}", .{source_irq});
 
     ioapic_lapic_lock.lock();
@@ -273,7 +299,8 @@ pub fn registerExternalInterrupt(source_irq: u8, notify: *caps.Notify) ?void {
 
     // FIXME: read the overrides
 
-    const lapic_id, const handler, const i = findUsableHandler() orelse return null;
+    const lapic_id, const notify, const i = try findUsableHandler() orelse return null;
+    errdefer notify.deinit();
     const ioapic, const low_index = findUsableRedirectEntry(source_irq) orelse return null;
     const high_index = low_index + 1;
 
@@ -295,23 +322,43 @@ pub fn registerExternalInterrupt(source_irq: u8, notify: *caps.Notify) ?void {
 
     low, high = @as([2]u32, @bitCast(val));
 
-    handler.store(notify, .seq_cst);
-
     ioapicWrite(ioapic, high_index, high);
     ioapicWrite(ioapic, low_index, low);
+
+    return notify;
 }
 
 /// `ioapic_lapic_lock` has to be held
-fn findUsableHandler() ?struct { u4, *Handler, u8 } {
+fn findUsableHandler() !?struct { u4, *caps.Notify, u8 } {
     for (ioapic_lapics.items) |lapic| {
         for (lapic.handlers[0..], 0..) |*handler, i| {
-            // modifying any handler is done behind the `ioapic_lapic_lock`
-            // the 'atomicity' is only for setting the handler
-            // and the handler running at the same time
+            handler.lock.lock();
+            defer handler.lock.unlock();
 
-            if (handler.load(.monotonic) != null) continue;
+            if (handler.notify != null) continue;
 
-            return .{ lapic.lapic_id, handler, @truncate(i) };
+            const notify = try caps.Notify.init();
+            handler.notify = notify;
+            notify.refcnt.inc();
+
+            return .{ lapic.lapic_id, notify, @truncate(i) };
+        }
+    }
+
+    for (ioapic_lapics.items) |lapic| {
+        for (lapic.handlers[0..], 0..) |*handler, i| {
+            handler.lock.lock();
+            defer handler.lock.unlock();
+
+            const notify = handler.notify orelse b: {
+                const notify = try caps.Notify.init();
+                handler.notify = notify;
+                break :b notify;
+            };
+
+            notify.refcnt.inc();
+
+            return .{ lapic.lapic_id, notify, @truncate(i) };
         }
     }
 

@@ -175,6 +175,7 @@ fn createAllExports(
             }
             result.value_ptr.* = Resource{
                 .handle = (try caps.Receiver.create()).cap,
+                .type = .receiver,
             };
         }
     }
@@ -270,9 +271,10 @@ fn binBytes(path: []const u8) ![]const u8 {
     });
 }
 
-const Resource = struct {
+const Resource = packed struct {
     handle: u32,
-    given: u32 = 0,
+    given: u24 = 0,
+    type: abi.ObjectType,
 };
 
 const StringContext = struct {

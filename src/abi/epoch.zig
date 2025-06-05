@@ -209,6 +209,10 @@ pub const RefCnt = struct {
     pub fn load(self: *@This()) usize {
         return self.refcnt.load(.seq_cst);
     }
+
+    pub fn isUnique(self: *@This()) bool {
+        return self.refcnt.load(.acquire) == 1;
+    }
 };
 
 pub fn RefCntHandle(comptime T: type) type {

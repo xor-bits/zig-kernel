@@ -1050,8 +1050,10 @@ pub const Idt = extern struct {
                     // log.info("extra interrupt i=0x{x}", .{i + IRQ_AVAIL_LOW});
                     defer apic.eoi();
 
-                    // const notify = cpuLocal().interrupt_handlers[i].load(.acquire) orelse return;
-                    // _ = notify.notify(0);
+                    const notify = cpuLocal().interrupt_handlers[i].load() orelse return;
+                    defer notify.deinit();
+
+                    _ = notify.notify();
                 }
             }).asInt();
         }

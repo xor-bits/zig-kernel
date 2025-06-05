@@ -292,14 +292,6 @@ pub const X86IoPortAllocator = extern struct {
     cap: u32 = 0,
 
     pub const Type: abi.ObjectType = .x86_ioport_allocator;
-
-    pub fn alloc(self: @This(), port: u16) sys.Error!X86IoPort {
-        return .{ .cap = try sys.x86IoPortAllocatorAlloc(self.cap, port) };
-    }
-
-    pub fn clone(self: @This()) sys.Error!@This() {
-        return .{ .cap = try sys.x86IoPortAllocatorClone(self.cap) };
-    }
 };
 
 /// x86 specific capability that gives access to one IO port
@@ -307,6 +299,11 @@ pub const X86IoPort = extern struct {
     cap: u32 = 0,
 
     pub const Type: abi.ObjectType = .x86_ioport;
+
+    pub fn create(alloc: X86IoPortAllocator, port: u16) sys.Error!@This() {
+        const cap = try sys.x86IoPortCreate(alloc.cap, port);
+        return .{ .cap = cap };
+    }
 
     pub fn inb(self: @This()) sys.Error!u8 {
         return sys.x86IoPortInb(self.cap);
@@ -322,14 +319,6 @@ pub const X86IrqAllocator = extern struct {
     cap: u32 = 0,
 
     pub const Type: abi.ObjectType = .x86_irq_allocator;
-
-    pub fn alloc(self: @This(), global_system_interrupt: u8) sys.Error!X86Irq {
-        return .{ .cap = try sys.x86IrqAllocatorAlloc(self.cap, global_system_interrupt) };
-    }
-
-    pub fn clone(self: @This()) sys.Error!@This() {
-        return .{ .cap = try sys.x86IrqAllocatorClone(self.cap) };
-    }
 };
 
 /// x86 specific capability that gives access to one IRQ (= interrupt request)
@@ -338,11 +327,13 @@ pub const X86Irq = extern struct {
 
     pub const Type: abi.ObjectType = .x86_irq;
 
-    pub fn subscribe(self: @This(), notify: Notify) sys.Error!void {
-        return sys.x86IrqSubscribe(self.cap, notify.cap);
+    pub fn create(alloc: X86IrqAllocator, irq: u8) sys.Error!@This() {
+        const cap = try sys.x86IrqCreate(alloc.cap, irq);
+        return .{ .cap = cap };
     }
 
-    pub fn unsubscribe(self: @This(), notify: Notify) sys.Error!void {
-        return sys.x86IrqUnsubscribe(self.cap, notify.cap);
+    pub fn subscribe(self: @This()) sys.Error!Notify {
+        const cap = try sys.x86IrqSubscribe(self.cap);
+        return .{ .cap = cap };
     }
 };

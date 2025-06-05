@@ -451,134 +451,176 @@ fn isEmpty(entries: *volatile [512]Entry) bool {
 //
 
 pub const X86IoPortAllocator = struct {
-    pub fn init(_: caps.Ref(@This())) void {}
+    // FIXME: prevent reordering so that the offset would be same on all objects
+    refcnt: abi.epoch.RefCnt = .{},
 
-    pub fn alloc(_: ?abi.ChunkSize) Error!addr.Phys {
-        return Error.InvalidArgument;
+    pub fn init() !*@This() {
+        if (conf.LOG_OBJ_CALLS)
+            log.info("X86IoPortAllocator.init", .{});
+
+        const obj: *@This() = try caps.slab_allocator.allocator().create(@This());
+        obj.* = .{};
+
+        return obj;
     }
 
-    pub fn call(_: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
-        const call_id = std.meta.intToEnum(abi.sys.X86IoPortAllocatorCallId, trap.arg1) catch {
-            return Error.InvalidArgument;
-        };
+    pub fn deinit(self: *@This()) void {
+        if (!self.refcnt.dec()) return;
 
         if (conf.LOG_OBJ_CALLS)
-            log.debug("x86_ioport_allocator call \"{s}\"", .{@tagName(call_id)});
+            log.info("X86IoPortAllocator.deinit", .{});
 
-        switch (call_id) {
-            .alloc => {
-                const port: u16 = @truncate(trap.arg2);
-                try allocPort(&port_bitmap, port);
+        caps.slab_allocator.allocator().destroy(self);
+    }
 
-                const cap_id = caps.pushCapability((caps.Ref(X86IoPort){ .paddr = .fromInt(port) }).object(thread));
-                trap.arg1 = cap_id;
-            },
-            .clone => {
-                const cap_id = caps.pushCapability((caps.Ref(X86IoPortAllocator){ .paddr = .fromInt(0) }).object(thread));
-                trap.arg1 = cap_id;
-            },
-        }
+    pub fn clone(self: *@This()) *@This() {
+        if (conf.LOG_OBJ_CALLS)
+            log.info("X86IoPortAllocator.clone", .{});
+
+        self.refcnt.inc();
+        return self;
     }
 };
 
+// TODO: use IOPB in the TSS for this
 pub const X86IoPort = struct {
-    pub fn init(_: caps.Ref(@This())) void {}
+    // FIXME: prevent reordering so that the offset would be same on all objects
+    refcnt: abi.epoch.RefCnt = .{},
 
-    pub fn alloc(_: ?abi.ChunkSize) Error!addr.Phys {
-        return Error.InvalidArgument;
+    port: u16,
+
+    // only borrows the `*X86IoPortAllocator`
+    pub fn init(_: *X86IoPortAllocator, port: u16) Error!*@This() {
+        if (conf.LOG_OBJ_CALLS)
+            log.info("X86IoPort.init", .{});
+
+        try allocPort(&port_bitmap, port);
+
+        const obj: *@This() = try caps.slab_allocator.allocator().create(@This());
+        obj.* = .{ .port = port };
+
+        return obj;
     }
 
-    pub fn call(port: addr.Phys, _: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
-        const call_id = std.meta.intToEnum(abi.sys.X86IoPortCallId, trap.arg1) catch {
-            return Error.InvalidArgument;
-        };
+    pub fn deinit(self: *@This()) void {
+        if (!self.refcnt.dec()) return;
 
         if (conf.LOG_OBJ_CALLS)
-            log.debug("x86_ioport call \"{s}\"", .{@tagName(call_id)});
+            log.info("X86IoPort.deinit", .{});
 
-        switch (call_id) {
-            .inb => {
-                trap.arg1 = arch.inb(@truncate(port.raw));
-            },
-            .outb => {
-                arch.outb(@truncate(port.raw), @truncate(trap.arg2));
-            },
-            // .free
-        }
+        freePort(&port_bitmap, self.port) catch
+            unreachable;
+
+        caps.slab_allocator.allocator().destroy(self);
+    }
+
+    pub fn clone(self: *@This()) *@This() {
+        if (conf.LOG_OBJ_CALLS)
+            log.info("X86IoPort.clone", .{});
+
+        self.refcnt.inc();
+        return self;
+    }
+
+    // TODO: IOPB
+    // pub fn enable() void {}
+    // pub fn disable() void {}
+
+    pub fn inb(self: *@This()) u32 {
+        const byte = arch.inb(self.port);
+
+        if (conf.LOG_OBJ_CALLS)
+            log.info("X86IoPort.inb port={} byte={}", .{ self.port, byte });
+
+        return byte;
+    }
+
+    pub fn outb(self: *@This(), byte: u8) void {
+        if (conf.LOG_OBJ_CALLS)
+            log.info("X86IoPort.outb port={} byte={}", .{ self.port, byte });
+
+        arch.outb(self.port, byte);
     }
 };
 
 pub const X86IrqAllocator = struct {
-    pub fn init(_: caps.Ref(@This())) void {}
+    // FIXME: prevent reordering so that the offset would be same on all objects
+    refcnt: abi.epoch.RefCnt = .{},
 
-    pub fn alloc(_: ?abi.ChunkSize) Error!addr.Phys {
-        return Error.InvalidArgument;
+    pub fn init() !*@This() {
+        if (conf.LOG_OBJ_CALLS)
+            log.info("X86IrqAllocator.init", .{});
+
+        const obj: *@This() = try caps.slab_allocator.allocator().create(@This());
+        obj.* = .{};
+
+        return obj;
     }
 
-    pub fn call(_: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
-        const call_id = std.meta.intToEnum(abi.sys.X86IrqAllocatorCallId, trap.arg1) catch {
-            return Error.InvalidArgument;
-        };
+    pub fn deinit(self: *@This()) void {
+        if (!self.refcnt.dec()) return;
 
         if (conf.LOG_OBJ_CALLS)
-            log.debug("x86_irq_allocator call \"{s}\"", .{@tagName(call_id)});
+            log.info("X86IrqAllocator.deinit", .{});
 
-        switch (call_id) {
-            .alloc => {
-                const irq: u8 = @truncate(trap.arg2);
-                try allocIrq(&irq_bitmap, irq);
+        caps.slab_allocator.allocator().destroy(self);
+    }
 
-                const cap_id = caps.pushCapability((caps.Ref(X86Irq){ .paddr = .fromInt(irq) }).object(thread));
-                trap.arg1 = cap_id;
-            },
-            .clone => {
-                const cap_id = caps.pushCapability((caps.Ref(X86IrqAllocator){ .paddr = .fromInt(0) }).object(thread));
-                trap.arg1 = cap_id;
-            },
-        }
+    pub fn clone(self: *@This()) *@This() {
+        if (conf.LOG_OBJ_CALLS)
+            log.info("X86IrqAllocator.clone", .{});
+
+        self.refcnt.inc();
+        return self;
     }
 };
 
 pub const X86Irq = struct {
-    pub fn init(_: caps.Ref(@This())) void {}
+    // FIXME: prevent reordering so that the offset would be same on all objects
+    refcnt: abi.epoch.RefCnt = .{},
 
-    pub fn alloc(_: ?abi.ChunkSize) Error!addr.Phys {
-        return Error.InvalidArgument;
+    irq: u8,
+
+    // only borrows the X86IrqAllocator
+    pub fn init(_: *X86IrqAllocator, irq: u8) Error!*@This() {
+        if (conf.LOG_OBJ_CALLS)
+            log.info("X86Irq.init", .{});
+
+        try allocIrq(&irq_bitmap, irq);
+
+        const obj: *@This() = try caps.slab_allocator.allocator().create(@This());
+        obj.* = .{ .irq = irq };
+
+        return obj;
     }
 
-    pub fn call(_irq: addr.Phys, thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
-        const call_id = std.meta.intToEnum(abi.sys.X86IrqCallId, trap.arg1) catch {
-            return Error.InvalidArgument;
-        };
+    pub fn deinit(self: *@This()) void {
+        if (!self.refcnt.dec()) return;
 
         if (conf.LOG_OBJ_CALLS)
-            log.debug("x86_irq call \"{s}\"", .{@tagName(call_id)});
+            log.info("X86Irq.deinit", .{});
 
-        const irq: u8 = @truncate(_irq.raw);
+        freeIrq(&irq_bitmap, self.irq) catch
+            unreachable;
 
-        switch (call_id) {
-            .subscribe => {
-                const notify_obj = try caps.getCapability(thread, @truncate(trap.arg2));
-                defer notify_obj.lock.unlock();
+        caps.slab_allocator.allocator().destroy(self);
+    }
 
-                const notify = try notify_obj.as(caps.Notify);
+    pub fn clone(self: *@This()) *@This() {
+        if (conf.LOG_OBJ_CALLS)
+            log.info("X86Irq.clone", .{});
 
-                const this_obj = caps.getCapabilityLocked(@truncate(trap.arg0));
+        self.refcnt.inc();
+        return self;
+    }
 
-                if (notify_obj.next != 0) return Error.NotifyAlreadySubscribed;
-                if (this_obj.next != 0) return Error.IrqAlreadySubscribed;
+    pub fn subscribe(self: *@This()) Error!*caps.Notify {
+        if (conf.LOG_OBJ_CALLS)
+            log.info("X86Irq.subscribe", .{});
 
-                apic.registerExternalInterrupt(irq, notify.ptr()) orelse {
-                    return Error.TooManyIrqs;
-                };
-
-                notify_obj.next = @truncate(trap.arg0);
-                this_obj.next = @truncate(trap.arg2);
-            },
-            .unsubscribe => {
-                return Error.Unimplemented;
-            },
-        }
+        return try apic.registerExternalInterrupt(self.irq) orelse {
+            return Error.TooManyIrqs;
+        };
     }
 };
 

@@ -45,7 +45,7 @@ pub const CpuLocalStorage = struct {
 
     // FIXME: remove notify caps from here
     interrupt_handlers: [apic.IRQ_AVAIL_COUNT]apic.Handler =
-        .{apic.Handler.init(null)} ** apic.IRQ_AVAIL_COUNT,
+        .{apic.Handler{}} ** apic.IRQ_AVAIL_COUNT,
 
     epoch_locals: abi.epoch.Locals = .{},
 };
@@ -636,23 +636,48 @@ fn handle_syscall(
         },
 
         .x86_ioport_create => {
-            trap.syscall_id = abi.sys.encode(Error.Unimplemented);
+            const allocator = try thread.proc.getObject(caps.X86IoPortAllocator, @truncate(trap.arg0));
+            defer allocator.deinit();
+
+            const ioport = try caps.X86IoPort.init(allocator, @truncate(trap.arg1));
+            errdefer ioport.deinit();
+
+            const handle = try thread.proc.pushCapability(caps.Capability.init(ioport));
+            trap.syscall_id = abi.sys.encode(handle);
         },
         .x86_ioport_inb => {
-            trap.syscall_id = abi.sys.encode(Error.Unimplemented);
+            const ioport = try thread.proc.getObject(caps.X86IoPort, @truncate(trap.arg0));
+            defer ioport.deinit();
+
+            trap.syscall_id = abi.sys.encode(ioport.inb());
         },
         .x86_ioport_outb => {
-            trap.syscall_id = abi.sys.encode(Error.Unimplemented);
+            const ioport = try thread.proc.getObject(caps.X86IoPort, @truncate(trap.arg0));
+            defer ioport.deinit();
+
+            ioport.outb(@truncate(trap.arg1));
+            trap.syscall_id = abi.sys.encode(0);
         },
 
         .x86_irq_create => {
-            trap.syscall_id = abi.sys.encode(Error.Unimplemented);
+            const allocator = try thread.proc.getObject(caps.X86IrqAllocator, @truncate(trap.arg0));
+            defer allocator.deinit();
+
+            const irq = try caps.X86Irq.init(allocator, @truncate(trap.arg1));
+            errdefer irq.deinit();
+
+            const handle = try thread.proc.pushCapability(caps.Capability.init(irq));
+            trap.syscall_id = abi.sys.encode(handle);
         },
         .x86_irq_subscribe => {
-            trap.syscall_id = abi.sys.encode(Error.Unimplemented);
-        },
-        .x86_irq_unsubscribe => {
-            trap.syscall_id = abi.sys.encode(Error.Unimplemented);
+            const irq = try thread.proc.getObject(caps.X86Irq, @truncate(trap.arg0));
+            defer irq.deinit();
+
+            const notify = try irq.subscribe();
+            errdefer notify.deinit();
+
+            const handle = try thread.proc.pushCapability(caps.Capability.init(notify));
+            trap.syscall_id = abi.sys.encode(handle);
         },
 
         .handle_identify => {

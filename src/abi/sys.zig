@@ -99,10 +99,8 @@ pub const Id = enum(usize) {
 
     /// create a new `X86Irq` object that manages a single x86 interrupt vector
     x86_irq_create,
-    /// notify a specific `Notify` object every time this IRQ is generated
+    /// acquire a handle to some `Notify` object that gets notified every time this IRQ is generated
     x86_irq_subscribe,
-    /// stop notifying a specific `Notify` object
-    x86_irq_unsubscribe,
 
     /// identify which object type some capability is
     handle_identify,
@@ -696,28 +694,24 @@ pub fn notifyNotify(notify: u32) Error!bool {
     return try syscall(.notify_notify, .{notify}) != 0;
 }
 
-pub fn x86IoportCreate() void {
-    @compileError("TODO");
+pub fn x86IoPortCreate(x86_ioport_allocator: u32, port: u16) Error!u32 {
+    return @intCast(try syscall(.x86_ioport_create, .{ x86_ioport_allocator, port }));
 }
 
-pub fn x86IoportInb() void {
-    @compileError("TODO");
+pub fn x86IoPortInb(x86_ioport: u32) Error!u8 {
+    return @intCast(try syscall(.x86_ioport_inb, .{x86_ioport}));
 }
 
-pub fn x86IoportOutb() void {
-    @compileError("TODO");
+pub fn x86IoPortOutb(x86_ioport: u32, byte: u8) Error!void {
+    return @intCast(try syscall(.x86_ioport_outb, .{ x86_ioport, byte }));
 }
 
-pub fn x86IrqCreate() void {
-    @compileError("TODO");
+pub fn x86IrqCreate(x86_irq_allocator: u32, irq: u8) Error!u32 {
+    return @intCast(try syscall(.x86_irq_create, .{ x86_irq_allocator, irq }));
 }
 
-pub fn x86IrqSubscribe() void {
-    @compileError("TODO");
-}
-
-pub fn x86IrqUnsubscribe() void {
-    @compileError("TODO");
+pub fn x86IrqSubscribe(x86_irq: u32) Error!u32 {
+    return @intCast(try syscall(.x86_irq_subscribe, .{x86_irq}));
 }
 
 pub fn handleIdentify(cap: u32) abi.ObjectType {
