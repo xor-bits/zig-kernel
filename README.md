@@ -108,17 +108,8 @@ zig build run --prominent-compile-errors --summary none -freference-trace \
   - [ ] grant server imports and exports
   - [ ] execute initfs:///sbin/init and give it a capability to IPC with the initfs
 
-- [x] initfs:///sbin/vm server process
-  - [ ] handles virtual memory for everything
-
 - [x] initfs:///sbin/pm server process
   - [ ] handles individual processes and their threads
-
-- [x] initfs:///sbin/rm server process
-  - [ ] launches a PS/2 keyboard driver if it detects a PS/2 keyboard
-
-- [ ] initfs:///sbin/timer server process
-  - [ ] launches a HPET driver
 
 - [x] initfs:///sbin/vfs server process
   - [ ] create fs://
@@ -138,8 +129,6 @@ zig build run --prominent-compile-errors --summary none -freference-trace \
 - [ ] initfs:///sbin/fsd.fat32
 
 - [ ] initfs:///sbin/rngd process
-
-- [ ] /sbin/inputd process
 
 - [ ] /sbin/outputd process
 

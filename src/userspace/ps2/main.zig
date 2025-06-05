@@ -13,6 +13,7 @@ const log = std.log.scoped(.ps2);
 const Error = abi.sys.Error;
 const KeyEvent = abi.input.KeyEvent;
 const KeyCode = abi.input.KeyCode;
+const KeyState = abi.input.KeyState;
 
 var waiting_lock: abi.lock.YieldMutex = .{};
 var waiting: std.ArrayList(caps.Reply) = .init(abi.mem.slab_allocator);
@@ -70,18 +71,29 @@ pub fn main() !void {
             .nextKey = nextKeyHandler,
         },
     ).init({}, caps.Receiver{ .cap = export_ps2.handle });
-    try server.run();
+
+    var msg: abi.sys.Message = undefined;
+    while (true) {
+        msg = try server.rx.recv();
+        try server.process(&msg);
+    }
 }
 
-fn nextKeyHandler(_: void, _: u32, req: struct { caps.Reply }) struct { void } {
+fn nextKeyHandler(_: void, _: u32, _: void) struct { Error!void, KeyCode, KeyState } {
     waiting_lock.lock();
     defer waiting_lock.unlock();
 
-    waiting.append(req.@"0") catch |err| {
+    // FIXME: keyboard inputs can be missed
+    // TODO: create IPC pipes for each input listener
+
+    const reply = caps.Reply.create() catch unreachable;
+
+    waiting.append(reply) catch |err| {
         log.err("failed to add a reply cap: {}", .{err});
     };
 
-    return .{{}};
+    // the reply doesnt happen from here
+    return undefined;
 }
 
 fn keyboardMain() callconv(.SysV) noreturn {
@@ -331,7 +343,7 @@ const Keyboard = struct {
                 defer waiting_lock.unlock();
 
                 for (waiting.items) |reply| {
-                    abi.InputProtocol.replyTo(reply, .nextKey, .{
+                    abi.Ps2Protocol.replyTo(reply, .nextKey, .{
                         {},
                         ev.code,
                         ev.state,

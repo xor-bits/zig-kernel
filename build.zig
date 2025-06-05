@@ -229,9 +229,7 @@ fn createInitfsTarGz(
     const initfs_processes = .{
         "pm",
         "vfs",
-        // "timer",
         // "hpet",
-        // "input",
         "ps2",
         // "init",
     };

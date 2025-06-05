@@ -199,8 +199,6 @@ pub const ServerKind = enum(u8) {
     pm,
     rm,
     vfs,
-    timer,
-    input,
 };
 
 pub const Device = struct {
@@ -222,82 +220,9 @@ pub const InitfsProtocol = util.Protocol(struct {
     list: fn () struct { sys.Error!void, caps.Frame, usize },
 });
 
-pub const VmProtocol = util.Protocol(struct {
-    /// create a new empty address space
-    /// returns a handle that can be used to create threads
-    newVmem: fn () struct { sys.Error!void, usize },
-
-    /// change the vmem handle's owner
-    moveOwner: fn (handle: usize, sender_cap_id: u32) struct { sys.Error!void, void },
-
-    // TODO: make sure there is only one copy of
-    // this frame so that the vm can read it in peace
-    /// load an ELF into an address space, returns the entrypoint addr
-    loadElf: fn (handle: usize, elf: caps.Frame, offset: usize, length: usize) struct { sys.Error!void, usize },
-
-    /// map a frame into an address space
-    mapFrame: fn (handle: usize, frame: caps.Frame, rights: sys.Rights, flags: sys.MapFlags) struct { sys.Error!void, usize, caps.Frame },
-
-    /// map a frame into an address space
-    mapDeviceFrame: fn (handle: usize, frame: caps.DeviceFrame, rights: sys.Rights, flags: sys.MapFlags) struct { sys.Error!void, usize, caps.DeviceFrame },
-
-    /// map an anonymous frame into an address space
-    mapAnon: fn (handle: usize, len: usize, rights: sys.Rights, flags: sys.MapFlags) struct { sys.Error!void, usize },
-
-    /// create a new thread from an address space
-    /// ip and sp are already set
-    newThread: fn (handle: usize, ip_override: usize, sp_override: usize) struct { sys.Error!void, caps.Thread },
-
-    /// create a new sender to the vm server
-    /// only root can call this
-    newSender: fn () struct { sys.Error!void, caps.Sender },
-});
-
 pub const PmProtocol = util.Protocol(struct {
     // /// exec an elf file
     // execElf: fn (path: [32:0]u8) struct { sys.Error!void, usize },
-
-    /// spawn a new thread in the current process
-    /// uses the ELF entrypoint if `ip_override` is 0
-    /// creates a new stack if `sp_override` is 0
-    spawn: fn (ip_override: usize, sp_override: usize) struct { sys.Error!void, caps.Thread },
-
-    /// grow the caller process' heap
-    growHeap: fn (by: usize) struct { sys.Error!void, usize },
-
-    /// map a frame into the caller process' heap
-    mapFrame: fn (frame: caps.Frame, rights: sys.Rights, flags: sys.MapFlags) struct { sys.Error!void, usize, caps.Frame },
-
-    /// map a device frame into the caller process' heap
-    mapDeviceFrame: fn (frame: caps.DeviceFrame, rights: sys.Rights, flags: sys.MapFlags) struct { sys.Error!void, usize, caps.DeviceFrame },
-
-    /// create a new sender the pm server
-    /// only root can call this
-    newSender: fn () struct { sys.Error!void, caps.Sender },
-});
-
-pub const RmProtocol = util.Protocol(struct {
-    /// request PS/2 keyboard ports
-    requestPs2: fn () struct { sys.Error!void, caps.X86IoPort, caps.X86IoPort },
-
-    /// request HPET device memory for a driver (and the PIT port)
-    requestHpet: fn () struct { sys.Error!void, caps.DeviceFrame, caps.X86IoPort },
-
-    /// request framebuffer device memory and its info frame
-    requestFramebuffer: fn () struct { sys.Error!void, caps.DeviceFrame, caps.Frame },
-
-    /// request pci configuration space device memory and its info frame
-    requestPci: fn () struct { sys.Error!void, caps.DeviceFrame, caps.Frame },
-
-    /// request an interrupt handler for a driver
-    requestInterruptHandler: fn (irq: u8, notify: caps.Notify) struct { sys.Error!void, caps.Notify },
-
-    /// request a notify kernel object
-    requestNotify: fn () struct { sys.Error!void, caps.Notify },
-
-    /// create a new sender to the rm server
-    /// only root can call this
-    newSender: fn () struct { sys.Error!void, caps.Sender },
 });
 
 pub const VfsProtocol = util.Protocol(struct {
@@ -324,14 +249,9 @@ pub const VfsProtocol = util.Protocol(struct {
 
     /// gets a shared 4K page in a file
     getPage: fn (handle: usize, index: usize) struct { sys.Error!void, caps.Frame },
-
-    /// create a new sender to the rm server
-    /// only root can call this
-    newSender: fn () struct { sys.Error!void, caps.Sender },
 });
 
-/// root,unix app <-> timer communication
-pub const TimerProtocol = util.Protocol(struct {
+pub const HpetProtocol = util.Protocol(struct {
     /// get the current timestamp
     timestamp: fn () u128,
 
@@ -340,38 +260,11 @@ pub const TimerProtocol = util.Protocol(struct {
 
     /// stop the thread until this timestamp is reached
     sleepDeadline: fn (nanos: u128) void,
-
-    /// create a new sender to the hpet server
-    /// only root can call this
-    newSender: fn () struct { sys.Error!void, caps.Sender },
 });
 
-/// timer <-> hpet communication
-pub const HpetProtocol = util.Protocol(struct {
-    /// get the current timestamp
-    timestamp: fn () u128,
-
-    /// stop the `reply` thread until the current timestamp + `nanos` is reached
-    sleep: fn (nanos: u128, reply: caps.Reply) void,
-
-    /// stop the `reply` thread until this timestamp is reached
-    sleepDeadline: fn (nanos: u128, reply: caps.Reply) void,
-});
-
-/// root,unix app <-> input communication
-pub const InputProtocol = util.Protocol(struct {
+pub const Ps2Protocol = util.Protocol(struct {
     /// wait for the next keyboard input
     nextKey: fn () struct { sys.Error!void, input.KeyCode, input.KeyState },
-
-    /// create a new sender to the input server
-    /// only root can call this
-    newSender: fn () struct { sys.Error!void, caps.Sender },
-});
-
-/// input <-> ps2 communication
-pub const Ps2Protocol = util.Protocol(struct {
-    /// stop the `reply` thread until there is some keyboard input
-    nextKey: fn (reply: caps.Reply) void,
 });
 
 pub const FramebufferInfoFrame = extern struct {

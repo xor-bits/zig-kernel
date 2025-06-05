@@ -618,8 +618,8 @@ pub fn receiverReplyRecv(recv: u32, msg: Message) Error!Message {
     return @bitCast([_]usize{ arg0, arg1, arg2, arg3, arg4, arg5 });
 }
 
-pub fn receiverSaveCaller() void {
-    @compileError("TODO");
+pub fn replyCreate() Error!u32 {
+    return @intCast(try syscall(.reply_create, .{}));
 }
 
 pub fn replyReply(reply: u32, msg: Message) Error!void {
@@ -627,7 +627,7 @@ pub fn replyReply(reply: u32, msg: Message) Error!void {
     _msg.cap_or_stamp = reply;
     const msg_regs = @as([6]usize, @bitCast(_msg));
 
-    _ = try syscall(.receiver_reply, .{
+    _ = try syscall(.reply_reply, .{
         msg_regs[0],
         msg_regs[1],
         msg_regs[2],
