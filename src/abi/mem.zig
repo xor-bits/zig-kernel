@@ -23,7 +23,9 @@ const ServerPageAllocator = struct {
         const vmem = abi.caps.Vmem.self() catch return null;
         defer vmem.close();
 
-        const frame = abi.caps.Frame.create(std.mem.alignForward(usize, len, 0x1000)) catch return null;
+        const size = std.mem.alignForward(usize, len, 0x1000);
+
+        const frame = abi.caps.Frame.create(size) catch return null;
         defer frame.close();
 
         const addr = vmem.map(
@@ -34,6 +36,13 @@ const ServerPageAllocator = struct {
             .{ .writable = true },
             .{ .fixed = false },
         ) catch return null;
+
+        if (abi.conf.IS_DEBUG)
+            abi.util.fillVolatile(
+                u8,
+                @as([*]u8, @ptrFromInt(addr))[0..size],
+                0xFA,
+            );
 
         return @ptrFromInt(addr);
     }
@@ -51,9 +60,14 @@ const ServerPageAllocator = struct {
         const vmem = abi.caps.Vmem.self() catch return;
         defer vmem.close();
 
+        const size = std.mem.alignForward(usize, buf.len, 0x1000);
+
+        if (abi.conf.IS_DEBUG)
+            abi.util.fillVolatile(u8, buf.ptr[0..size], 0xFA);
+
         vmem.unmap(
             @intFromPtr(buf.ptr),
-            std.mem.alignForward(usize, buf.len, 0x1000),
+            size,
         ) catch return;
     }
 };
@@ -128,6 +142,9 @@ pub const SlabAllocator = struct {
             last.next = slab.next;
             slab.next = second;
 
+            if (abi.conf.IS_DEBUG)
+                abi.util.fillVolatile(u8, @as([*]u8, @ptrCast(first))[0..slab_size.sizeBytes()], 0xFA);
+
             return @ptrCast(first);
         } else {
             return self.page_allocator.rawAlloc(len, alignment, ret_addr);
@@ -157,6 +174,9 @@ pub const SlabAllocator = struct {
             const i = @intFromEnum(slab_size);
             const lock = &self.locks[i];
             const slab = &self.slabs[i];
+
+            if (abi.conf.IS_DEBUG)
+                abi.util.fillVolatile(u8, mem.ptr[0..slab_size.sizeBytes()], 0xFA);
 
             const new_head: *FreeList = @alignCast(@ptrCast(mem.ptr));
 
