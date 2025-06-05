@@ -94,19 +94,22 @@ pub const Resource = extern struct {
     magic: u64 = exp_magic,
     ty: abi.ObjectType = .null,
     handle: u32 = 0,
-    name: [114]u8 = .{0} ** 114,
+    note: u64,
+    name: [107]u8 = .{0} ** 107,
 
     pub const exp_magic = 0xc47d27b79d2c8bb9;
 
     pub const Info = struct {
         ty: abi.ObjectType,
         name: []const u8,
+        note: u64 = 0,
     };
 
     pub fn new(comptime info: Info) @This() {
         return .{
             .ty = info.ty,
-            .name = (info.name ++ .{0} ** (114 - info.name.len)).*,
+            .name = (info.name ++ .{0} ** (107 - info.name.len)).*,
+            .note = info.note,
         };
     }
 

@@ -76,7 +76,7 @@ pub fn main() !void {
     var servers = std.ArrayList(Server).init(abi.mem.slab_allocator);
 
     var resources = std.ArrayHashMap(
-        [114]u8,
+        [107]u8,
         Resource,
         StringContext,
         true,
@@ -149,7 +149,7 @@ fn collectAllServers(servers: *std.ArrayList(Server)) !void {
 
 fn createAllExports(
     servers: *std.ArrayList(Server),
-    resources: *std.ArrayHashMap([114]u8, Resource, StringContext, true),
+    resources: *std.ArrayHashMap([107]u8, Resource, StringContext, true),
 ) !void {
     for (servers.items) |*server| {
         const manifest = (try server.bin.manifest()) orelse continue;
@@ -195,7 +195,7 @@ fn loadAllServers(
 
 fn grantAllExports(
     servers: *std.ArrayList(Server),
-    resources: *std.ArrayHashMap([114]u8, Resource, StringContext, true),
+    resources: *std.ArrayHashMap([107]u8, Resource, StringContext, true),
 ) !void {
     for (servers.items) |*server| {
         const manifest = (try server.bin.manifest()) orelse continue;
@@ -230,7 +230,7 @@ fn grantAllExports(
 
 fn grantAllImports(
     servers: *std.ArrayList(Server),
-    resources: *std.ArrayHashMap([114]u8, Resource, StringContext, true),
+    resources: *std.ArrayHashMap([107]u8, Resource, StringContext, true),
 ) !void {
     for (servers.items) |*server| {
         const manifest = (try server.bin.manifest()) orelse continue;
@@ -276,10 +276,10 @@ const Resource = struct {
 };
 
 const StringContext = struct {
-    pub fn hash(_: @This(), s: [114]u8) u32 {
+    pub fn hash(_: @This(), s: [107]u8) u32 {
         return std.array_hash_map.hashString(s[0..]);
     }
-    pub fn eql(_: @This(), a: [114]u8, b: [114]u8, _: usize) bool {
+    pub fn eql(_: @This(), a: [107]u8, b: [107]u8, _: usize) bool {
         return std.array_hash_map.eqlString(a[0..], b[0..]);
     }
 };
