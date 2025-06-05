@@ -50,35 +50,38 @@ pub fn init() !void {
     }
 }
 
-pub fn bootInfoInstallMcfg(boot_info: *volatile abi.BootInfo, thread: *caps.Thread) !void {
+pub fn bootInfoInstallMcfg(boot_info: *caps.Frame, thread: *caps.Thread) !void {
     const mcfg_table = maybe_mcfg orelse return;
 
     var it = @as(*const Mcfg, @ptrCast(mcfg_table)).iterator();
     if (it.next()) |entry| {
-        const mcfg_size = comptime abi.ChunkSize.of(0x10000000) orelse unreachable;
-        const mcfg_info_size = comptime abi.ChunkSize.of(@sizeOf(abi.McfgInfoFrame)) orelse unreachable;
+        const mcfg_paddr = addr.Phys.fromInt(entry.base_addr);
 
-        const paddr = addr.Phys.fromInt(entry.base_addr);
+        const mcfg_obj = try caps.Frame.initPhysical(mcfg_paddr, 0x10000000);
+        const mcfg_info_obj = try caps.Frame.init(@sizeOf(abi.FramebufferInfoFrame));
 
-        const mcfg_obj: caps.Ref(caps.DeviceFrame) = .{ .paddr = caps.DeviceFrame.new(paddr, mcfg_size) };
-        const mcfg_info_obj: caps.Ref(caps.Frame) = try caps.Ref(caps.Frame).alloc(mcfg_info_size);
-
-        const mcfg_info = @as(*volatile abi.McfgInfoFrame, @ptrCast(mcfg_info_obj.ptr()));
-        mcfg_info.* = .{
+        try mcfg_info_obj.write(0, std.mem.asBytes(&abi.McfgInfoFrame{
             .pci_segment_group = entry.pci_segment_group,
             .start_pci_bus = entry.start_pci_bus,
             .end_pci_bus = entry.end_pci_bus,
-        };
+        }));
 
         var id: u32 = undefined;
-        id = caps.pushCapability(mcfg_obj.object(thread));
-        volat(&boot_info.mcfg).* = .{ .cap = id };
-        id = caps.pushCapability(mcfg_info_obj.object(thread));
-        volat(&boot_info.mcfg_info).* = .{ .cap = id };
+        id = try thread.proc.pushCapability(.init(mcfg_obj));
+        try boot_info.write(
+            @offsetOf(abi.BootInfo, "mcfg"),
+            std.mem.asBytes(&abi.caps.Frame{ .cap = id }),
+        );
+
+        id = try thread.proc.pushCapability(.init(mcfg_info_obj));
+        try boot_info.write(
+            @offsetOf(abi.BootInfo, "mcfg_info"),
+            std.mem.asBytes(&abi.caps.Frame{ .cap = id }),
+        );
     }
 
     if (it.next()) |_| {
-        log.warn("TODO: MCFG entry discarded", .{});
+        log.warn("TODO: other MCFG entries discarded", .{});
     }
 }
 

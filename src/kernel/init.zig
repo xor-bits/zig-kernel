@@ -91,8 +91,8 @@ fn mapRoot(thread: *caps.Thread, vmem: *caps.Vmem, boot_info: *caps.Frame, a: ar
     }))[0..@sizeOf(abi.BootInfo)]);
 
     try hpet.bootInfoInstallHpet(boot_info, thread);
-
     try fb.bootInfoInstallFramebuffer(boot_info, thread);
+    try acpi.bootInfoInstallMcfg(boot_info, thread);
 
     log.info("creating root frame", .{});
     const root_frame = try caps.Frame.init(data_len);
