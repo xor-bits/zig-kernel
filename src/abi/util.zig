@@ -446,9 +446,10 @@ const MessageUsage = struct {
             }
 
             pub fn serialize(msg: *sys.Message, inputs: Io) Error!void {
-                var data: Struct = undefined;
-                @memset(data._padding[0..], 0);
+                var data: Struct = std.mem.zeroes(Struct);
                 msg.* = .{};
+
+                // std.log.info("serialize inputs={}", .{inputs});
 
                 // const input_fields: []const std.builtin.Type.StructField = @typeInfo(@TypeOf(inputs));
                 inline for (self.data[0 .. self.data_cnt - 1]) |f| {
@@ -471,6 +472,8 @@ const MessageUsage = struct {
                             @intFromEnum(@field(inputs, f.name));
                     }
                 }
+
+                // std.log.info("serialize data={}", .{data});
 
                 const data_as_regs: [regs]u64 = @bitCast(data);
 
