@@ -123,18 +123,20 @@ pub const Receiver = struct {
     }
 
     fn replyGetSender(thread: *caps.Thread, msg: abi.sys.Message) Error!*caps.Thread {
-        // prepare cap transfer
-        if (conf.LOG_OBJ_CALLS)
-            log.debug("replying {} from {*}", .{ msg, thread });
-
         const sender = thread.takeReply() orelse
             return Error.InvalidCapability;
+
+        try replyToSender(thread, msg, sender);
+        return sender;
+    }
+
+    fn replyToSender(thread: *caps.Thread, msg: abi.sys.Message, sender: *caps.Thread) Error!void {
+        if (conf.LOG_OBJ_CALLS)
+            log.debug("replying {} from {*}", .{ msg, thread });
 
         // copy over the reply message
         sender.trap.writeMessage(msg);
         thread.moveExtra(sender, @truncate(msg.extra));
-
-        return sender;
     }
 
     pub fn replyRecv(self: *@This(), thread: *caps.Thread, trap: *arch.SyscallRegs, msg: abi.sys.Message) Error!void {
@@ -243,7 +245,7 @@ pub const Reply = struct {
     // TODO: this shouldn't be cloneable
     // FIXME: prevent reordering so that the offset would be same on all objects
     refcnt: abi.epoch.RefCnt = .{},
-    sender: *caps.Thread,
+    sender: std.atomic.Value(?*caps.Thread),
 
     /// only borrows `thread`
     pub fn init(thread: *caps.Thread) !*@This() {
@@ -256,7 +258,8 @@ pub const Reply = struct {
         };
 
         const obj: *@This() = try caps.slab_allocator.allocator().create(@This());
-        obj.* = .{ .sender = sender };
+        obj.* = .{ .sender = .init(null) };
+        obj.sender.store(sender, .release);
 
         return obj;
     }
@@ -270,18 +273,16 @@ pub const Reply = struct {
         caps.slab_allocator.allocator().destroy(self);
     }
 
-    pub fn reply(_: *@This(), thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
+    pub fn reply(self: *@This(), thread: *caps.Thread, msg: abi.sys.Message) Error!void {
         if (conf.LOG_OBJ_CALLS)
             log.debug("Reply.reply", .{});
 
-        const reply_cap_id = trap.readMessage().cap;
+        const sender = self.sender.swap(null, .acquire) orelse {
+            // reply cap will be destroyed and its fine
+            return Error.BadHandle;
+        };
 
-        thread.reply = thread.clone();
-        const sender = try Receiver.replyGetSender(thread, trap);
-
-        // delete this reply object
-        caps.getCapabilityLocked(reply_cap_id).owner.store(null, .release);
-        caps.deallocate(reply_cap_id);
+        Receiver.replyToSender(thread, msg, sender) catch unreachable;
 
         // set the original caller thread as ready to run again, but return to the current thread
         proc.ready(sender);

@@ -16,7 +16,7 @@ pub const LOG_APIC: bool = LOG_GENERIC or false;
 pub const LOG_INTERRUPTS: bool = LOG_GENERIC or false;
 pub const LOG_ENTRYPOINT_CODE: bool = LOG_GENERIC or false;
 pub const LOG_SERVERS: bool = LOG_USER or false;
-pub const LOG_KEYS: bool = LOG_USER or true;
+pub const LOG_KEYS: bool = LOG_USER or false;
 
 /// parse DWARF info early, to make it functional in a OOM panic
 pub const DWARF_INFO_EARLY_INIT: bool = true;

@@ -27,6 +27,11 @@ pub export var export_vfs = abi.loader.Resource.new(.{
     .ty = .receiver,
 });
 
+pub export var import_ps2 = abi.loader.Resource.new(.{
+    .name = "hiillos.ps2.ipc",
+    .ty = .sender,
+});
+
 //
 
 var global_root: *DirNode = undefined;
@@ -39,6 +44,14 @@ pub fn main() !void {
     log.info("hello from vfs, export_vfs={}", .{
         export_vfs.handle,
     });
+
+    const ps2 = abi.Ps2Protocol.Client().init(.{ .cap = import_ps2.handle });
+
+    while (true) {
+        const res, const code, const state = try ps2.call(.nextKey, {});
+        try res;
+        log.info("got key ev: {{ {}, {} }}", .{ code, state });
+    }
 
     if (abi.conf.IPC_BENCHMARK) {
         const recv = caps.Receiver{ .cap = export_vfs.handle };

@@ -172,9 +172,11 @@ pub fn Protocol(comptime spec: type) type {
 
                     var msg: sys.Message = undefined;
                     const inputs = if (@TypeOf(args) == void) .{id} else .{id} ++ args;
-                    variant.input_converter.serialize(&msg, inputs);
-                    try self.tx.call(&msg);
-                    return variant.output_converter.deserialize(&msg).?; // FIXME:
+                    try variant.input_converter.serialize(&msg, inputs);
+                    // std.log.info("send <- msg={}", .{msg});
+                    msg = try self.tx.call(msg);
+                    // std.log.info("call -> msg={}", .{msg});
+                    return (try variant.output_converter.deserialize(&msg)).?; // FIXME:
                 }
             };
         }
@@ -203,8 +205,10 @@ pub fn Protocol(comptime spec: type) type {
                         std.log.scoped(s).debug("handling {s} done", .{@tagName(variant)});
 
                     // hopefully gets converted into a switch
-                    inline for (&variants_const, 0..) |v, i| {
-                        if (i == @intFromEnum(variant)) {
+                    switch (variant) {
+                        inline else => |s| {
+                            const v = variants_const[@intFromEnum(s)];
+
                             const sender = msg.cap_or_stamp;
                             const input = try v.input_converter.deserialize(msg) orelse {
                                 // FIXME: handle invalid input
@@ -217,20 +221,21 @@ pub fn Protocol(comptime spec: type) type {
                             const output = handler(self.ctx, sender, tuplePopFirst(input));
 
                             try v.output_converter.serialize(msg, output);
-                        }
+                        },
                     }
                 }
 
                 pub fn reply(rx: caps.Receiver, comptime id: MessageVariant, output: VariantOf(id).output_ty) sys.Error!void {
                     var msg: sys.Message = undefined;
                     variants_const[@intFromEnum(id)].output_converter.serialize(&msg, output);
+                    // std.log.info("reply <- msg={}", .{msg});
                     try rx.reply(msg);
                 }
 
                 pub fn run(self: @This()) Error!void {
                     var msg: sys.Message = try self.rx.recv();
                     while (true) {
-                        std.log.info("got msg: {}", .{msg});
+                        // std.log.info("recv -> msg={}", .{msg});
                         try self.process(&msg);
                         msg = try self.rx.replyRecv(msg);
                     }
@@ -377,7 +382,7 @@ const MessageUsage = struct {
             fields[i] = .{
                 .name = s.name,
                 .type = s.type,
-                .default_value_ptr = null,
+                .default_value_ptr = &@as(s.type, undefined),
                 .is_comptime = false,
                 .alignment = @alignOf(s.type),
             };
@@ -442,6 +447,8 @@ const MessageUsage = struct {
 
             pub fn serialize(msg: *sys.Message, inputs: Io) Error!void {
                 var data: Struct = undefined;
+                @memset(data._padding[0..], 0);
+                msg.* = .{};
 
                 // const input_fields: []const std.builtin.Type.StructField = @typeInfo(@TypeOf(inputs));
                 inline for (self.data[0 .. self.data_cnt - 1]) |f| {

@@ -86,14 +86,25 @@ fn nextKeyHandler(_: void, _: u32, _: void) struct { Error!void, KeyCode, KeySta
     // FIXME: keyboard inputs can be missed
     // TODO: create IPC pipes for each input listener
 
-    const reply = caps.Reply.create() catch unreachable;
+    const reply = caps.Reply.create() catch |err| {
+        log.err("failed to create a reply cap: {}", .{err});
+        return .{ {}, .escape, .press };
+    };
 
     waiting.append(reply) catch |err| {
         log.err("failed to add a reply cap: {}", .{err});
+        abi.Ps2Protocol.replyTo(reply, .nextKey, .{
+            Error.Internal,
+            .escape,
+            .press,
+        }) catch |err2| {
+            log.err("failed to send error: {}", .{err2});
+        };
+        return .{ {}, .escape, .press };
     };
 
     // the reply doesnt happen from here
-    return undefined;
+    return .{ {}, .escape, .press };
 }
 
 fn keyboardMain() callconv(.SysV) noreturn {

@@ -123,4 +123,17 @@ pub const Process = struct {
 
         return cap.as(T) orelse return Error.InvalidCapability;
     }
+
+    pub fn takeObject(self: *@This(), comptime T: type, handle: u32) Error!*T {
+        const cap = (try self.replaceCapability(handle, .{})) orelse {
+            return Error.BadHandle;
+        };
+
+        // place it back if an error occurs
+        errdefer std.debug.assert(null == self.replaceCapability(handle, cap) catch unreachable);
+
+        // TODO: free list
+
+        return cap.as(caps.Reply) orelse return Error.InvalidCapability;
+    }
 };

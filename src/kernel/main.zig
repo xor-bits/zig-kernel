@@ -580,10 +580,16 @@ fn handle_syscall(
             trap.syscall_id = abi.sys.encode(handle);
         },
         .reply_reply => {
-            const reply = try thread.proc.getObject(caps.Reply, @truncate(trap.arg0));
-            defer reply.deinit();
+            var msg = trap.readMessage();
 
-            trap.syscall_id = abi.sys.encode(Error.Unimplemented);
+            const reply = try thread.proc.takeObject(caps.Reply, msg.cap_or_stamp);
+            defer reply.deinit(); // destroys the object
+
+            msg.cap_or_stamp = 0; // call doesnt get to know the Receiver capability id
+            // the only error is allowed to destroy the object, so the defer deinit ↑ is fine
+            try reply.reply(thread, msg);
+
+            trap.syscall_id = abi.sys.encode(0);
         },
 
         .sender_create => {
