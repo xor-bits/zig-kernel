@@ -231,6 +231,7 @@ fn createInitfsTarGz(
         "vfs",
         "hpet",
         "ps2",
+        "pci",
         // "init",
     };
 

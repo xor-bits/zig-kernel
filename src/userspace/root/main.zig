@@ -73,14 +73,40 @@ pub fn main() !void {
         true,
     ).init(abi.mem.slab_allocator);
 
-    const hpet_entry = try resources.getOrPut(("hiillos.root.hpet" ++ .{0} ** 90).*);
+    try resources.ensureUnusedCapacity(10);
 
     try initfsd.wait();
 
     const boot_info = @as(*const volatile abi.BootInfo, @ptrFromInt(BOOT_INFO)).*;
 
+    const hpet_entry = try resources.getOrPut(("hiillos.root.hpet" ++ .{0} ** 90).*);
     hpet_entry.value_ptr.* = .{
         .handle = boot_info.hpet.cap,
+        .type = .frame,
+    };
+    // const hpet_info_entry = try resources.getOrPut(("hiillos.root.hpet_info" ++ .{0} ** 85).*);
+    // hpet_info_entry.value_ptr.* = .{
+    //     .handle = boot_info.hpet_info.cap,
+    //     .type = .frame,
+    // };
+    const fb_entry = try resources.getOrPut(("hiillos.root.fb" ++ .{0} ** 92).*);
+    fb_entry.value_ptr.* = .{
+        .handle = boot_info.framebuffer.cap,
+        .type = .frame,
+    };
+    const fb_info_entry = try resources.getOrPut(("hiillos.root.fb_info" ++ .{0} ** 87).*);
+    fb_info_entry.value_ptr.* = .{
+        .handle = boot_info.framebuffer_info.cap,
+        .type = .frame,
+    };
+    const mcfg_entry = try resources.getOrPut(("hiillos.root.mcfg" ++ .{0} ** 90).*);
+    mcfg_entry.value_ptr.* = .{
+        .handle = boot_info.mcfg.cap,
+        .type = .frame,
+    };
+    const mcfg_info_entry = try resources.getOrPut(("hiillos.root.mcfg_info" ++ .{0} ** 85).*);
+    mcfg_info_entry.value_ptr.* = .{
+        .handle = boot_info.mcfg_info.cap,
         .type = .frame,
     };
 
