@@ -79,6 +79,11 @@ pub fn main() !void {
 
     const boot_info = @as(*const volatile abi.BootInfo, @ptrFromInt(BOOT_INFO)).*;
 
+    const initfsd_entry = try resources.getOrPut(("hiillos.initfsd.ipc" ++ .{0} ** 88).*);
+    initfsd_entry.value_ptr.* = .{
+        .handle = (try initfsd.getReceiver()).cap,
+        .type = .receiver,
+    };
     const hpet_entry = try resources.getOrPut(("hiillos.root.hpet" ++ .{0} ** 90).*);
     hpet_entry.value_ptr.* = .{
         .handle = boot_info.hpet.cap,
@@ -129,7 +134,12 @@ pub fn main() !void {
     try grantAllImports(&servers, &resources);
 
     // launch all servers
-    for (servers.items) |*server| try server.thread.start();
+    for (servers.items) |*server| {
+        const server_manifest = (try server.bin.manifest()) orelse continue;
+
+        log.info("exec '{s}'", .{server_manifest.getName()});
+        try server.thread.start();
+    }
 
     // TODO: wait for crashed servers
 }
@@ -168,7 +178,7 @@ fn collectAllServers(servers: *std.ArrayList(Server)) !void {
 
     // debug print all servers and their imports/exports
     for (servers.items) |*server| {
-        const server_manifest = (try server.bin.manifest()).?;
+        const server_manifest = (try server.bin.manifest()) orelse continue;
 
         log.info("name: {s}", .{server_manifest.getName()});
         log.info("imports:", .{});

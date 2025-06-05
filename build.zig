@@ -232,7 +232,7 @@ fn createInitfsTarGz(
         "hpet",
         "ps2",
         "pci",
-        // "init",
+        "init",
     };
 
     // create virtual initfs.tar.gz root

@@ -22,8 +22,28 @@ pub export var export_pm = abi.loader.Resource.new(.{
     .ty = .receiver,
 });
 
+pub export var import_initfs = abi.loader.Resource.new(.{
+    .name = "hiillos.initfsd.ipc",
+    .ty = .sender,
+});
+
 pub export var import_vfs = abi.loader.Resource.new(.{
     .name = "hiillos.vfs.ipc",
+    .ty = .sender,
+});
+
+pub export var import_hpet = abi.loader.Resource.new(.{
+    .name = "hiillos.hpet.ipc",
+    .ty = .sender,
+});
+
+pub export var import_ps2 = abi.loader.Resource.new(.{
+    .name = "hiillos.ps2.ipc",
+    .ty = .sender,
+});
+
+pub export var import_pci = abi.loader.Resource.new(.{
+    .name = "hiillos.pci.ipc",
     .ty = .sender,
 });
 
@@ -41,6 +61,37 @@ pub fn main() !void {
             _ = try sender.call(.{ .arg0 = 5, .arg2 = 6 });
         }
     }
+
+    const vmem = try caps.Vmem.self();
+    defer vmem.close();
+
+    const initfs = abi.InitfsProtocol.Client().init(.{ .cap = import_initfs.handle });
+    var res, const init_size = try initfs.call(.fileSize, .{
+        ("/sbin/init" ++ .{0} ** 22).*,
+    });
+    try res;
+
+    res, const init_elf_frame = try initfs.call(.openFile, .{
+        ("/sbin/init" ++ .{0} ** 22).*,
+        try caps.Frame.create(init_size),
+    });
+    try res;
+
+    std.log.info("map", .{});
+
+    const init_elf_addr = try vmem.map(
+        init_elf_frame,
+        0,
+        0,
+        0,
+        .{},
+        .{},
+    );
+
+    const init_elf = @as([*]const u8, @ptrFromInt(init_elf_addr))[0..init_size];
+
+    log.info("exec init", .{});
+    try abi.loader.exec(init_elf);
 }
 
 pub fn _main() !void {

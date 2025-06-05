@@ -88,8 +88,8 @@ pub fn wait() !void {
     try initfs_ready.wait();
 }
 
-pub fn getSender() !caps.Sender {
-    return try initfs_recv.subscribe();
+pub fn getReceiver() !caps.Receiver {
+    return try initfs_recv.clone();
 }
 
 var initfs_ready: caps.Notify = .{};

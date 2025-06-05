@@ -21,7 +21,6 @@ pub fn spawn(comptime function: anytype, args: anytype) !void {
         args: Args,
 
         fn entryFn(raw_arg: usize) callconv(.SysV) void {
-            std.log.info("raw_arg=0x{x}", .{raw_arg});
             const self: *@This() = @ptrFromInt(raw_arg);
             callFn(function, self.args);
             sys.selfStop();
