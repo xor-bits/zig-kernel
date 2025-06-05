@@ -73,7 +73,16 @@ pub fn main() !void {
         true,
     ).init(abi.mem.slab_allocator);
 
+    const hpet_entry = try resources.getOrPut(("hiillos.root.hpet" ++ .{0} ** 90).*);
+
     try initfsd.wait();
+
+    const boot_info = @as(*const volatile abi.BootInfo, @ptrFromInt(BOOT_INFO)).*;
+
+    hpet_entry.value_ptr.* = .{
+        .handle = boot_info.hpet.cap,
+        .type = .frame,
+    };
 
     // find all critical system servers in the initfs
     try collectAllServers(&servers);
@@ -229,6 +238,12 @@ fn createAllImports(
                         .type = .x86_irq,
                     };
                 },
+                .x86_irq_allocator => {
+                    result.value_ptr.* = Resource{
+                        .handle = try abi.sys.handleDuplicate(caps.ROOT_X86_IRQ_ALLOCATOR.cap),
+                        .type = .x86_irq_allocator,
+                    };
+                },
                 else => {
                     log.warn("invalid resource import: '{s}'", .{imp.name});
                     continue;
@@ -295,7 +310,6 @@ fn grantAllImports(
                 log.warn("unresolved import resource: '{s}'", .{imp.val.getName()});
                 continue;
             };
-            res.given += 1;
 
             log.info("granting import: '{s}' to '{s}'", .{
                 imp.val.getName(), server_manifest.getName(),
@@ -303,10 +317,27 @@ fn grantAllImports(
 
             // FIXME: validate the data
             const new_handle: u32 = switch (imp.val.ty) {
-                .sender => (try caps.Sender.create(caps.Receiver{ .cap = res.handle })).cap,
-                .notify, .x86_ioport, .x86_irq => try abi.sys.handleDuplicate(res.handle),
+                .sender,
+                => (try caps.Sender.create(caps.Receiver{ .cap = res.handle })).cap,
+
+                .notify,
+                .x86_irq_allocator,
+                => try abi.sys.handleDuplicate(res.handle),
+
+                .x86_ioport,
+                .x86_irq,
+                .frame,
+                => b: {
+                    if (res.given != 0) {
+                        log.warn("duplicate request to the same import resource", .{});
+                        continue;
+                    }
+                    break :b try abi.sys.handleDuplicate(res.handle);
+                },
+
                 else => continue,
             };
+            res.given += 1;
 
             const their_handle = try server.proc.giveCap(new_handle);
             try server.vmem.write(

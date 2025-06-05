@@ -6,13 +6,14 @@ pub const caps = @import("caps.zig");
 pub const conf = @import("conf.zig");
 pub const epoch = @import("epoch.zig");
 pub const input = @import("input.zig");
+pub const loader = @import("loader.zig");
 pub const lock = @import("lock.zig");
 pub const mem = @import("mem.zig");
 pub const ring = @import("ring.zig");
 pub const rt = @import("rt.zig");
 pub const sys = @import("sys.zig");
+pub const thread = @import("thread.zig");
 pub const util = @import("util.zig");
-pub const loader = @import("loader.zig");
 
 //
 

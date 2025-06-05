@@ -13,64 +13,62 @@ const Error = abi.sys.Error;
 
 //
 
+pub export var manifest = abi.loader.Manifest.new(.{
+    .name = "hpet",
+});
+
+pub export var export_hpet = abi.loader.Resource.new(.{
+    .name = "hiillos.hpet.ipc",
+    .ty = .receiver,
+});
+
+pub export var import_hpet_frame = abi.loader.Resource.new(.{
+    .name = "hiillos.root.hpet",
+    .ty = .frame,
+});
+
+pub export var import_hpet_pit_port = abi.loader.Resource.new(.{
+    .name = "hiillos.hpet.pit_cmd_port",
+    .ty = .x86_ioport,
+    .note = 0x43,
+});
+
+pub export var import_hpet_irq_allocator = abi.loader.Resource.new(.{
+    .name = "hiillos.hpet.irq_allocator",
+    .ty = .x86_irq_allocator,
+});
+
+//
+
 var hpet_regs: ?*volatile HpetRegs = null;
-var notify: caps.Notify = .{};
 var irqs: [24]bool = .{false} ** 24;
 
 var timer_count: u8 = 0;
 var timers: [32]Timer = .{Timer{}} ** 32;
 
-var vm_client: abi.VmProtocol.Client() = undefined;
-var self_vmem_handle: usize = 0;
-
 //
 
-pub export fn _start(
-    recv_cap_id: usize,
-    vm_sender_cap_id: usize,
-    rm_sender_cap_id: usize,
-    rcx: usize, // rcx cannot be set
-    notify_cap_id: usize,
-    _self_vmem_handle: usize,
-) callconv(.SysV) noreturn {
-    _ = rcx;
-    self_vmem_handle = _self_vmem_handle;
-    main(
-        @truncate(recv_cap_id),
-        @truncate(vm_sender_cap_id),
-        @truncate(rm_sender_cap_id),
-        @truncate(notify_cap_id),
-    ) catch |err| {
-        log.err("HPET server error: {}", .{err});
-    };
-    @panic("HPET server died");
-}
-
-pub fn main(
-    recv_cap_id: u32,
-    vm_sender_cap_id: u32,
-    rm_sender_cap_id: u32,
-    notify_cap_id: u32,
-) !void {
+pub fn main() !void {
     log.info("hello from hpet", .{});
 
-    const recv = caps.Receiver{ .cap = recv_cap_id };
-    vm_client = abi.VmProtocol.Client().init(.{ .cap = vm_sender_cap_id });
-    const rm_client = abi.RmProtocol.Client().init(.{ .cap = rm_sender_cap_id });
-    notify = caps.Notify{ .cap = notify_cap_id };
+    const vmem = try caps.Vmem.self();
+    defer vmem.close();
 
-    log.debug("requesting HPET memory", .{});
-    var res, const hpet_frame, const pit_cmd = try rm_client.call(.requestHpet, {});
-    try res;
+    const hpet_frame = caps.Frame{ .cap = import_hpet_frame.handle };
+    defer hpet_frame.close();
 
-    log.debug("mapping HPET memory", .{});
-    res, const hpet_addr, _ = try vm_client.call(.mapDeviceFrame, .{
-        self_vmem_handle,
+    const pit_cmd = caps.X86IoPort{ .cap = import_hpet_pit_port.handle };
+
+    const irq_allocator = caps.X86IrqAllocator{ .cap = import_hpet_irq_allocator.handle };
+
+    const hpet_addr = try vmem.map(
         hpet_frame,
-        abi.sys.Rights{ .writable = true },
-        abi.sys.MapFlags{ .cache = .uncacheable },
-    });
-    try res;
+        0,
+        0,
+        0x1000,
+        .{ .writable = true },
+        .{ .cache = .uncacheable },
+    );
 
     // disable PIT
     try pit_cmd.outb(0b00_00_001); // ch 0, latch count val cmd, one-shot
@@ -95,8 +93,11 @@ pub fn main(
             if (conf.int_route_cap & (@as(u32, 1) << @as(u5, @truncate(irq_idx))) == 0) continue;
 
             if (!irqs[irq_idx]) {
-                res, _ = try rm_client.call(.requestInterruptHandler, .{ @truncate(irq_idx), notify });
-                try res;
+                const irq = try caps.X86Irq.create(irq_allocator, @truncate(irq_idx));
+                defer irq.close();
+
+                const notify = try irq.subscribe();
+                try abi.thread.spawn(hpetThreadMain, .{notify});
             }
             irqs[irq_idx] = true;
 
@@ -114,58 +115,58 @@ pub fn main(
         @as(*volatile TimerNConfigAndCaps, &timer.config_and_caps).* = conf;
     }
 
-    try spawn(&hpetThread);
-
+    var ctx: Context = .{};
     const server = abi.HpetProtocol.Server(.{
+        .Context = *Context,
         .scope = if (abi.conf.LOG_SERVERS) .hpet else null,
     }, .{
         .timestamp = timestampHandler,
         .sleep = sleepHandler,
         .sleepDeadline = sleepDeadlineHandler,
-    }).init({}, recv);
+    }).init(&ctx, .{ .cap = export_hpet.handle });
 
     log.info("HPET server listening", .{});
-    try server.run();
+    var msg = try server.rx.recv();
+    while (true) {
+        server.ctx.dont_reply = false;
+        try server.process(&msg);
+
+        if (server.ctx.dont_reply)
+            msg = try server.rx.replyRecv(msg)
+        else
+            msg = try server.rx.recv();
+    }
 }
 
-fn timestampHandler(_: void, _: u32, _: void) struct { u128 } {
+pub const Context = struct {
+    dont_reply: bool = false,
+};
+
+fn timestampHandler(_: *Context, _: u32, _: void) struct { u128 } {
     return .{timestampNanos()};
 }
 
-fn sleepHandler(_: void, _: u32, req: struct { u128, caps.Reply }) struct { void } {
+fn sleepHandler(ctx: *Context, _: u32, req: struct { u128 }) struct { void } {
+    ctx.dont_reply = false;
+
     const deadline_nanos = req.@"0" + timestampNanos();
-    const reply = req.@"1";
+    const reply = caps.Reply.create() catch unreachable;
+
     sleepDeadline(reply, deadline_nanos);
     return .{{}};
 }
 
-fn sleepDeadlineHandler(_: void, _: u32, req: struct { u128, caps.Reply }) struct { void } {
+fn sleepDeadlineHandler(ctx: *Context, _: u32, req: struct { u128 }) struct { void } {
+    ctx.dont_reply = false;
+
     const deadline_nanos = req.@"0";
-    const reply = req.@"1";
+    const reply = caps.Reply.create() catch unreachable;
+
     sleepDeadline(reply, deadline_nanos);
     return .{{}};
 }
 
-fn spawn(f: *const fn () callconv(.SysV) noreturn) !void {
-    const res, const kb_thread: caps.Thread = try vm_client.call(.newThread, .{
-        self_vmem_handle,
-        @intFromPtr(f),
-        0,
-    });
-    try res;
-
-    try kb_thread.setPrio(0);
-    try kb_thread.start();
-}
-
-pub fn hpetThread() callconv(.SysV) noreturn {
-    hpetThreadMain() catch |err| {
-        log.err("HPET interrupt thread error: {}", .{err});
-    };
-    abi.sys.stop();
-}
-
-fn hpetThreadMain() !void {
+fn hpetThreadMain(notify: caps.Notify) !void {
     const regs = hpet_regs.?;
     while (true) {
         const main_counter = regs.readMainCounter();
@@ -182,8 +183,7 @@ fn hpetThreadMain() !void {
             // wake up the current waiter
             if (current.deadline <= main_counter) {
                 timer.current = null;
-                var msg: abi.sys.Message = .{};
-                current.reply.reply(&msg) catch |err| {
+                current.reply.reply(.{}) catch |err| {
                     log.err("invalid reply cap: {}", .{err});
                 };
             } else {
@@ -194,8 +194,7 @@ fn hpetThreadMain() !void {
             while (timer.deadlines.removeOrNull()) |next| {
                 if (next.deadline <= main_counter) {
                     // wake it up if its ready
-                    var msg: abi.sys.Message = .{};
-                    next.reply.reply(&msg) catch |err| {
+                    next.reply.reply(.{}) catch |err| {
                         log.err("invalid reply cap: {}", .{err});
                     };
                 } else {
@@ -280,39 +279,6 @@ pub fn sleepDeadline(reply: caps.Reply, timestamp_nanos: u128) void {
     }
 }
 
-const tmp_allocator = std.mem.Allocator{
-    .ptr = @ptrFromInt(0x1000),
-    .vtable = &.{
-        .alloc = _alloc,
-        .resize = _resize,
-        .remap = _remap,
-        .free = _free,
-    },
-};
-
-fn _alloc(_: *anyopaque, len: usize, _: std.mem.Alignment, _: usize) ?[*]u8 {
-    const res, const addr = vm_client.call(.mapAnon, .{
-        self_vmem_handle,
-        len,
-        abi.sys.Rights{ .writable = true },
-        abi.sys.MapFlags{},
-    }) catch return null;
-    res catch return null;
-
-    return @ptrFromInt(addr);
-}
-
-fn _resize(_: *anyopaque, mem: []u8, _: std.mem.Alignment, new_len: usize, _: usize) bool {
-    const n = abi.ChunkSize.of(mem.len) orelse return false;
-    return n.sizeBytes() >= new_len;
-}
-
-fn _remap(_: *anyopaque, _: []u8, _: std.mem.Alignment, _: usize, _: usize) ?[*]u8 {
-    return null;
-}
-
-fn _free(_: *anyopaque, _: []u8, _: std.mem.Alignment, _: usize) void {}
-
 //
 
 const Timer = struct {
@@ -325,7 +291,7 @@ const Timer = struct {
         fn inner(_: void, a: Deadline, b: Deadline) std.math.Order {
             return std.math.order(a.deadline, b.deadline);
         }
-    }.inner) = .init(tmp_allocator, {}),
+    }.inner) = .init(abi.mem.slab_allocator, {}),
 
     fn count(self: *@This()) u64 {
         return self.deadlines.count() + @intFromBool(self.current != null);
@@ -412,3 +378,7 @@ const TimerNConfigAndCaps = packed struct {
     reserved2: u16 = 0,
     int_route_cap: u32,
 };
+
+comptime {
+    abi.rt.installRuntime();
+}

@@ -16,12 +16,16 @@ pub const Frame = struct {
     // FIXME: prevent reordering so that the offset would be same on all objects
     refcnt: abi.epoch.RefCnt = .{},
 
+    is_physical: bool,
     lock: spin.Mutex = .new(),
     pages: []u32,
 
     pub fn init(size_bytes: usize) !*@This() {
         if (conf.LOG_OBJ_CALLS)
             log.info("Frame.init size={}", .{size_bytes});
+
+        if (size_bytes == 0)
+            return Error.InvalidArgument;
 
         const size_pages = std.math.divCeil(usize, size_bytes, 0x1000) catch unreachable;
         if (size_pages > std.math.maxInt(u32)) return error.OutOfMemory;
@@ -32,6 +36,7 @@ pub const Frame = struct {
         @memset(pages, 0);
 
         obj.* = .{
+            .is_physical = false,
             .lock = .newLocked(),
             .pages = pages,
         };
@@ -40,19 +45,48 @@ pub const Frame = struct {
         return obj;
     }
 
+    pub fn initPhysical(paddr: addr.Phys, size_bytes: usize) !*@This() {
+        if (!pmem.isInMemoryKind(paddr, size_bytes, .reserved) and
+            !pmem.isInMemoryKind(paddr, size_bytes, .acpi_nvs) and
+            !pmem.isInMemoryKind(paddr, size_bytes, .framebuffer) and
+            !pmem.isInMemoryKind(paddr, size_bytes, null))
+        {
+            log.warn("user-space tried to create a frame to memory that isn't one of: [ reserved, acpi_nvs, framebuffer ]", .{});
+            return Error.InvalidAddress;
+        }
+
+        const aligned_paddr: usize = std.mem.alignBackward(usize, paddr.raw, 0x1000);
+        const aligned_size: usize = std.mem.alignForward(usize, size_bytes, 0x1000);
+
+        if (aligned_paddr == 0)
+            return Error.InvalidAddress;
+
+        const frame = try Frame.init(aligned_size);
+        // just a memory barrier, is_physical is not supposed to be atomic
+        @atomicStore(bool, &frame.is_physical, true, .release);
+
+        for (frame.pages, 0..) |*page, i| {
+            page.* = addr.Phys.fromInt(aligned_paddr + i * 0x1000).toParts().page;
+        }
+
+        return frame;
+    }
+
     pub fn deinit(self: *@This()) void {
         if (!self.refcnt.dec()) return;
 
         if (conf.LOG_OBJ_CALLS)
             log.info("Frame.deinit", .{});
 
-        for (self.pages) |page| {
-            if (page == 0) continue;
+        if (!self.is_physical) {
+            for (self.pages) |page| {
+                if (page == 0) continue;
 
-            pmem.deallocChunk(
-                addr.Phys.fromParts(.{ .page = page }),
-                .@"4KiB",
-            );
+                pmem.deallocChunk(
+                    addr.Phys.fromParts(.{ .page = page }),
+                    .@"4KiB",
+                );
+            }
         }
 
         caps.slab_allocator.allocator().free(self.pages);

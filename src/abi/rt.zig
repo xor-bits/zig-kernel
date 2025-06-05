@@ -3,6 +3,7 @@ const root = @import("root");
 
 const caps = @import("caps.zig");
 const sys = @import("sys.zig");
+const thread = @import("thread.zig");
 
 //
 
@@ -11,17 +12,13 @@ pub var vm_ipc: caps.Sender = .{ .cap = 0 };
 pub var vmem_handle: usize = 0;
 
 pub fn installRuntime() void {
-    @export(&_start, .{
-        .name = "_start",
-        .linkage = .strong,
-    });
+    // @export(&_start, .{
+    //     .name = "_start",
+    //     .linkage = .strong,
+    // });
 }
 
-fn _start() callconv(.SysV) noreturn {
-    // sys.log("entry");
-    root.main() catch |err| {
-        std.debug.panic("{}", .{err});
-    };
-
+pub export fn _start() callconv(.SysV) noreturn {
+    thread.callFn(root.main, .{});
     sys.selfStop();
 }

@@ -43,8 +43,6 @@ pub fn exec(a: args.Args) !void {
     log.info("creating root x86_irq_allocator", .{});
     const x86_irq_allocator = try caps.X86IrqAllocator.init();
 
-    try mapRoot(init_thread, init_vmem, boot_info, a);
-
     var id: u32 = undefined;
 
     id = try init_proc.pushCapability(.init(init_vmem));
@@ -65,6 +63,9 @@ pub fn exec(a: args.Args) !void {
     id = try init_proc.pushCapability(.init(x86_irq_allocator));
     std.debug.assert(id == abi.caps.ROOT_X86_IRQ_ALLOCATOR.cap);
 
+    // the handles (init_thread, init_vmem, boot_info) moved, but they are still valid
+    try mapRoot(init_thread, init_vmem, boot_info, a);
+
     proc.start(init_thread);
     proc.init();
 }
@@ -75,8 +76,6 @@ const Result = struct {
 };
 
 fn mapRoot(thread: *caps.Thread, vmem: *caps.Vmem, boot_info: *caps.Frame, a: args.Args) !void {
-    _ = thread;
-
     const data_len = a.root_data.len + a.root_path.len + a.initfs_data.len + a.initfs_path.len;
 
     log.info("writing root boot_info", .{});
@@ -90,6 +89,14 @@ fn mapRoot(thread: *caps.Thread, vmem: *caps.Vmem, boot_info: *caps.Frame, a: ar
         .initfs_path = @ptrFromInt(abi.ROOT_EXE + a.root_data.len + a.root_path.len + a.initfs_data.len),
         .initfs_path_len = a.initfs_path.len,
     }))[0..@sizeOf(abi.BootInfo)]);
+
+    if (hpet.hpet_frame) |hpet_frame| {
+        const id = try thread.proc.pushCapability(.init(hpet_frame.clone()));
+        try boot_info.write(
+            @offsetOf(abi.BootInfo, "hpet"),
+            std.mem.asBytes(&abi.caps.Frame{ .cap = id }),
+        );
+    }
 
     log.info("creating root frame", .{});
     const root_frame = try caps.Frame.init(data_len);

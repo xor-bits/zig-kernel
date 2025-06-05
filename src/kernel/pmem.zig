@@ -165,7 +165,7 @@ pub fn allocChunk(size: abi.ChunkSize) ?addr.Phys {
             // success: bit set to 0 from 1 before anyone else
             const result = addr.Phys.fromInt((std.math.log2_int(u64, lowest) + 64 * i) * size.sizeBytes());
             if (conf.IS_DEBUG) {
-                std.debug.assert(isInUsable(result, size.sizeBytes()));
+                std.debug.assert(isInMemoryKind(result, size.sizeBytes(), .usable));
                 std.crypto.secureZero(u64, result.toHhdm().toPtr([*]volatile u64)[0..512]);
             }
             return result;
@@ -185,7 +185,7 @@ pub fn allocChunk(size: abi.ChunkSize) ?addr.Phys {
 
     const result = addr.Phys.fromInt(parent_chunk.raw + size.sizeBytes());
     if (conf.IS_DEBUG) {
-        std.debug.assert(isInUsable(result, size.sizeBytes()));
+        std.debug.assert(isInMemoryKind(result, size.sizeBytes(), .usable));
         std.crypto.secureZero(u64, result.toHhdm().toPtr([*]volatile u64)[0..512]);
     }
     return result;
@@ -391,12 +391,27 @@ pub fn free(chunk: addr.Phys, size: usize) void {
     return deallocChunk(chunk, _size);
 }
 
-fn isInUsable(paddr: addr.Phys, size: usize) bool {
+pub fn isInMemoryKind(paddr: addr.Phys, size: usize, exp: ?limine.MemoryMapEntryType) bool {
     for (memory.response.?.entries()) |entry| {
-        if (entry.kind != .usable) continue;
+        if (entry.kind != exp) continue;
+
+        // TODO: also check if it even collides with some other entries
 
         if (paddr.raw >= entry.base and paddr.raw + size <= entry.base + entry.length) {
             return true;
+        }
+    }
+
+    return exp == null;
+}
+
+pub fn memoryKind(paddr: addr.Phys, size: usize) bool {
+    for (memory.response.?.entries()) |entry| {
+
+        // TODO: also check if it even collides with some other entries
+
+        if (paddr.raw >= entry.base and paddr.raw + size <= entry.base + entry.length) {
+            return entry.kind;
         }
     }
 

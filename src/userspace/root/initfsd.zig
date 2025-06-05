@@ -118,8 +118,7 @@ fn runMain() !void {
 
     @atomicStore(u32, &initfs_recv.cap, (try caps.Receiver.create()).cap, .seq_cst);
 
-    const _boot_info: *const volatile abi.BootInfo = @ptrFromInt(main.BOOT_INFO);
-    const boot_info = _boot_info.*;
+    const boot_info = @as(*const volatile abi.BootInfo, @ptrFromInt(main.BOOT_INFO)).*;
     const initfs: []const u8 = boot_info.initfsData();
 
     var initfs_tar_gz = std.io.fixedBufferStream(initfs);

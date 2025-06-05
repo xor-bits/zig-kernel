@@ -1,11 +1,12 @@
 const std = @import("std");
 
-const arch = @import("arch.zig");
-const addr = @import("addr.zig");
 const acpi = @import("acpi.zig");
+const addr = @import("addr.zig");
+const arch = @import("arch.zig");
+const caps = @import("caps.zig");
 const lazy = @import("lazy.zig");
 const spin = @import("spin.zig");
-const caps = @import("caps.zig");
+const util = @import("util.zig");
 
 const log = std.log.scoped(.hpet);
 
@@ -18,17 +19,20 @@ pub fn init(hpet: *const Hpet) !void {
         hpet_once.wait();
         return;
     }
-    defer hpet_once.complete();
 
     log.info("found HPET addr: 0x{x}", .{hpet.address});
 
-    const regs: *volatile HpetRegs = addr.Phys.fromInt(hpet.address).toHhdm().toPtr(*volatile HpetRegs);
-    hpet_frame = regs;
+    hpet_frame = try caps.Frame.initPhysical(addr.Phys.fromInt(hpet.address), 0x1000);
+
+    const regs: *volatile HpetRegs = addr.Phys.fromParts(.{ .page = hpet_frame.?.pages[0] })
+        .toHhdm().toPtr(*volatile HpetRegs);
 
     const config = @as(*volatile Config, &regs.config);
     var tmp = config.*;
     tmp.enable_config = 1;
     config.* = tmp;
+
+    hpet_once.complete();
 
     log.info("HPET speed: 1ms = {d} ticks", .{1_000_000_000_000 / @as(u64, @as(*volatile u32, &regs.caps_and_id.counter_period_femtoseconds).*)});
 }
@@ -36,7 +40,8 @@ pub fn init(hpet: *const Hpet) !void {
 // TODO: something useful could be done while waiting
 // + only one CPU has to measure the APIC timer speed afaik
 pub fn hpetSpinWait(micros: u32, just_before: anytype) void {
-    const regs: *volatile HpetRegs = @ptrCast(hpet_frame.?);
+    const regs: *volatile HpetRegs = addr.Phys.fromParts(.{ .page = hpet_frame.?.pages[0] })
+        .toHhdm().toPtr(*volatile HpetRegs);
 
     const ticks = (@as(u64, micros) * 1_000_000_000) / @as(*volatile u32, &regs.caps_and_id.counter_period_femtoseconds).*;
 
@@ -47,7 +52,7 @@ pub fn hpetSpinWait(micros: u32, just_before: anytype) void {
     }
 }
 
-var hpet_frame: ?*volatile HpetRegs = null;
+pub var hpet_frame: ?*caps.Frame = null;
 
 const Hpet = extern struct {
     header: acpi.SdtHeader align(1),
