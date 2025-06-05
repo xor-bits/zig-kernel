@@ -155,8 +155,8 @@ pub fn Protocol(comptime spec: type) type {
 
         pub fn replyTo(rx: caps.Reply, comptime id: MessageVariant, output: VariantOf(id).output_ty) sys.Error!void {
             var msg: sys.Message = undefined;
-            variants_const[@intFromEnum(id)].output_converter.serialize(&msg, output);
-            try rx.reply(&msg);
+            try variants_const[@intFromEnum(id)].output_converter.serialize(&msg, output);
+            try rx.reply(msg);
         }
 
         pub fn Client() type {

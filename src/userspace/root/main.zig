@@ -87,8 +87,11 @@ pub fn main() !void {
     // find all critical system servers in the initfs
     try collectAllServers(&servers);
 
-    // create all export resources
+    // create all export resources, like IPC Receivers or Notify objects
     try createAllExports(&servers, &resources);
+
+    // create all import resources, like IPC Senders, Notify objects, X86IoPorts or X86Irqs
+    try createAllImports(&servers, &resources);
 
     // load all servers
     try loadAllServers(&servers);
@@ -145,11 +148,11 @@ fn collectAllServers(servers: *std.ArrayList(Server)) !void {
         log.info("imports:", .{});
         var imports = try server.bin.imports();
         while (try imports.next()) |imp|
-            log.info(" - {}({}) @0x{x}: {s}", .{ imp.val.ty, imp.val.handle, imp.addr, imp.val.getName() });
+            log.info(" - {} [note={}]: {s}", .{ imp.val.ty, imp.val.note, imp.val.getName() });
         log.info("exports:", .{});
         var exports = try server.bin.exports();
         while (try exports.next()) |exp|
-            log.info(" - {}({}) @0x{x}: {s}", .{ exp.val.ty, exp.val.handle, exp.addr, exp.val.getName() });
+            log.info(" - {} [note={}]: {s}", .{ exp.val.ty, exp.val.note, exp.val.getName() });
     }
 }
 
@@ -165,24 +168,80 @@ fn createAllExports(
                 exp.val.getName(), manifest.getName(), exp.name,
             });
 
-            // FIXME: validate the data
-            switch (exp.val.ty) {
-                .receiver => {},
-                else => {
-                    log.warn("invalid resource export: '{s}'", .{exp.name});
-                    continue;
-                },
-            }
-
             const result = try resources.getOrPut(exp.val.name);
             if (result.found_existing) {
                 log.warn("export resource collision: '{s}'", .{exp.name});
                 continue;
             }
-            result.value_ptr.* = Resource{
-                .handle = (try caps.Receiver.create()).cap,
-                .type = .receiver,
-            };
+
+            // FIXME: validate the data
+            switch (exp.val.ty) {
+                .receiver => {
+                    result.value_ptr.* = Resource{
+                        .handle = (try caps.Receiver.create()).cap,
+                        .type = .receiver,
+                    };
+                },
+                .notify => {
+                    result.value_ptr.* = Resource{
+                        .handle = (try caps.Notify.create()).cap,
+                        .type = .notify,
+                    };
+                },
+                else => {
+                    log.warn("invalid resource export: '{s}'", .{exp.name});
+                    continue;
+                },
+            }
+        }
+    }
+}
+
+fn createAllImports(
+    servers: *std.ArrayList(Server),
+    resources: *std.ArrayHashMap([107]u8, Resource, StringContext, true),
+) !void {
+    for (servers.items) |*server| {
+        const manifest = (try server.bin.manifest()) orelse continue;
+        var imports = try server.bin.imports();
+        while (try imports.next()) |imp| {
+            if (imp.val.ty == .sender) continue;
+
+            log.info("found import '{s}' in '{s}' called '{s}'", .{
+                imp.val.getName(), manifest.getName(), imp.name,
+            });
+
+            const result = try resources.getOrPut(imp.val.name);
+            if (result.found_existing) {
+                log.warn("import resource collision: '{s}'", .{imp.name});
+                continue;
+            }
+
+            // FIXME: validate the data
+            switch (imp.val.ty) {
+                .x86_ioport => {
+                    result.value_ptr.* = Resource{
+                        .handle = (try caps.X86IoPort.create(
+                            caps.ROOT_X86_IOPORT_ALLOCATOR,
+                            @truncate(imp.val.note),
+                        )).cap,
+                        .type = .x86_ioport,
+                    };
+                },
+                .x86_irq => {
+                    result.value_ptr.* = Resource{
+                        .handle = (try caps.X86Irq.create(
+                            caps.ROOT_X86_IRQ_ALLOCATOR,
+                            @truncate(imp.val.note),
+                        )).cap,
+                        .type = .x86_irq,
+                    };
+                },
+                else => {
+                    log.warn("invalid resource import: '{s}'", .{imp.name});
+                    continue;
+                },
+            }
         }
     }
 }
@@ -208,19 +267,16 @@ fn grantAllExports(
         const manifest = (try server.bin.manifest()) orelse continue;
         var exports = try server.bin.exports();
         while (try exports.next()) |exp| {
-            // FIXME: validate the data
-            switch (exp.val.ty) {
-                .receiver => {},
-                else => continue,
-            }
+            const res = resources.getPtr(exp.val.name) orelse {
+                log.warn("unresolved export resource: '{s}'", .{exp.val.getName()});
+                continue;
+            };
+            std.debug.assert(res.given == 0);
+            res.given += 1;
 
             log.info("granting export: '{s}' to '{s}'", .{
                 exp.val.getName(), manifest.getName(),
             });
-
-            const res = resources.getPtr(exp.val.name) orelse unreachable;
-            std.debug.assert(res.given == 0);
-            res.given += 1;
 
             // TODO: lower the root server privileges on the resource
             // to allow only creating new senders
@@ -243,25 +299,24 @@ fn grantAllImports(
         const manifest = (try server.bin.manifest()) orelse continue;
         var imports = try server.bin.imports();
         while (try imports.next()) |imp| {
-            // FIXME: validate the data
-            switch (imp.val.ty) {
-                .sender => {},
-                else => continue,
-            }
-
-            log.info("granting import: '{s}' to '{s}'", .{
-                imp.val.getName(), manifest.getName(),
-            });
-
             const res = resources.getPtr(imp.val.name) orelse {
                 log.warn("unresolved import resource: '{s}'", .{imp.val.getName()});
                 continue;
             };
             res.given += 1;
 
-            const new_sender = try caps.Sender.create(caps.Receiver{ .cap = res.handle });
+            log.info("granting import: '{s}' to '{s}'", .{
+                imp.val.getName(), manifest.getName(),
+            });
 
-            const their_handle = try server.proc.giveCap(new_sender.cap);
+            // FIXME: validate the data
+            const new_handle: u32 = switch (imp.val.ty) {
+                .sender => (try caps.Sender.create(caps.Receiver{ .cap = res.handle })).cap,
+                .notify, .x86_ioport, .x86_irq => try abi.sys.handleDuplicate(res.handle),
+                else => continue,
+            };
+
+            const their_handle = try server.proc.giveCap(new_handle);
             try server.vmem.write(
                 imp.addr + @offsetOf(abi.loader.Resource, "handle"),
                 std.mem.asBytes(&their_handle)[0..],

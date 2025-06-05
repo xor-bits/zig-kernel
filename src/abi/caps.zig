@@ -7,7 +7,6 @@ pub const ROOT_SELF_VMEM: Vmem = .{ .cap = 1 };
 pub const ROOT_SELF_THREAD: Thread = .{ .cap = 2 };
 pub const ROOT_SELF_PROC: Process = .{ .cap = 3 };
 pub const ROOT_BOOT_INFO: Frame = .{ .cap = 4 };
-pub const ROOT_MEMORY: Memory = .{ .cap = 5 };
 pub const ROOT_X86_IOPORT_ALLOCATOR: X86IoPortAllocator = .{ .cap = 5 };
 pub const ROOT_X86_IRQ_ALLOCATOR: X86IrqAllocator = .{ .cap = 6 };
 
@@ -292,6 +291,10 @@ pub const X86IoPortAllocator = extern struct {
     cap: u32 = 0,
 
     pub const Type: abi.ObjectType = .x86_ioport_allocator;
+
+    pub fn close(this: @This()) void {
+        sys.handleClose(this.cap);
+    }
 };
 
 /// x86 specific capability that gives access to one IO port
@@ -305,12 +308,16 @@ pub const X86IoPort = extern struct {
         return .{ .cap = cap };
     }
 
+    pub fn close(this: @This()) void {
+        sys.handleClose(this.cap);
+    }
+
     pub fn inb(self: @This()) sys.Error!u8 {
-        return sys.x86IoPortInb(self.cap);
+        return try sys.x86IoPortInb(self.cap);
     }
 
     pub fn outb(self: @This(), byte: u8) sys.Error!void {
-        return sys.x86IoPortOutb(self.cap, byte);
+        return try sys.x86IoPortOutb(self.cap, byte);
     }
 };
 
@@ -319,6 +326,10 @@ pub const X86IrqAllocator = extern struct {
     cap: u32 = 0,
 
     pub const Type: abi.ObjectType = .x86_irq_allocator;
+
+    pub fn close(this: @This()) void {
+        sys.handleClose(this.cap);
+    }
 };
 
 /// x86 specific capability that gives access to one IRQ (= interrupt request)
@@ -330,6 +341,10 @@ pub const X86Irq = extern struct {
     pub fn create(alloc: X86IrqAllocator, irq: u8) sys.Error!@This() {
         const cap = try sys.x86IrqCreate(alloc.cap, irq);
         return .{ .cap = cap };
+    }
+
+    pub fn close(this: @This()) void {
+        sys.handleClose(this.cap);
     }
 
     pub fn subscribe(self: @This()) sys.Error!Notify {

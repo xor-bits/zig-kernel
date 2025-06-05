@@ -37,6 +37,12 @@ pub fn exec(a: args.Args) !void {
     log.info("creating root boot_info", .{});
     const boot_info = try caps.Frame.init(@sizeOf(abi.BootInfo));
 
+    log.info("creating root x86_ioport_allocator", .{});
+    const x86_ioport_allocator = try caps.X86IoPortAllocator.init();
+
+    log.info("creating root x86_irq_allocator", .{});
+    const x86_irq_allocator = try caps.X86IrqAllocator.init();
+
     try mapRoot(init_thread, init_vmem, boot_info, a);
 
     var id: u32 = undefined;
@@ -52,6 +58,12 @@ pub fn exec(a: args.Args) !void {
 
     id = try init_proc.pushCapability(.init(boot_info));
     std.debug.assert(id == abi.caps.ROOT_BOOT_INFO.cap);
+
+    id = try init_proc.pushCapability(.init(x86_ioport_allocator));
+    std.debug.assert(id == abi.caps.ROOT_X86_IOPORT_ALLOCATOR.cap);
+
+    id = try init_proc.pushCapability(.init(x86_irq_allocator));
+    std.debug.assert(id == abi.caps.ROOT_X86_IRQ_ALLOCATOR.cap);
 
     proc.start(init_thread);
     proc.init();

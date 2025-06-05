@@ -701,7 +701,7 @@ pub fn x86IoPortInb(x86_ioport: u32) Error!u8 {
 }
 
 pub fn x86IoPortOutb(x86_ioport: u32, byte: u8) Error!void {
-    return @intCast(try syscall(.x86_ioport_outb, .{ x86_ioport, byte }));
+    _ = try syscall(.x86_ioport_outb, .{ x86_ioport, byte });
 }
 
 pub fn x86IrqCreate(x86_irq_allocator: u32, irq: u8) Error!u32 {

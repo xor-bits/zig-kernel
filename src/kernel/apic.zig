@@ -56,7 +56,7 @@ var ioapic_lapic_lock: spin.Mutex = .{};
 
 // pub const Handler = std.atomic.Value(?*caps.Notify);
 pub const Handler = struct {
-    lock: spin.Mutex = .newLocked(),
+    lock: spin.Mutex = .{},
     notify: ?*caps.Notify = null,
 
     pub fn load(self: *@This()) ?*caps.Notify {

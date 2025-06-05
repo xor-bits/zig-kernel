@@ -35,9 +35,11 @@ pub fn main() !void {
         import_vfs.handle,
     });
 
-    const sender = caps.Sender{ .cap = import_vfs.handle };
-    while (true) {
-        _ = try sender.call(.{ .arg0 = 5, .arg2 = 6 });
+    if (abi.conf.IPC_BENCHMARK) {
+        const sender = caps.Sender{ .cap = import_vfs.handle };
+        while (true) {
+            _ = try sender.call(.{ .arg0 = 5, .arg2 = 6 });
+        }
     }
 }
 

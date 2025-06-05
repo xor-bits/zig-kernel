@@ -5,23 +5,17 @@ const caps = abi.caps;
 
 //
 
-const log = std.log.scoped(.ps2);
 pub const std_options = abi.std_options;
 pub const panic = abi.panic;
-pub const name = "ps2";
-const Error = abi.sys.Error;
 pub const log_level = .info;
+
+const log = std.log.scoped(.ps2);
+const Error = abi.sys.Error;
 const KeyEvent = abi.input.KeyEvent;
 const KeyCode = abi.input.KeyCode;
 
-var self_vmem_handle: usize = 0;
-var vm_client: abi.VmProtocol.Client() = undefined;
-var rm_client: abi.RmProtocol.Client() = undefined;
-var notify: caps.Notify = .{};
-var done_lock: abi.lock.YieldMutex = .newLocked();
-
 var waiting_lock: abi.lock.YieldMutex = .{};
-var waiting: std.ArrayList(caps.Reply) = .init(tmp_allocator);
+var waiting: std.ArrayList(caps.Reply) = .init(abi.mem.slab_allocator);
 
 //
 
@@ -46,8 +40,8 @@ pub export var import_ps2_data_port = abi.loader.Resource.new(.{
     .note = 0x60,
 });
 
-pub export var import_ps2_cmd_port = abi.loader.Resource.new(.{
-    .name = "hiillos.ps2.cmd_port",
+pub export var import_ps2_status_port = abi.loader.Resource.new(.{
+    .name = "hiillos.ps2.status_port",
     .ty = .x86_ioport,
     .note = 0x64,
 });
@@ -57,25 +51,26 @@ pub export var import_ps2_cmd_port = abi.loader.Resource.new(.{
 pub fn main() !void {
     log.info("hello from ps2", .{});
 
-    // const recv = caps.Receiver{ .cap = recv_cap_id };
-    // vm_client = abi.VmProtocol.Client().init(.{ .cap = vm_sender_cap_id });
-    // rm_client = abi.RmProtocol.Client().init(.{ .cap = rm_sender_cap_id });
-    // notify = caps.Notify{ .cap = notify_cap_id };
-    // done_lock.unlock();
+    // const port = caps.X86IoPort{ .cap = import_ps2_cmd_port.handle };
+    // try port.outb(0xFE);
 
-    // log.info("spawning keyboard thread", .{});
-    // try spawn(keyboardMain);
+    log.info("spawning keyboard thread", .{});
+    const vmem = try caps.Vmem.self();
+    defer vmem.close();
+    const proc = try caps.Process.self();
+    defer proc.close();
+    try abi.loader.spawn(vmem, proc, @intFromPtr(&keyboardMain));
 
-    // log.info("ps2 init done, server listening", .{});
-    // var vm_server = abi.Ps2Protocol.Server(
-    //     .{
-    //         .scope = if (abi.conf.LOG_SERVERS) .ps2 else null,
-    //     },
-    //     .{
-    //         .nextKey = nextKeyHandler,
-    //     },
-    // ).init({}, recv);
-    // try vm_server.run();
+    log.info("ps2 init done, server listening", .{});
+    var server = abi.Ps2Protocol.Server(
+        .{
+            .scope = if (abi.conf.LOG_SERVERS) .ps2 else null,
+        },
+        .{
+            .nextKey = nextKeyHandler,
+        },
+    ).init({}, caps.Receiver{ .cap = export_ps2.handle });
+    try server.run();
 }
 
 fn nextKeyHandler(_: void, _: u32, req: struct { caps.Reply }) struct { void } {
@@ -90,7 +85,6 @@ fn nextKeyHandler(_: void, _: u32, req: struct { caps.Reply }) struct { void } {
 }
 
 fn keyboardMain() callconv(.SysV) noreturn {
-    done_lock.lock();
     _ = b: {
         var keyboard = Keyboard.init() catch |err| break :b err;
         keyboard.run() catch |err| break :b err;
@@ -99,53 +93,6 @@ fn keyboardMain() callconv(.SysV) noreturn {
     };
     @panic("ps2 server died");
 }
-
-//
-
-fn spawn(f: *const fn () callconv(.SysV) noreturn) !void {
-    const res, const kb_thread: caps.Thread = try vm_client.call(.newThread, .{
-        self_vmem_handle,
-        @intFromPtr(f),
-        0,
-    });
-    try res;
-
-    try kb_thread.setPrio(0);
-    try kb_thread.start();
-}
-
-const tmp_allocator = std.mem.Allocator{
-    .ptr = @ptrFromInt(0x1000),
-    .vtable = &.{
-        .alloc = _alloc,
-        .resize = _resize,
-        .remap = _remap,
-        .free = _free,
-    },
-};
-
-fn _alloc(_: *anyopaque, len: usize, _: std.mem.Alignment, _: usize) ?[*]u8 {
-    const res, const addr = vm_client.call(.mapAnon, .{
-        self_vmem_handle,
-        len,
-        abi.sys.Rights{ .writable = true },
-        abi.sys.MapFlags{},
-    }) catch return null;
-    res catch return null;
-
-    return @ptrFromInt(addr);
-}
-
-fn _resize(_: *anyopaque, mem: []u8, _: std.mem.Alignment, new_len: usize, _: usize) bool {
-    const n = abi.ChunkSize.of(mem.len) orelse return false;
-    return n.sizeBytes() >= new_len;
-}
-
-fn _remap(_: *anyopaque, _: []u8, _: std.mem.Alignment, _: usize, _: usize) ?[*]u8 {
-    return null;
-}
-
-fn _free(_: *anyopaque, _: []u8, _: std.mem.Alignment, _: usize) void {}
 
 //
 
@@ -161,9 +108,12 @@ const ControllerConfig = packed struct {
 };
 
 const Keyboard = struct {
-    kb_port_data: caps.X86IoPort,
-    kb_port_status: caps.X86IoPort,
-    kb_irq_notify: caps.Notify,
+    /// port 0x60
+    data: caps.X86IoPort,
+    /// port 0x64
+    status: caps.X86IoPort,
+    /// irq 1
+    notify: caps.Notify,
 
     is_dual: bool = false,
 
@@ -180,16 +130,22 @@ const Keyboard = struct {
     caps: bool = false,
 
     pub fn init() !@This() {
-        var res, _ = try rm_client.call(.requestInterruptHandler, .{ 1, notify });
-        try res;
+        log.debug("keyboard init", .{});
 
-        res, const data: caps.X86IoPort, const status: caps.X86IoPort = try rm_client.call(.requestPs2, {});
-        try res;
+        const data = caps.X86IoPort{ .cap = import_ps2_data_port.handle };
+        errdefer data.close();
+        const status = caps.X86IoPort{ .cap = import_ps2_status_port.handle };
+        errdefer status.close();
+        const irq = caps.X86Irq{ .cap = import_ps2_primary_irq.handle };
+        defer irq.close();
+
+        const notify = try irq.subscribe();
+        errdefer notify.close();
 
         var self = @This(){
-            .kb_port_data = data,
-            .kb_port_status = status,
-            .kb_irq_notify = notify,
+            .data = data,
+            .status = status,
+            .notify = notify,
         };
 
         log.debug("disabling keyboard and mouse temporarily", .{});
@@ -365,7 +321,8 @@ const Keyboard = struct {
         while (true) {
             const inb = try self.readWait();
             if (try self.runOn(inb)) |ev| {
-                log.debug("keyboard ev: {}", .{ev});
+                if (abi.conf.LOG_KEYS)
+                    log.info("keyboard ev: {}", .{ev});
 
                 if (ev.code == .print_screen and abi.conf.KERNEL_PANIC_SYSCALL)
                     abi.sys.kernelPanic();
@@ -389,13 +346,13 @@ const Keyboard = struct {
     }
 
     fn controllerWrite(self: *@This(), byte: u8) !void {
-        while (!try self.isInputEmpty()) abi.sys.yield();
-        try self.kb_port_status.outb(byte);
+        while (!try self.isInputEmpty()) abi.sys.selfYield();
+        try self.status.outb(byte);
     }
 
     fn write(self: *@This(), byte: u8) !void {
-        while (!try self.isInputEmpty()) abi.sys.yield();
-        try self.kb_port_data.outb(byte);
+        while (!try self.isInputEmpty()) abi.sys.selfYield();
+        try self.data.outb(byte);
     }
 
     fn flush(self: *@This()) !void {
@@ -404,7 +361,7 @@ const Keyboard = struct {
 
     fn read(self: *@This()) !?u8 {
         if (!try self.isOutputEmpty()) {
-            const b = try self.kb_port_data.inb();
+            const b = try self.data.inb();
             log.debug("got byte 0x{x}", .{b});
             return b;
         } else {
@@ -422,21 +379,21 @@ const Keyboard = struct {
     fn readPoll(self: *@This()) !u8 {
         while (true) {
             if (try self.read()) |byte| return byte;
-            abi.sys.yield();
+            abi.sys.selfYield();
         }
     }
 
     fn isOutputEmpty(self: *@This()) !bool {
-        return try self.kb_port_status.inb() & 0b01 == 0;
+        return try self.status.inb() & 0b01 == 0;
     }
 
     fn isInputEmpty(self: *@This()) !bool {
-        return try self.kb_port_status.inb() & 0b10 == 0;
+        return try self.status.inb() & 0b10 == 0;
     }
 
     fn wait(self: *@This()) !void {
         log.debug("waiting for keyboard interrupt", .{});
-        _ = try self.kb_irq_notify.wait();
+        _ = try self.notify.wait();
     }
 
     fn check(byte: u8) !enum { ack, resend } {

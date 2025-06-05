@@ -40,13 +40,15 @@ pub fn main() !void {
         export_vfs.handle,
     });
 
-    const recv = caps.Receiver{ .cap = export_vfs.handle };
-    var msg = try recv.recv();
-    var i: usize = 0;
-    while (true) : (i +%= 1) {
-        msg = try recv.replyRecv(msg);
-        if (i % 1_000_000 == 0) {
-            log.info("{} calls", .{i});
+    if (abi.conf.IPC_BENCHMARK) {
+        const recv = caps.Receiver{ .cap = export_vfs.handle };
+        var msg = try recv.recv();
+        var i: usize = 0;
+        while (true) : (i +%= 1) {
+            msg = try recv.replyRecv(msg);
+            if (i % 1_000_000 == 0) {
+                log.info("{} calls", .{i});
+            }
         }
     }
 }
