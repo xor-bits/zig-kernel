@@ -35,6 +35,11 @@ pub const Process = extern struct {
         return .{ .cap = cap };
     }
 
+    pub fn clone(this: @This()) sys.Error!@This() {
+        const cap = try sys.handleDuplicate(this.cap);
+        return .{ .cap = cap };
+    }
+
     pub fn close(this: @This()) void {
         sys.handleClose(this.cap);
     }
@@ -57,6 +62,11 @@ pub const Thread = extern struct {
 
     pub fn self() sys.Error!@This() {
         const cap = try sys.threadSelf();
+        return .{ .cap = cap };
+    }
+
+    pub fn clone(this: @This()) sys.Error!@This() {
+        const cap = try sys.handleDuplicate(this.cap);
         return .{ .cap = cap };
     }
 
@@ -98,6 +108,11 @@ pub const Vmem = extern struct {
 
     pub fn self() sys.Error!@This() {
         const cap = try sys.vmemSelf();
+        return .{ .cap = cap };
+    }
+
+    pub fn clone(this: @This()) sys.Error!@This() {
+        const cap = try sys.handleDuplicate(this.cap);
         return .{ .cap = cap };
     }
 
@@ -150,6 +165,11 @@ pub const Frame = extern struct {
         return .{ .cap = cap };
     }
 
+    pub fn clone(this: @This()) sys.Error!@This() {
+        const cap = try sys.handleDuplicate(this.cap);
+        return .{ .cap = cap };
+    }
+
     pub fn close(this: @This()) void {
         sys.handleClose(this.cap);
     }
@@ -183,6 +203,11 @@ pub const Receiver = extern struct {
 
     pub fn create() sys.Error!@This() {
         const cap = try sys.receiverCreate();
+        return .{ .cap = cap };
+    }
+
+    pub fn clone(this: @This()) sys.Error!@This() {
+        const cap = try sys.handleDuplicate(this.cap);
         return .{ .cap = cap };
     }
 
@@ -223,6 +248,11 @@ pub const Sender = extern struct {
         return .{ .cap = cap };
     }
 
+    pub fn clone(this: @This()) sys.Error!@This() {
+        const cap = try sys.handleDuplicate(this.cap);
+        return .{ .cap = cap };
+    }
+
     pub fn close(this: @This()) void {
         sys.handleClose(this.cap);
     }
@@ -241,6 +271,11 @@ pub const Reply = extern struct {
 
     pub fn create() sys.Error!@This() {
         const cap = try sys.replyCreate();
+        return .{ .cap = cap };
+    }
+
+    pub fn clone(this: @This()) sys.Error!@This() {
+        const cap = try sys.handleDuplicate(this.cap);
         return .{ .cap = cap };
     }
 
@@ -265,6 +300,11 @@ pub const Notify = extern struct {
         return .{ .cap = cap };
     }
 
+    pub fn clone(this: @This()) sys.Error!@This() {
+        const cap = try sys.handleDuplicate(this.cap);
+        return .{ .cap = cap };
+    }
+
     pub fn close(this: @This()) void {
         sys.handleClose(this.cap);
     }
@@ -280,10 +320,6 @@ pub const Notify = extern struct {
     pub fn notify(self: @This()) sys.Error!bool {
         return try sys.notifyNotify(self.cap);
     }
-
-    pub fn clone(self: @This()) sys.Error!Notify {
-        return .{ .cap = try sys.notifyClone(self.cap) };
-    }
 };
 
 /// x86 specific capability that allows allocating `x86_ioport` capabilities
@@ -291,6 +327,11 @@ pub const X86IoPortAllocator = extern struct {
     cap: u32 = 0,
 
     pub const Type: abi.ObjectType = .x86_ioport_allocator;
+
+    pub fn clone(this: @This()) sys.Error!@This() {
+        const cap = try sys.handleDuplicate(this.cap);
+        return .{ .cap = cap };
+    }
 
     pub fn close(this: @This()) void {
         sys.handleClose(this.cap);
@@ -305,6 +346,11 @@ pub const X86IoPort = extern struct {
 
     pub fn create(alloc: X86IoPortAllocator, port: u16) sys.Error!@This() {
         const cap = try sys.x86IoPortCreate(alloc.cap, port);
+        return .{ .cap = cap };
+    }
+
+    pub fn clone(this: @This()) sys.Error!@This() {
+        const cap = try sys.handleDuplicate(this.cap);
         return .{ .cap = cap };
     }
 
@@ -327,6 +373,11 @@ pub const X86IrqAllocator = extern struct {
 
     pub const Type: abi.ObjectType = .x86_irq_allocator;
 
+    pub fn clone(this: @This()) sys.Error!@This() {
+        const cap = try sys.handleDuplicate(this.cap);
+        return .{ .cap = cap };
+    }
+
     pub fn close(this: @This()) void {
         sys.handleClose(this.cap);
     }
@@ -340,6 +391,11 @@ pub const X86Irq = extern struct {
 
     pub fn create(alloc: X86IrqAllocator, irq: u8) sys.Error!@This() {
         const cap = try sys.x86IrqCreate(alloc.cap, irq);
+        return .{ .cap = cap };
+    }
+
+    pub fn clone(this: @This()) sys.Error!@This() {
+        const cap = try sys.handleDuplicate(this.cap);
         return .{ .cap = cap };
     }
 
