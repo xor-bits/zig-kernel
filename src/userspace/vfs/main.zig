@@ -5,10 +5,10 @@ const caps = abi.caps;
 
 //
 
-const log = std.log.scoped(.vfs);
 pub const std_options = abi.std_options;
 pub const panic = abi.panic;
-pub const name = "vfs";
+
+const log = std.log.scoped(.vfs);
 const Error = abi.sys.Error;
 
 var main_thread_locals: abi.epoch.Locals = .{};

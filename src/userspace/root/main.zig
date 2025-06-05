@@ -11,7 +11,10 @@ const caps = abi.caps;
 
 pub const std_options = abi.std_options;
 pub const panic = abi.panic;
-pub const name = "root";
+
+pub export var manifest = abi.loader.Manifest.new(.{
+    .name = "root",
+});
 
 //
 
@@ -142,9 +145,9 @@ fn collectAllServers(servers: *std.ArrayList(Server)) !void {
 
     // debug print all servers and their imports/exports
     for (servers.items) |*server| {
-        const manifest = (try server.bin.manifest()).?;
+        const server_manifest = (try server.bin.manifest()).?;
 
-        log.info("name: {s}", .{manifest.getName()});
+        log.info("name: {s}", .{server_manifest.getName()});
         log.info("imports:", .{});
         var imports = try server.bin.imports();
         while (try imports.next()) |imp|
@@ -153,6 +156,7 @@ fn collectAllServers(servers: *std.ArrayList(Server)) !void {
         var exports = try server.bin.exports();
         while (try exports.next()) |exp|
             log.info(" - {} [note={}]: {s}", .{ exp.val.ty, exp.val.note, exp.val.getName() });
+        log.info("", .{});
     }
 }
 
@@ -161,11 +165,11 @@ fn createAllExports(
     resources: *std.ArrayHashMap([107]u8, Resource, StringContext, true),
 ) !void {
     for (servers.items) |*server| {
-        const manifest = (try server.bin.manifest()) orelse continue;
+        const server_manifest = (try server.bin.manifest()) orelse continue;
         var exports = try server.bin.exports();
         while (try exports.next()) |exp| {
             log.info("found export '{s}' in '{s}' called '{s}'", .{
-                exp.val.getName(), manifest.getName(), exp.name,
+                exp.val.getName(), server_manifest.getName(), exp.name,
             });
 
             const result = try resources.getOrPut(exp.val.name);
@@ -202,13 +206,13 @@ fn createAllImports(
     resources: *std.ArrayHashMap([107]u8, Resource, StringContext, true),
 ) !void {
     for (servers.items) |*server| {
-        const manifest = (try server.bin.manifest()) orelse continue;
+        const server_manifest = (try server.bin.manifest()) orelse continue;
         var imports = try server.bin.imports();
         while (try imports.next()) |imp| {
             if (imp.val.ty == .sender) continue;
 
             log.info("found import '{s}' in '{s}' called '{s}'", .{
-                imp.val.getName(), manifest.getName(), imp.name,
+                imp.val.getName(), server_manifest.getName(), imp.name,
             });
 
             const result = try resources.getOrPut(imp.val.name);
@@ -264,7 +268,7 @@ fn grantAllExports(
     resources: *std.ArrayHashMap([107]u8, Resource, StringContext, true),
 ) !void {
     for (servers.items) |*server| {
-        const manifest = (try server.bin.manifest()) orelse continue;
+        const server_manifest = (try server.bin.manifest()) orelse continue;
         var exports = try server.bin.exports();
         while (try exports.next()) |exp| {
             const res = resources.getPtr(exp.val.name) orelse {
@@ -275,7 +279,7 @@ fn grantAllExports(
             res.given += 1;
 
             log.info("granting export: '{s}' to '{s}'", .{
-                exp.val.getName(), manifest.getName(),
+                exp.val.getName(), server_manifest.getName(),
             });
 
             // TODO: lower the root server privileges on the resource
@@ -296,7 +300,7 @@ fn grantAllImports(
     resources: *std.ArrayHashMap([107]u8, Resource, StringContext, true),
 ) !void {
     for (servers.items) |*server| {
-        const manifest = (try server.bin.manifest()) orelse continue;
+        const server_manifest = (try server.bin.manifest()) orelse continue;
         var imports = try server.bin.imports();
         while (try imports.next()) |imp| {
             const res = resources.getPtr(imp.val.name) orelse {
@@ -306,7 +310,7 @@ fn grantAllImports(
             res.given += 1;
 
             log.info("granting import: '{s}' to '{s}'", .{
-                imp.val.getName(), manifest.getName(),
+                imp.val.getName(), server_manifest.getName(),
             });
 
             // FIXME: validate the data

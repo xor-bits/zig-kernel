@@ -5,10 +5,10 @@ const caps = abi.caps;
 
 //
 
-const log = std.log.scoped(.hpet);
 pub const std_options = abi.std_options;
 pub const panic = abi.panic;
-pub const name = "hpet";
+
+const log = std.log.scoped(.hpet);
 const Error = abi.sys.Error;
 
 //

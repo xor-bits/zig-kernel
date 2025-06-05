@@ -43,8 +43,10 @@ pub fn panic(msg: []const u8, _: ?*std.builtin.StackTrace, _: ?usize) noreturn {
     @branchHint(.cold);
     const log = std.log.scoped(.panic);
 
-    const name =
-        if (@hasDecl(root, "name")) root.name else "<unknown>";
+    const name = if (@hasDecl(root, "manifest"))
+        root.manifest.getName()
+    else
+        "<unknown>";
     log.err("{s} panicked: {s}\nstack trace:", .{ name, msg });
     var iter = std.debug.StackIterator.init(@returnAddress(), @frameAddress());
     while (iter.next()) |addr| {

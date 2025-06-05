@@ -5,10 +5,10 @@ const caps = abi.caps;
 
 //
 
-const log = std.log.scoped(.timer);
 pub const std_options = abi.std_options;
 pub const panic = abi.panic;
-pub const name = "timer";
+
+const log = std.log.scoped(.timer);
 const Error = abi.sys.Error;
 
 //
