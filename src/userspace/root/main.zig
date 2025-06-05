@@ -106,6 +106,12 @@ pub fn main() !void {
 }
 
 fn collectAllServers(servers: *std.ArrayList(Server)) !void {
+    var it = initfsd.fileIterator();
+    while (it.next()) |server_binary| {
+        const elf_file = initfsd.readFile(server_binary.inode);
+        try servers.append(.{ .bin = try abi.loader.Elf.init(elf_file) });
+    }
+
     // virtual memory manager (system) (server)
     // maps new processes to memory and manages page faults,
     // heaps, lazy alloc, shared memory, swapping, etc.
@@ -113,7 +119,7 @@ fn collectAllServers(servers: *std.ArrayList(Server)) !void {
 
     // process manager (system) (server)
     // manages unix-like process stuff like permissions, cli args, etc.
-    try servers.append(.{ .bin = try abi.loader.Elf.init(try binBytes("/sbin/pm")) });
+    // try servers.append(.{ .bin = try abi.loader.Elf.init(try binBytes("/sbin/pm")) });
 
     // resource manager (system) (server)
     // manages ioports, irqs, device memory, etc. should also manage physical memory
@@ -121,7 +127,7 @@ fn collectAllServers(servers: *std.ArrayList(Server)) !void {
 
     // virtual filesystem (system) (server)
     // manages the main VFS tree, everything mounted into it and file descriptors
-    try servers.append(.{ .bin = try abi.loader.Elf.init(try binBytes("/sbin/vfs")) });
+    // try servers.append(.{ .bin = try abi.loader.Elf.init(try binBytes("/sbin/vfs")) });
 
     // timer (system) (server)
     // manages timer drivers and accepts sleep, sleepDeadline and timestamp calls
@@ -262,13 +268,6 @@ fn grantAllImports(
             );
         }
     }
-}
-
-fn binBytes(path: []const u8) ![]const u8 {
-    return initfsd.readFile(initfsd.openFile(path) orelse {
-        log.err("missing critical system binary: '{s}'", .{path});
-        return error.MissingSystem;
-    });
 }
 
 const Resource = packed struct {

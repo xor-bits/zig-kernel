@@ -252,22 +252,41 @@ fn listHandler(_: void, _: u32, _: void) struct { Error!void, caps.Frame, usize 
 }
 
 pub fn openFile(path: []const u8) ?usize {
-    var it = iterator();
-    while (it.next()) |blocks| {
-        const header: *const TarEntryHeader = @ptrCast(&blocks[0]);
-        if (header.ty != 0 and header.ty != '0') {
-            // skip non files
+    var it = fileIterator();
+    while (it.next()) |file| {
+        if (!pathEql(path, file.path)) {
             continue;
         }
 
-        if (!pathEql(path, std.mem.sliceTo(header.name[0..100], 0))) {
-            continue;
-        }
-
-        return inodeOf(header);
+        return file.inode;
     }
 
     return null;
+}
+
+pub const FileIterator = struct {
+    inner: Iterator,
+
+    pub fn next(self: *@This()) ?struct { path: []const u8, inode: usize } {
+        while (self.inner.next()) |blocks| {
+            const header: *const TarEntryHeader = @ptrCast(&blocks[0]);
+            if (header.ty != 0 and header.ty != '0') {
+                // skip non files
+                continue;
+            }
+
+            return .{
+                .path = std.mem.sliceTo(header.name[0..100], 0),
+                .inode = inodeOf(header),
+            };
+        }
+
+        return null;
+    }
+};
+
+pub fn fileIterator() FileIterator {
+    return .{ .inner = iterator() };
 }
 
 pub fn inodeOf(header: *const TarEntryHeader) usize {

@@ -25,54 +25,57 @@ var waiting: std.ArrayList(caps.Reply) = .init(tmp_allocator);
 
 //
 
-pub export fn _start(
-    recv_cap_id: usize,
-    vm_sender_cap_id: usize,
-    rm_sender_cap_id: usize,
-    rcx: usize, // rcx cannot be set
-    notify_cap_id: usize,
-    _self_vmem_handle: usize,
-) callconv(.SysV) noreturn {
-    _ = rcx;
-    self_vmem_handle = _self_vmem_handle;
-    main(
-        @truncate(recv_cap_id),
-        @truncate(vm_sender_cap_id),
-        @truncate(rm_sender_cap_id),
-        @truncate(notify_cap_id),
-    ) catch |err| {
-        log.err("ps2 server error: {}", .{err});
-    };
-    @panic("ps2 server died");
-}
+pub export var manifest = abi.loader.Manifest.new(.{
+    .name = "ps2",
+});
 
-pub fn main(
-    recv_cap_id: u32,
-    vm_sender_cap_id: u32,
-    rm_sender_cap_id: u32,
-    notify_cap_id: u32,
-) !void {
+pub export var export_ps2 = abi.loader.Resource.new(.{
+    .name = "hiillos.ps2.ipc",
+    .ty = .receiver,
+});
+
+pub export var import_ps2_primary_irq = abi.loader.Resource.new(.{
+    .name = "hiillos.ps2.primary_irq",
+    .ty = .x86_irq,
+    .note = 1,
+});
+
+pub export var import_ps2_data_port = abi.loader.Resource.new(.{
+    .name = "hiillos.ps2.data_port",
+    .ty = .x86_ioport,
+    .note = 0x60,
+});
+
+pub export var import_ps2_cmd_port = abi.loader.Resource.new(.{
+    .name = "hiillos.ps2.cmd_port",
+    .ty = .x86_ioport,
+    .note = 0x64,
+});
+
+//
+
+pub fn main() !void {
     log.info("hello from ps2", .{});
 
-    const recv = caps.Receiver{ .cap = recv_cap_id };
-    vm_client = abi.VmProtocol.Client().init(.{ .cap = vm_sender_cap_id });
-    rm_client = abi.RmProtocol.Client().init(.{ .cap = rm_sender_cap_id });
-    notify = caps.Notify{ .cap = notify_cap_id };
-    done_lock.unlock();
+    // const recv = caps.Receiver{ .cap = recv_cap_id };
+    // vm_client = abi.VmProtocol.Client().init(.{ .cap = vm_sender_cap_id });
+    // rm_client = abi.RmProtocol.Client().init(.{ .cap = rm_sender_cap_id });
+    // notify = caps.Notify{ .cap = notify_cap_id };
+    // done_lock.unlock();
 
-    log.info("spawning keyboard thread", .{});
-    try spawn(keyboardMain);
+    // log.info("spawning keyboard thread", .{});
+    // try spawn(keyboardMain);
 
-    log.info("ps2 init done, server listening", .{});
-    var vm_server = abi.Ps2Protocol.Server(
-        .{
-            .scope = if (abi.conf.LOG_SERVERS) .ps2 else null,
-        },
-        .{
-            .nextKey = nextKeyHandler,
-        },
-    ).init({}, recv);
-    try vm_server.run();
+    // log.info("ps2 init done, server listening", .{});
+    // var vm_server = abi.Ps2Protocol.Server(
+    //     .{
+    //         .scope = if (abi.conf.LOG_SERVERS) .ps2 else null,
+    //     },
+    //     .{
+    //         .nextKey = nextKeyHandler,
+    //     },
+    // ).init({}, recv);
+    // try vm_server.run();
 }
 
 fn nextKeyHandler(_: void, _: u32, req: struct { caps.Reply }) struct { void } {
@@ -508,3 +511,7 @@ const Keyboard = struct {
         }
     }
 };
+
+comptime {
+    abi.rt.installRuntime();
+}

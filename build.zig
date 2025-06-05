@@ -232,7 +232,7 @@ fn createInitfsTarGz(
         // "timer",
         // "hpet",
         // "input",
-        // "ps2",
+        "ps2",
         // "init",
     };
 
