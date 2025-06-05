@@ -12,10 +12,8 @@ pub var vm_ipc: caps.Sender = .{ .cap = 0 };
 pub var vmem_handle: usize = 0;
 
 pub fn installRuntime() void {
-    // @export(&_start, .{
-    //     .name = "_start",
-    //     .linkage = .strong,
-    // });
+    // ??? wtf zig
+    // export fn doesnt work without this random empty function that is called in comptime
 }
 
 pub export fn _start() callconv(.SysV) noreturn {

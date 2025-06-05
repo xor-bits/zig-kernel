@@ -90,13 +90,9 @@ fn mapRoot(thread: *caps.Thread, vmem: *caps.Vmem, boot_info: *caps.Frame, a: ar
         .initfs_path_len = a.initfs_path.len,
     }))[0..@sizeOf(abi.BootInfo)]);
 
-    if (hpet.hpet_frame) |hpet_frame| {
-        const id = try thread.proc.pushCapability(.init(hpet_frame.clone()));
-        try boot_info.write(
-            @offsetOf(abi.BootInfo, "hpet"),
-            std.mem.asBytes(&abi.caps.Frame{ .cap = id }),
-        );
-    }
+    try hpet.bootInfoInstallHpet(boot_info, thread);
+
+    try fb.bootInfoInstallFramebuffer(boot_info, thread);
 
     log.info("creating root frame", .{});
     const root_frame = try caps.Frame.init(data_len);

@@ -19,39 +19,43 @@ pub export var framebuffer: limine.FramebufferRequest = .{};
 
 //
 
-// pub fn bootInfoInstallFramebuffer(boot_info: *volatile abi.BootInfo, thread: *caps.Thread) !void {
-//     const resp = framebuffer.response orelse return;
-//     if (resp.framebuffer_count == 0) return;
+pub fn bootInfoInstallFramebuffer(boot_info: *caps.Frame, thread: *caps.Thread) !void {
+    const resp = framebuffer.response orelse return;
+    if (resp.framebuffer_count == 0) return;
 
-//     const first_fb = resp.framebuffers()[0];
-//     const fb_paddr = addr.Virt.fromPtr(first_fb.address).hhdmToPhys();
-//     const bytes: usize = first_fb.height * first_fb.pitch * (std.math.divCeil(usize, first_fb.bpp, 8) catch unreachable);
-//     const fb_size = abi.ChunkSize.of(bytes) orelse return;
-//     const fb_info_size = comptime abi.ChunkSize.of(@sizeOf(abi.FramebufferInfoFrame)) orelse unreachable;
+    const first_fb = resp.framebuffers()[0];
+    const fb_paddr = addr.Virt.fromPtr(first_fb.address).hhdmToPhys();
+    const fb_size: usize = first_fb.height * first_fb.pitch * (std.math.divCeil(usize, first_fb.bpp, 8) catch unreachable);
 
-//     const fb_obj: caps.Ref(caps.DeviceFrame) = .{ .paddr = caps.DeviceFrame.new(fb_paddr, fb_size) };
-//     const fb_info_obj: caps.Ref(caps.Frame) = try caps.Ref(caps.Frame).alloc(fb_info_size);
+    const fb_obj = try caps.Frame.initPhysical(fb_paddr, fb_size);
+    const fb_info_obj = try caps.Frame.init(@sizeOf(abi.FramebufferInfoFrame));
 
-//     const fb_info = @as(*volatile abi.FramebufferInfoFrame, @ptrCast(fb_info_obj.ptr()));
-//     fb_info.* = .{
-//         .width = first_fb.width,
-//         .height = first_fb.height,
-//         .pitch = first_fb.pitch,
-//         .bpp = first_fb.bpp,
-//         .red_mask_size = first_fb.red_mask_size,
-//         .red_mask_shift = first_fb.red_mask_shift,
-//         .green_mask_size = first_fb.green_mask_size,
-//         .green_mask_shift = first_fb.green_mask_shift,
-//         .blue_mask_size = first_fb.blue_mask_size,
-//         .blue_mask_shift = first_fb.blue_mask_shift,
-//     };
+    try fb_info_obj.write(0, std.mem.asBytes(&abi.FramebufferInfoFrame{
+        .width = first_fb.width,
+        .height = first_fb.height,
+        .pitch = first_fb.pitch,
+        .bpp = first_fb.bpp,
+        .red_mask_size = first_fb.red_mask_size,
+        .red_mask_shift = first_fb.red_mask_shift,
+        .green_mask_size = first_fb.green_mask_size,
+        .green_mask_shift = first_fb.green_mask_shift,
+        .blue_mask_size = first_fb.blue_mask_size,
+        .blue_mask_shift = first_fb.blue_mask_shift,
+    }));
 
-//     var id: u32 = undefined;
-//     id = caps.pushCapability(fb_obj.object(thread));
-//     volat(&boot_info.framebuffer).* = .{ .cap = id };
-//     id = caps.pushCapability(fb_info_obj.object(thread));
-//     volat(&boot_info.framebuffer_info).* = .{ .cap = id };
-// }
+    var id: u32 = undefined;
+    id = try thread.proc.pushCapability(.init(fb_obj));
+    try boot_info.write(
+        @offsetOf(abi.BootInfo, "framebuffer"),
+        std.mem.asBytes(&abi.caps.Frame{ .cap = id }),
+    );
+
+    id = try thread.proc.pushCapability(.init(fb_info_obj));
+    try boot_info.write(
+        @offsetOf(abi.BootInfo, "framebuffer_info"),
+        std.mem.asBytes(&abi.caps.Frame{ .cap = id }),
+    );
+}
 
 // EVERYTHING BELOW THIS IS JUST FOR THE KERNEL PANIC WRITER
 

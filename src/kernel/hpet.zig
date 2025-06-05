@@ -1,4 +1,5 @@
 const std = @import("std");
+const abi = @import("abi");
 
 const acpi = @import("acpi.zig");
 const addr = @import("addr.zig");
@@ -50,6 +51,16 @@ pub fn hpetSpinWait(micros: u32, just_before: anytype) void {
     while (@as(*volatile u64, &regs.main_counter_value).* <= deadline) {
         std.atomic.spinLoopHint();
     }
+}
+
+pub fn bootInfoInstallHpet(boot_info: *caps.Frame, thread: *caps.Thread) !void {
+    const frame = hpet_frame orelse return;
+
+    const id = try thread.proc.pushCapability(.init(frame.clone()));
+    try boot_info.write(
+        @offsetOf(abi.BootInfo, "hpet"),
+        std.mem.asBytes(&abi.caps.Frame{ .cap = id }),
+    );
 }
 
 pub var hpet_frame: ?*caps.Frame = null;
