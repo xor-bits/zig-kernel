@@ -89,7 +89,7 @@ pub const YieldMutex = struct {
                 }
             }
 
-            sys.self_yield();
+            sys.selfYield();
             if (self.tryLock()) return;
         }
     }

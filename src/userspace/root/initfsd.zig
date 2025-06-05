@@ -110,7 +110,7 @@ fn run() callconv(.SysV) noreturn {
     };
 
     log.info("initfs terminated", .{});
-    abi.sys.self_stop();
+    abi.sys.selfStop();
 }
 
 fn runMain() !void {

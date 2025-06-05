@@ -189,9 +189,9 @@ pub fn syscall(trap: *arch.SyscallRegs) void {
     const locals = arch.cpuLocal();
     const thread = locals.current_thread.?;
 
-    if (conf.LOG_SYSCALLS and id != .self_yield)
+    if (conf.LOG_SYSCALLS and id != .selfYield)
         log.debug("syscall: {s}", .{@tagName(id)});
-    defer if (conf.LOG_SYSCALLS and id != .self_yield)
+    defer if (conf.LOG_SYSCALLS and id != .selfYield)
         log.debug("syscall: {s} done", .{@tagName(id)});
 
     if (conf.LOG_SYSCALL_STATS) {
@@ -700,10 +700,10 @@ fn handle_syscall(
             trap.syscall_id = abi.sys.encode(0);
         },
 
-        .self_yield => {
+        .selfYield => {
             proc.yield(trap);
         },
-        .self_stop => {
+        .selfStop => {
             proc.stop(thread);
             proc.yield(trap);
         },

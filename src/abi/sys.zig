@@ -110,15 +110,13 @@ pub const Id = enum(usize) {
     handle_close,
 
     /// give up the CPU for other tasks
-    self_yield,
+    selfYield,
     /// stop the active thread
-    self_stop,
+    selfStop,
     /// set an extra IPC register of this thread
     self_set_extra,
     /// get and zero an extra IPC register of this thread
     self_get_extra,
-
-    // TODO: maybe move all object call id's here to be syscall id's
 };
 
 /// capability or mapping rights
@@ -729,12 +727,12 @@ pub fn handleClose(cap: u32) void {
     _ = syscall(.handle_close, .{cap}) catch unreachable;
 }
 
-pub fn self_yield() void {
-    _ = syscall(.self_yield, .{}) catch unreachable;
+pub fn selfYield() void {
+    _ = syscall(.selfYield, .{}) catch unreachable;
 }
 
-pub fn self_stop() noreturn {
-    _ = syscall(.self_stop, .{}) catch {};
+pub fn selfStop() noreturn {
+    _ = syscall(.selfStop, .{}) catch {};
     asm volatile ("mov 0, %rax"); // read from nullptr to kill the process for sure
     unreachable;
 }

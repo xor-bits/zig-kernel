@@ -23,5 +23,5 @@ fn _start() callconv(.SysV) noreturn {
         std.debug.panic("{}", .{err});
     };
 
-    sys.self_stop();
+    sys.selfStop();
 }

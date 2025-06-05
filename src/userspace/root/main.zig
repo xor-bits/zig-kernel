@@ -344,5 +344,5 @@ export fn zigMainRealstack() noreturn {
     main() catch |err| {
         std.debug.panic("{}", .{err});
     };
-    abi.sys.self_stop();
+    abi.sys.selfStop();
 }
