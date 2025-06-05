@@ -74,16 +74,9 @@ var initfs_tar: std.ArrayList(u8) = .init(vmm_vector);
 //
 
 pub fn init() !void {
-    const _boot_info: *const volatile abi.BootInfo = @ptrFromInt(main.BOOT_INFO);
-    const boot_info = _boot_info.*;
-    const initfs: []const u8 = boot_info.initfsData();
+    @atomicStore(u32, &initfs_ready.cap, (try caps.Notify.create()).cap, .seq_cst);
 
     log.info("starting initfs thread", .{});
-    initfs_tar_gz = std.io.fixedBufferStream(initfs);
-
-    initfs_recv = try caps.Receiver.create();
-    initfs_ready = try caps.Notify.create();
-
     try abi.loader.spawn(
         caps.ROOT_SELF_VMEM,
         caps.ROOT_SELF_PROC,
@@ -99,8 +92,6 @@ pub fn getSender() !caps.Sender {
     return try initfs_recv.subscribe();
 }
 
-var thread: caps.Thread = undefined;
-var initfs_tar_gz: std.io.FixedBufferStream([]const u8) = undefined;
 var initfs_ready: caps.Notify = .{};
 var initfs_recv: caps.Receiver = .{};
 
@@ -114,6 +105,25 @@ fn run() callconv(.SysV) noreturn {
 }
 
 fn runMain() !void {
+    log.info("mapping boot info", .{});
+    const len = try abi.sys.frameGetSize(abi.caps.ROOT_BOOT_INFO.cap);
+    _ = try abi.caps.ROOT_SELF_VMEM.map(
+        abi.caps.ROOT_BOOT_INFO,
+        0,
+        main.BOOT_INFO,
+        len,
+        .{},
+        .{ .fixed = true },
+    );
+
+    @atomicStore(u32, &initfs_recv.cap, (try caps.Receiver.create()).cap, .seq_cst);
+
+    const _boot_info: *const volatile abi.BootInfo = @ptrFromInt(main.BOOT_INFO);
+    const boot_info = _boot_info.*;
+    const initfs: []const u8 = boot_info.initfsData();
+
+    var initfs_tar_gz = std.io.fixedBufferStream(initfs);
+
     log.info("decompressing", .{});
     try std.compress.flate.inflate.decompress(.gzip, initfs_tar_gz.reader(), initfs_tar.writer());
     std.debug.assert(std.mem.eql(u8, initfs_tar.items[257..][0..8], "ustar\x20\x20\x00"));

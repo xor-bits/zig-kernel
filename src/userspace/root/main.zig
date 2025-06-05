@@ -47,18 +47,6 @@ pub var self_vmem_lock: abi.lock.YieldMutex = .new();
 pub fn main() !void {
     log.info("I am root", .{});
 
-    const len = try abi.sys.frameGetSize(abi.caps.ROOT_BOOT_INFO.cap);
-
-    _ = try abi.caps.ROOT_SELF_VMEM.map(
-        abi.caps.ROOT_BOOT_INFO,
-        0,
-        BOOT_INFO,
-        len,
-        .{},
-        .{ .fixed = true },
-    );
-    log.info("boot info mapped", .{});
-
     try initfsd.init();
 
     // const boot_info = @as(*const volatile abi.BootInfo, @ptrFromInt(BOOT_INFO)).*;
