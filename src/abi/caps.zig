@@ -243,8 +243,8 @@ pub const Sender = extern struct {
 
     pub const Type: abi.ObjectType = .sender;
 
-    pub fn create(recv: Receiver) sys.Error!@This() {
-        const cap = try sys.senderCreate(recv.cap);
+    pub fn create(recv: Receiver, stamp: u32) sys.Error!@This() {
+        const cap = try sys.senderCreate(recv.cap, stamp);
         return .{ .cap = cap };
     }
 

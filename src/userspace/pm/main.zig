@@ -198,8 +198,8 @@ const System = struct {
 };
 
 const Process = struct {
-    pm_endpoint: u32,
-    vmem_handle: usize,
+    vmem: caps.Vmem,
+    proc: caps.Process,
     main_thread: caps.Thread,
 };
 

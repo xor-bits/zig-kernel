@@ -596,7 +596,7 @@ fn handle_syscall(
             const recv = try thread.proc.getObject(caps.Receiver, @truncate(trap.arg0));
             defer recv.deinit();
 
-            const sender = try caps.Sender.init(recv, 0);
+            const sender = try caps.Sender.init(recv, @truncate(trap.arg1));
             const handle = try thread.proc.pushCapability(caps.Capability.init(sender));
             trap.syscall_id = abi.sys.encode(handle);
         },

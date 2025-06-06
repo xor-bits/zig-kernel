@@ -637,8 +637,8 @@ pub fn replyReply(reply: u32, msg: Message) Error!void {
     });
 }
 
-pub fn senderCreate(recv: u32) Error!u32 {
-    return @intCast(try syscall(.sender_create, .{recv}));
+pub fn senderCreate(recv: u32, stamp: u32) Error!u32 {
+    return @intCast(try syscall(.sender_create, .{ recv, stamp }));
 }
 
 pub fn senderCall(recv: u32, msg: Message) Error!Message {

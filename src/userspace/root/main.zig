@@ -354,7 +354,7 @@ fn grantAllImports(
             // FIXME: validate the data
             const new_handle: u32 = switch (imp.val.ty) {
                 .sender,
-                => (try caps.Sender.create(caps.Receiver{ .cap = res.handle })).cap,
+                => (try caps.Sender.create(caps.Receiver{ .cap = res.handle }, 0)).cap,
 
                 .notify,
                 .x86_irq_allocator,
