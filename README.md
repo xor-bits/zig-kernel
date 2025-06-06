@@ -7,10 +7,13 @@ all written in pure Zig
 
 </div>
 
-The plan is for the kernel to be just a scheduler, IPC relay and a physical memory manager.
+The plan is for the kernel to be just a scheduler, IPC relay, a physical memory manager and a small virtual memory manager.
 
-The system uses seL4-like capabilities, but on a global linear array instead of the CNode tree.
-And physical memory allocation is managed by the kernel.
+The system design ~~steals~~ borrows ideas from:
+ - Zircon: the reference counted capability model
+ - seL4: IPC endpoints and signals
+ - Minix3: posix compat services, like process manager
+ - Plan9/RedoxOS: filesystem URI to reference different services, like fs:///etc/hosts, initfs:///sbin/init, tcp://10.0.0.1:80 or https://archlinux.org
 
 ## Running in QEMU
 
