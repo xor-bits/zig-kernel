@@ -148,7 +148,17 @@ fn collectAllServers(servers: *std.ArrayList(Server)) !void {
     var it = initfsd.fileIterator();
     while (it.next()) |server_binary| {
         const elf_file = initfsd.readFile(server_binary.inode);
-        try servers.append(.{ .bin = try abi.loader.Elf.init(elf_file) });
+        var elf = abi.loader.Elf.init(elf_file) catch |err| {
+            log.warn("skipping invalid ELF \"initfs://{s}\": {}", .{ server_binary.path, err });
+            continue;
+        };
+        const opt_manifest = elf.manifest() catch |err| {
+            log.warn("skipping invalid ELF \"initfs://{s}\": {}", .{ server_binary.path, err });
+            continue;
+        };
+
+        if (opt_manifest == null) continue;
+        try servers.append(.{ .bin = elf });
     }
 
     // virtual memory manager (system) (server)
