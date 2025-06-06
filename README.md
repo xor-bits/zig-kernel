@@ -11,7 +11,7 @@ The plan is for the kernel to be just a scheduler, IPC relay, a physical memory 
 
 The system design ~~steals~~ borrows ideas from:
  - Zircon: the reference counted capability model
- - seL4: IPC endpoints and signals
+ - seL4: synchronous IPC endpoints and asynchronous signals
  - Minix3: posix compat services, like process manager
  - Plan9/RedoxOS: filesystem URI to reference different services, like fs:///etc/hosts, initfs:///sbin/init, tcp://10.0.0.1:80 or https://archlinux.org
 
