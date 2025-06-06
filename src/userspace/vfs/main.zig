@@ -50,29 +50,6 @@ pub fn main() !void {
         export_vfs.handle,
     });
 
-    try abi.thread.spawn(struct {
-        fn func() !void {
-            const ps2 = abi.Ps2Protocol.Client().init(.{ .cap = import_ps2.handle });
-
-            while (true) {
-                const res, const code, const state = try ps2.call(.nextKey, {});
-                try res;
-                log.info("got key ev: {{ {}, {} }}", .{ code, state });
-            }
-        }
-    }.func, .{});
-
-    try abi.thread.spawn(struct {
-        fn func() !void {
-            const hpet = abi.HpetProtocol.Client().init(.{ .cap = import_hpet.handle });
-
-            while (true) {
-                _ = try hpet.call(.sleep, .{500_000_000});
-                log.info("500ms", .{});
-            }
-        }
-    }.func, .{});
-
     if (abi.conf.IPC_BENCHMARK) {
         const recv = caps.Receiver{ .cap = export_vfs.handle };
         var msg = try recv.recv();

@@ -24,66 +24,67 @@ const color: u32 = 0xFF8000;
 // const color: u32 = 0xFFFFFF;
 // const color: u32 = 0x000000;
 
+const pm = abi.PmProtocol.Client().init(caps.Sender{ .cap = 1 });
+const hpet = abi.HpetProtocol.Client().init(caps.Sender{ .cap = 2 });
+const ps2 = abi.Ps2Protocol.Client().init(caps.Sender{ .cap = 3 });
+const fb_frame = caps.Frame{ .cap = 4 };
+const fb_info_frame = caps.Frame{ .cap = 5 };
+
 //
 
 pub fn spinnerMain() !void {
-    var res: Error!void, const framebuffer: caps.DeviceFrame, const framebuffer_info: caps.Frame =
-        try main.rm.call(.requestFramebuffer, {});
-    try res;
+    const vmem = try caps.Vmem.self();
 
-    res, const fb_addr, _ = try main.pm.call(.mapDeviceFrame, .{
-        framebuffer,
-        abi.sys.Rights{ .writable = true },
-        abi.sys.MapFlags{ .cache = .write_combining },
-    });
-    try res;
-
-    res, const fb_info_addr, _ = try main.pm.call(.mapFrame, .{
-        framebuffer_info,
-        abi.sys.Rights{},
-        abi.sys.MapFlags{},
-    });
-    try res;
-
-    res, const key_thread: caps.Thread = try main.pm.call(
-        .spawn,
-        .{ @intFromPtr(&tickKey), 0 },
+    const fb_addr = try vmem.map(
+        fb_frame,
+        0,
+        0,
+        0,
+        .{ .writable = true },
+        .{ .cache = .write_combining },
     );
-    try res;
 
-    try key_thread.start();
+    const fb_info_addr = try vmem.map(
+        fb_info_frame,
+        0,
+        0,
+        0,
+        .{},
+        .{},
+    );
+
+    try abi.thread.spawn(tickKey, .{});
 
     framebufferSplash(
+        vmem,
         @ptrFromInt(fb_addr),
         @ptrFromInt(fb_info_addr),
     ) catch |err| {
         log.warn("spinner failed: {}", .{err});
     };
-    abi.sys.stop();
 }
 
 var dir: std.atomic.Value(i32) = .init(1);
 
-fn tickKey() callconv(.SysV) noreturn {
+fn tickKey() !void {
     var local_dir: i32 = 1;
 
     while (true) {
-        const res, _, const state: abi.input.KeyState = main.input.call(
+        const res, _, const state: abi.input.KeyState = try ps2.call(
             .nextKey,
             {},
-        ) catch break;
-        res catch break;
+        );
+        try res;
 
         if (state == .release) continue;
 
         local_dir = -local_dir;
         dir.store(local_dir, .monotonic);
     }
-
-    abi.sys.stop();
 }
 
 fn framebufferSplash(
+    vmem: caps.Vmem,
     framebuffer: [*]volatile u32,
     framebuffer_info: *const abi.FramebufferInfoFrame,
 ) !void {
@@ -96,11 +97,17 @@ fn framebufferSplash(
     const height = framebuffer_info.height;
     const pitch = framebuffer_info.pitch / 4;
 
-    const res: Error!void, const backbuffer_addr = try main.pm.call(
-        .growHeap,
-        .{@as(usize, 4) * FbInfo.width * FbInfo.height},
+    const backbuffer_frame = try caps.Frame.create(@as(usize, 4) * FbInfo.width * FbInfo.height);
+    defer backbuffer_frame.close();
+
+    const backbuffer_addr = try vmem.map(
+        backbuffer_frame,
+        0,
+        0,
+        0,
+        .{ .writable = true },
+        .{},
     );
-    try res;
 
     const fb_info: FbInfo = .{
         .buffer = @as([*]u32, @ptrFromInt(backbuffer_addr))[0 .. FbInfo.width * FbInfo.height],
@@ -116,7 +123,7 @@ fn framebufferSplash(
     const mid_x = width / 2;
     const mid_y = height / 2;
 
-    const _nanos = try main.timer.call(.timestamp, {});
+    const _nanos = try hpet.call(.timestamp, {});
     var nanos: u128 = _nanos.@"0";
     var phase: i128 = 0;
     while (true) {
@@ -129,7 +136,7 @@ fn framebufferSplash(
 
         phase += dir.load(.monotonic) * frametime_ns;
         nanos += frametime_ns;
-        _ = main.timer.call(.sleepDeadline, .{nanos}) catch break;
+        _ = hpet.call(.sleepDeadline, .{nanos}) catch break;
     }
 }
 

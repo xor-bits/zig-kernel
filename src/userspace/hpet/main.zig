@@ -131,7 +131,7 @@ pub fn main() !void {
         server.ctx.dont_reply = false;
         try server.process(&msg);
 
-        if (server.ctx.dont_reply)
+        if (!server.ctx.dont_reply)
             msg = try server.rx.replyRecv(msg)
         else
             msg = try server.rx.recv();
@@ -147,7 +147,7 @@ fn timestampHandler(_: *Context, _: u32, _: void) struct { u128 } {
 }
 
 fn sleepHandler(ctx: *Context, _: u32, req: struct { u128 }) struct { void } {
-    ctx.dont_reply = false;
+    ctx.dont_reply = true;
 
     const deadline_nanos = req.@"0" + timestampNanos();
     const reply = caps.Reply.create() catch unreachable;
@@ -157,7 +157,7 @@ fn sleepHandler(ctx: *Context, _: u32, req: struct { u128 }) struct { void } {
 }
 
 fn sleepDeadlineHandler(ctx: *Context, _: u32, req: struct { u128 }) struct { void } {
-    ctx.dont_reply = false;
+    ctx.dont_reply = true;
 
     const deadline_nanos = req.@"0";
     const reply = caps.Reply.create() catch unreachable;

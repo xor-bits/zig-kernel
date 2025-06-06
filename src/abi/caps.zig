@@ -44,8 +44,12 @@ pub const Process = extern struct {
         sys.handleClose(this.cap);
     }
 
-    pub fn giveCap(this: @This(), handle: anytype) sys.Error!u32 {
-        return try sys.procGiveCap(this.cap, handle);
+    pub fn giveHandle(this: @This(), handle: anytype) sys.Error!u32 {
+        return try this.giveCap(handle.cap);
+    }
+
+    pub fn giveCap(this: @This(), cap: u32) sys.Error!u32 {
+        return try sys.procGiveCap(this.cap, cap);
     }
 };
 

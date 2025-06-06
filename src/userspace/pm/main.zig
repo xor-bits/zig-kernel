@@ -47,6 +47,18 @@ pub export var import_pci = abi.loader.Resource.new(.{
     .ty = .sender,
 });
 
+// temporary:
+pub export var import_fb = abi.loader.Resource.new(.{
+    .name = "hiillos.root.fb",
+    .ty = .frame,
+});
+
+// temporary:
+pub export var import_fb_info = abi.loader.Resource.new(.{
+    .name = "hiillos.root.fb_info",
+    .ty = .frame,
+});
+
 //
 
 pub fn main() !void {
@@ -62,8 +74,11 @@ pub fn main() !void {
         }
     }
 
-    const vmem = try caps.Vmem.self();
-    defer vmem.close();
+    var system: System = .{
+        .recv = .{ .cap = export_pm.handle },
+        .self_vmem = try caps.Vmem.self(),
+    };
+    defer system.self_vmem.close();
 
     const initfs = abi.InitfsProtocol.Client().init(.{ .cap = import_initfs.handle });
     var res, const init_size = try initfs.call(.fileSize, .{
@@ -77,9 +92,7 @@ pub fn main() !void {
     });
     try res;
 
-    std.log.info("map", .{});
-
-    const init_elf_addr = try vmem.map(
+    const init_elf_addr = try system.self_vmem.map(
         init_elf_frame,
         0,
         0,
@@ -88,146 +101,110 @@ pub fn main() !void {
         .{},
     );
 
-    const init_elf = @as([*]const u8, @ptrFromInt(init_elf_addr))[0..init_size];
-
-    log.info("exec init", .{});
-    try abi.loader.exec(init_elf);
-}
-
-pub fn _main() !void {
-    log.info("hello from pm", .{});
-
-    const root = abi.RootProtocol.Client().init(abi.rt.root_ipc);
-    const vm_client = abi.VmProtocol.Client().init(abi.rt.vm_ipc);
-    const vmem_handle = abi.rt.vmem_handle;
-
-    log.debug("requesting memory", .{});
-    var res: Error!void, const memory: caps.Memory = try root.call(.memory, {});
-    try res;
-
-    // endpoint for pm server <-> unix app communication
-    log.debug("allocating pm endpoint", .{});
-    const pm_recv = try caps.Receiver.create();
-    const pm_send = try pm_recv.subscribe();
-
-    log.debug("requesting initfs sender", .{});
-    res, const initfs_sender: caps.Sender = try root.call(.initfs, {});
-    try res;
-    const initfs_client = abi.InitfsProtocol.Client().init(initfs_sender);
-
-    log.debug("opening init ELF", .{});
-    res, const init_elf_len: usize = try initfs_client.call(.fileSize, .{("/sbin/init" ++ .{0} ** 22).*});
-    try res;
-    const init_elf_frame: caps.Frame = try memory.allocSized(caps.Frame, abi.ChunkSize.of(init_elf_len) orelse return Error.OutOfMemory);
-    res, _ = try initfs_client.call(.openFile, .{ ("/sbin/init" ++ .{0} ** 22).*, init_elf_frame });
-    try res;
+    var init_elf = try abi.loader.Elf.init(@as([*]const u8, @ptrFromInt(init_elf_addr))[0..init_size]);
 
     // init (normal) (process)
     // all the critial system servers are running, so now "normal" Linux-like init can run
     // gets a Sender capability to access the initfs part of this root process
     // just runs normal processes according to the init configuration
     // launches stuff like the window manager and virtual TTYs
-    log.debug("creating init process", .{});
-    res, const init_vmem_handle: usize = try vm_client.call(.newVmem, {});
-    try res;
-    res, _ = try vm_client.call(.loadElf, .{ init_vmem_handle, init_elf_frame, 0, init_elf_len });
-    try res;
-    res, const init_thread: caps.Thread = try vm_client.call(.newThread, .{ init_vmem_handle, 0, 0 });
-    try res;
-
-    log.debug("requesting root sender for init", .{});
-    res, const init_root_sender: caps.Sender = try root.call(.newSender, {});
-    try res;
-
-    const init_send: caps.Sender = try pm_recv.subscribe();
-
-    log.debug("starting init process", .{});
-    var regs: abi.sys.ThreadRegs = undefined;
-    try init_thread.transferCap(init_root_sender.cap);
-    try init_thread.transferCap(init_send.cap);
-    try init_thread.setPrio(0);
-    try init_thread.readRegs(&regs);
-    regs.arg0 = init_root_sender.cap;
-    regs.arg2 = init_send.cap;
-    try init_thread.writeRegs(&regs);
-    try init_thread.start();
-
-    var system: System = .{
-        .recv = pm_recv,
-        .memory = memory,
-        .root_endpoint = pm_send.cap,
-
-        .vm_client = vm_client,
-        .self_vmem_handle = vmem_handle,
-    };
-
-    system.processes[1] = Process{
-        .pm_endpoint = init_send.cap,
-        .vmem_handle = init_vmem_handle,
-        .main_thread = init_thread,
-    };
+    log.info("exec init", .{});
+    const init_pid = try system.exec(&init_elf);
+    std.debug.assert(init_pid == 1);
 
     const server = abi.PmProtocol.Server(.{
         .Context = *System,
         .scope = if (abi.conf.LOG_SERVERS) .vm else null,
     }, .{
-        .spawn = spawnHandler,
-        .growHeap = growHeapHandler,
-        .mapFrame = mapFrameHandler,
-        .mapDeviceFrame = mapDeviceFrameHandler,
-        .newSender = newSenderHandler,
-    }).init(&system, pm_recv);
+        .execElf = execElfHandler,
+    }).init(&system, system.recv);
 
     // inform the root that pm is ready
     log.debug("pm ready", .{});
-    res, _ = try root.call(.serverReady, .{ abi.ServerKind.pm, pm_send });
-    try res;
-
     try server.run();
 }
 
-const System = struct {
-    recv: caps.Receiver,
-    memory: caps.Memory,
-    root_endpoint: u32,
-
-    vm_client: abi.VmProtocol.Client(),
-    self_vmem_handle: usize,
-
-    processes: [256]?Process = .{null} ** 256,
-};
-
-const Process = struct {
+pub const Process = struct {
     vmem: caps.Vmem,
     proc: caps.Process,
-    main_thread: caps.Thread,
+    thread: caps.Thread,
 };
 
-fn spawnHandler(ctx: *System, sender: u32, req: struct { usize, usize }) struct { Error!void, caps.Thread } {
-    const ip_override = req.@"0";
-    const sp_override = req.@"1";
+pub const System = struct {
+    recv: caps.Receiver,
+    self_vmem: caps.Vmem,
 
-    for (ctx.processes[1..]) |proc| {
-        const process = proc orelse continue;
-        if (process.pm_endpoint != sender) continue;
+    processes: std.ArrayList(?Process) = .init(abi.mem.slab_allocator),
+    // empty process ids into ↑
+    free_slots: std.fifo.LinearFifo(u32, .Dynamic) = .init(abi.mem.slab_allocator),
 
-        const res, const thread = ctx.vm_client.call(.newThread, .{
-            process.vmem_handle,
-            ip_override,
-            sp_override,
-        }) catch |err| {
-            log.err("failed to spawn a thread: {}", .{err});
-            return .{ Error.Internal, .{} };
-        };
-        res catch |err| {
-            log.err("failed to spawn a thread: {}", .{err});
-            return .{ Error.Internal, .{} };
+    pub fn exec(system: *System, elf: *abi.loader.Elf) !u32 {
+        const pid = try system.allocPid();
+        std.debug.assert(pid != 0);
+        errdefer system.freePid(pid) catch |err| {
+            log.err("could not deallocate PID because another error occurred: {}", .{err});
         };
 
-        return .{ {}, thread };
+        const slot = &system.processes.items[pid - 1];
+        std.debug.assert(slot.* == null);
+
+        const vmem = try caps.Vmem.create();
+        errdefer vmem.close();
+        const proc = try caps.Process.create(vmem);
+        errdefer proc.close();
+        const thread = try caps.Thread.create(proc);
+        errdefer thread.close();
+
+        const entry = try elf.loadInto(system.self_vmem, vmem);
+
+        try abi.loader.prepareSpawn(vmem, thread, entry);
+
+        var id: u32 = 0;
+        id = try proc.giveHandle(try caps.Sender.create(system.recv, pid));
+        std.debug.assert(id == 1);
+        id = try proc.giveHandle(try (caps.Sender{ .cap = import_hpet.handle }).clone());
+        std.debug.assert(id == 2);
+        id = try proc.giveHandle(try (caps.Sender{ .cap = import_ps2.handle }).clone());
+        std.debug.assert(id == 3);
+
+        _ = try proc.giveHandle(try (caps.Frame{ .cap = import_fb.handle }).clone());
+        _ = try proc.giveHandle(try (caps.Frame{ .cap = import_fb_info.handle }).clone());
+
+        try thread.start();
+
+        slot.* = .{
+            .vmem = vmem,
+            .proc = proc,
+            .thread = thread,
+        };
+
+        return pid;
     }
 
-    return .{ Error.PermissionDenied, .{} };
+    pub fn allocPid(system: *@This()) !u32 {
+        if (system.free_slots.readItem()) |pid| {
+            return pid;
+        } else {
+            const pid = system.processes.items.len + 1;
+            if (pid > std.math.maxInt(u32))
+                return error.TooManyActiveProcesses;
+
+            try system.processes.append(null);
+            return @intCast(pid);
+        }
+    }
+
+    pub fn freePid(system: *@This(), pid: u32) !void {
+        try system.free_slots.writeItem(pid);
+    }
+};
+
+fn execElfHandler(ctx: *System, sender: u32, req: struct { [32:0]u8 }) struct { Error!void, usize } {
+    _ = ctx;
+    _ = sender;
+    _ = req;
+
+    return .{ Error.PermissionDenied, 0 };
 }
 
 fn growHeapHandler(ctx: *System, sender: u32, req: struct { usize }) struct { Error!void, usize } {

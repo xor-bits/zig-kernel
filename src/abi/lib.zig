@@ -222,8 +222,8 @@ pub const InitfsProtocol = util.Protocol(struct {
 });
 
 pub const PmProtocol = util.Protocol(struct {
-    // /// exec an elf file
-    // execElf: fn (path: [32:0]u8) struct { sys.Error!void, usize },
+    /// exec an elf file
+    execElf: fn (path: [32:0]u8) struct { sys.Error!void, usize },
 });
 
 pub const VfsProtocol = util.Protocol(struct {
