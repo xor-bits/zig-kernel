@@ -7,21 +7,15 @@ const log = std.log.scoped(.loader);
 //
 
 pub fn exec(elf: []const u8) !void {
-    log.debug("new vmem", .{});
     const vmem = try caps.Vmem.create();
     defer vmem.close();
 
-    log.debug("new proc", .{});
     const proc = try caps.Process.create(vmem);
     defer proc.close();
 
-    log.debug("loading", .{});
     const entry = try load(vmem, elf);
 
-    log.debug("spawning", .{});
     try spawn(vmem, proc, entry);
-
-    log.debug("done", .{});
 }
 
 pub fn load(vmem: caps.Vmem, elf: []const u8) !usize {
@@ -55,8 +49,6 @@ pub fn prepareSpawn(vmem: caps.Vmem, thread: caps.Thread, entry: u64) !void {
         .user_instr_ptr = entry,
         .user_stack_ptr = stack_ptr + 1024 * 256 - 0x100,
     });
-
-    log.info("spawn ip=0x{x} sp=0x{x}", .{ entry, stack_ptr });
 }
 
 pub fn spawn(vmem: caps.Vmem, proc: caps.Process, entry: u64) !void {
@@ -154,7 +146,7 @@ pub const Elf = struct {
             if (program_header.p_type != std.elf.PT_LOAD) continue;
             if (program_header.p_memsz == 0) continue;
 
-            log.debug("loading phdr", .{});
+            // log.debug("loading phdr", .{});
 
             const bytes = try getProgramData(self.data, program_header);
 
