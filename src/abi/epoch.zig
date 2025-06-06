@@ -185,6 +185,10 @@ pub const RefCnt = struct {
         // log.info("inc refcnt", .{});
         const old = self.refcnt.fetchAdd(1, .monotonic);
         if (old >= MAX) @panic("too many ref counts");
+
+        if (conf.IS_DEBUG and old % 100 == 0) {
+            std.log.warn("a high refcount detected: {}", .{old});
+        }
     }
 
     /// returns true if the item should be freed

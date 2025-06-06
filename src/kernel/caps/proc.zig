@@ -25,6 +25,8 @@ pub const Process = struct {
 
         if (conf.LOG_OBJ_CALLS)
             log.info("Process.init", .{});
+        if (conf.LOG_OBJ_STATS)
+            caps.incCount(.process);
 
         const obj: *@This() = try caps.slab_allocator.allocator().create(@This());
         obj.* = .{
@@ -41,6 +43,8 @@ pub const Process = struct {
 
         if (conf.LOG_OBJ_CALLS)
             log.info("Process.deinit", .{});
+        if (conf.LOG_OBJ_STATS)
+            caps.decCount(.process);
 
         for (self.caps.items) |*cap_slot| {
             cap_slot.deinit();

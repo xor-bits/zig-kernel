@@ -60,9 +60,17 @@ pub const Thread = struct {
 
         if (conf.LOG_OBJ_CALLS)
             log.info("Thread.init", .{});
+        if (conf.LOG_OBJ_STATS)
+            caps.incCount(.thread);
 
         const obj: *@This() = try caps.slab_allocator.allocator().create(@This());
         obj.* = .{ .proc = from_proc };
+
+        try obj.extra_regs.resize(caps.slab_allocator.allocator(), 128);
+        for (0..128) |i| {
+            obj.extra_regs.set(i, .{ .val = 0 });
+        }
+
         obj.lock.unlock();
 
         return obj;
@@ -73,6 +81,8 @@ pub const Thread = struct {
 
         if (conf.LOG_OBJ_CALLS)
             log.info("Thread.deinit", .{});
+        if (conf.LOG_OBJ_STATS)
+            caps.decCount(.thread);
 
         if (self.next) |next| next.deinit();
         if (self.prev) |prev| prev.deinit();
@@ -80,10 +90,8 @@ pub const Thread = struct {
 
         self.proc.deinit();
 
-        if (self.extra_regs.len != 0) {
-            for (0..128) |i| {
-                self.getExtra(@truncate(i)).deinit();
-            }
+        for (0..128) |i| {
+            self.getExtra(@truncate(i)).deinit();
         }
         self.extra_regs.deinit(caps.slab_allocator.allocator());
 
@@ -96,19 +104,6 @@ pub const Thread = struct {
 
         self.refcnt.inc();
         return self;
-    }
-
-    pub fn prepareExtras(self: *@This()) Error!void {
-        self.lock.lock();
-        defer self.lock.unlock();
-
-        if (self.extra_regs.len == 0) {
-            @branchHint(.cold);
-            try self.extra_regs.resize(caps.slab_allocator.allocator(), 128);
-            for (0..128) |i| {
-                self.extra_regs.set(i, .{ .val = 0 });
-            }
-        }
     }
 
     pub fn getExtra(self: *@This(), idx: u7) CapOrVal {
@@ -125,10 +120,7 @@ pub const Thread = struct {
         return val;
     }
 
-    /// cannot return an error if prepareExtras was already called successfully
-    pub fn setExtra(self: *@This(), idx: u7, data: CapOrVal) Error!void {
-        try self.prepareExtras();
-
+    pub fn setExtra(self: *@This(), idx: u7, data: CapOrVal) void {
         self.lock.lock();
         defer self.lock.unlock();
 

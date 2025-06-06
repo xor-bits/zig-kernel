@@ -23,6 +23,8 @@ pub const Frame = struct {
     pub fn init(size_bytes: usize) !*@This() {
         if (conf.LOG_OBJ_CALLS)
             log.info("Frame.init size={}", .{size_bytes});
+        if (conf.LOG_OBJ_STATS)
+            caps.incCount(.frame);
 
         if (size_bytes == 0)
             return Error.InvalidArgument;
@@ -77,6 +79,8 @@ pub const Frame = struct {
 
         if (conf.LOG_OBJ_CALLS)
             log.info("Frame.deinit", .{});
+        if (conf.LOG_OBJ_STATS)
+            caps.decCount(.frame);
 
         if (!self.is_physical) {
             for (self.pages) |page| {

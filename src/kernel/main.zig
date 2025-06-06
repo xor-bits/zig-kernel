@@ -718,20 +718,18 @@ fn handle_syscall(
             const val: u64 = @truncate(trap.arg1);
             const is_cap: bool = trap.arg2 != 0;
 
-            try thread.prepareExtras();
-
             if (is_cap) {
                 const cap = try thread.proc.takeCapability(@truncate(val));
 
                 thread.setExtra(
                     idx,
                     .{ .cap = caps.CapabilitySlot.init(cap) },
-                ) catch unreachable;
+                );
             } else {
                 thread.setExtra(
                     idx,
                     .{ .val = val },
-                ) catch unreachable;
+                );
             }
 
             trap.syscall_id = abi.sys.encode(0);
@@ -740,10 +738,7 @@ fn handle_syscall(
             const idx: u7 = @truncate(trap.arg0);
 
             const data = thread.getExtra(idx);
-            errdefer thread.setExtra(idx, data) catch {
-                // error here would mean the extras arent initialized,
-                // but getExtra returned a dummy zero, which doesnt need to be set back
-            };
+            errdefer thread.setExtra(idx, data);
 
             switch (data) {
                 .cap => |cap| {

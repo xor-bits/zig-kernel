@@ -96,6 +96,8 @@ pub const Vmem = struct {
     pub fn init() Error!*@This() {
         if (conf.LOG_OBJ_CALLS)
             log.info("Vmem.init", .{});
+        if (conf.LOG_OBJ_STATS)
+            caps.incCount(.vmem);
 
         const obj: *@This() = try caps.slab_allocator.allocator().create(@This());
         const mappings = std.ArrayList(Mapping).init(caps.slab_allocator.allocator());
@@ -115,6 +117,8 @@ pub const Vmem = struct {
 
         if (conf.LOG_OBJ_CALLS)
             log.info("Vmem.deinit", .{});
+        if (conf.LOG_OBJ_STATS)
+            caps.decCount(.vmem);
 
         for (self.mappings.items) |mapping| {
             mapping.frame.deinit();

@@ -31,6 +31,8 @@ pub const Receiver = struct {
     pub fn init() !*@This() {
         if (conf.LOG_OBJ_CALLS)
             log.info("Receiver.init", .{});
+        if (conf.LOG_OBJ_STATS)
+            caps.incCount(.receiver);
 
         const obj: *@This() = try caps.slab_allocator.allocator().create(@This());
         obj.* = .{};
@@ -44,6 +46,8 @@ pub const Receiver = struct {
 
         if (conf.LOG_OBJ_CALLS)
             log.info("Receiver.deinit", .{});
+        if (conf.LOG_OBJ_STATS)
+            caps.decCount(.receiver);
 
         // TODO: wake the waiting threads or what
         if (self.receiver.load(.monotonic)) |receiver| {
@@ -61,8 +65,6 @@ pub const Receiver = struct {
     pub fn recv(self: *@This(), thread: *caps.Thread, trap: *arch.SyscallRegs) Error!void {
         if (conf.LOG_OBJ_CALLS)
             log.debug("Receiver.recv", .{});
-
-        try thread.prepareExtras();
 
         if (thread.reply) |discarded| discarded.deinit();
         thread.reply = null;
@@ -143,8 +145,6 @@ pub const Receiver = struct {
         if (conf.LOG_OBJ_CALLS)
             log.debug("Receiver.replyRecv", .{});
 
-        try thread.prepareExtras();
-
         const sender = try Receiver.replyGetSender(thread, msg);
         std.debug.assert(sender != thread);
 
@@ -175,6 +175,8 @@ pub const Sender = struct {
 
         if (conf.LOG_OBJ_CALLS)
             log.info("Sender.init", .{});
+        if (conf.LOG_OBJ_STATS)
+            caps.incCount(.sender);
 
         const obj: *@This() = try caps.slab_allocator.allocator().create(@This());
         obj.* = .{
@@ -190,6 +192,8 @@ pub const Sender = struct {
 
         if (conf.LOG_OBJ_CALLS)
             log.info("Sender.deinit", .{});
+        if (conf.LOG_OBJ_STATS)
+            caps.decCount(.sender);
 
         self.recv.deinit();
 
@@ -200,8 +204,6 @@ pub const Sender = struct {
     pub fn call(self: *@This(), thread: *caps.Thread, trap: *arch.SyscallRegs, msg: abi.sys.Message) Error!void {
         if (conf.LOG_OBJ_CALLS)
             log.debug("Sender.call {}", .{msg});
-
-        try thread.prepareExtras();
 
         // acquire a listener or switch threads
         const listener = self.recv.receiver.swap(null, .seq_cst) orelse {
@@ -251,6 +253,8 @@ pub const Reply = struct {
     pub fn init(thread: *caps.Thread) !*@This() {
         if (conf.LOG_OBJ_CALLS)
             log.info("Reply.init", .{});
+        if (conf.LOG_OBJ_STATS)
+            caps.incCount(.reply);
 
         const sender = thread.takeReply() orelse {
             @branchHint(.cold);
@@ -269,6 +273,8 @@ pub const Reply = struct {
 
         if (conf.LOG_OBJ_CALLS)
             log.info("Reply.deinit", .{});
+        if (conf.LOG_OBJ_STATS)
+            caps.decCount(.reply);
 
         caps.slab_allocator.allocator().destroy(self);
     }
@@ -302,6 +308,8 @@ pub const Notify = struct {
     pub fn init() !*@This() {
         if (conf.LOG_OBJ_CALLS)
             log.info("Notify.init", .{});
+        if (conf.LOG_OBJ_STATS)
+            caps.incCount(.notify);
 
         const obj: *@This() = try caps.slab_allocator.allocator().create(@This());
         obj.* = .{};
@@ -315,6 +323,8 @@ pub const Notify = struct {
 
         if (conf.LOG_OBJ_CALLS)
             log.info("Notify.deinit", .{});
+        if (conf.LOG_OBJ_STATS)
+            caps.decCount(.notify);
 
         while (self.queue.popFront()) |waiter| {
             waiter.deinit();

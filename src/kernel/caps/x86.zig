@@ -457,6 +457,8 @@ pub const X86IoPortAllocator = struct {
     pub fn init() !*@This() {
         if (conf.LOG_OBJ_CALLS)
             log.info("X86IoPortAllocator.init", .{});
+        if (conf.LOG_OBJ_STATS)
+            caps.incCount(.x86_ioport_allocator);
 
         const obj: *@This() = try caps.slab_allocator.allocator().create(@This());
         obj.* = .{};
@@ -469,6 +471,8 @@ pub const X86IoPortAllocator = struct {
 
         if (conf.LOG_OBJ_CALLS)
             log.info("X86IoPortAllocator.deinit", .{});
+        if (conf.LOG_OBJ_STATS)
+            caps.decCount(.x86_ioport_allocator);
 
         caps.slab_allocator.allocator().destroy(self);
     }
@@ -493,6 +497,8 @@ pub const X86IoPort = struct {
     pub fn init(_: *X86IoPortAllocator, port: u16) Error!*@This() {
         if (conf.LOG_OBJ_CALLS)
             log.info("X86IoPort.init", .{});
+        if (conf.LOG_OBJ_STATS)
+            caps.incCount(.x86_ioport);
 
         try allocPort(&port_bitmap, port);
 
@@ -507,6 +513,8 @@ pub const X86IoPort = struct {
 
         if (conf.LOG_OBJ_CALLS)
             log.info("X86IoPort.deinit", .{});
+        if (conf.LOG_OBJ_STATS)
+            caps.decCount(.x86_ioport);
 
         freePort(&port_bitmap, self.port) catch
             unreachable;
@@ -550,6 +558,8 @@ pub const X86IrqAllocator = struct {
     pub fn init() !*@This() {
         if (conf.LOG_OBJ_CALLS)
             log.info("X86IrqAllocator.init", .{});
+        if (conf.LOG_OBJ_STATS)
+            caps.incCount(.x86_irq_allocator);
 
         const obj: *@This() = try caps.slab_allocator.allocator().create(@This());
         obj.* = .{};
@@ -562,6 +572,8 @@ pub const X86IrqAllocator = struct {
 
         if (conf.LOG_OBJ_CALLS)
             log.info("X86IrqAllocator.deinit", .{});
+        if (conf.LOG_OBJ_STATS)
+            caps.decCount(.x86_irq_allocator);
 
         caps.slab_allocator.allocator().destroy(self);
     }
@@ -585,6 +597,8 @@ pub const X86Irq = struct {
     pub fn init(_: *X86IrqAllocator, irq: u8) Error!*@This() {
         if (conf.LOG_OBJ_CALLS)
             log.info("X86Irq.init", .{});
+        if (conf.LOG_OBJ_STATS)
+            caps.incCount(.x86_irq);
 
         try allocIrq(&irq_bitmap, irq);
 
@@ -599,6 +613,8 @@ pub const X86Irq = struct {
 
         if (conf.LOG_OBJ_CALLS)
             log.info("X86Irq.deinit", .{});
+        if (conf.LOG_OBJ_STATS)
+            caps.decCount(.x86_irq);
 
         freeIrq(&irq_bitmap, self.irq) catch
             unreachable;

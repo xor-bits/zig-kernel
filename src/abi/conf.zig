@@ -6,7 +6,7 @@ pub const LOG_GENERIC: bool = LOG_EVERYTHING or false;
 pub const LOG_USER: bool = LOG_EVERYTHING or false;
 
 pub const LOG_SYSCALL_STATS: bool = LOG_STATS or false;
-pub const LOG_OBJ_ACCESS_STATS: bool = LOG_STATS or false;
+pub const LOG_OBJ_STATS: bool = LOG_STATS or true;
 pub const LOG_SYSCALLS: bool = LOG_GENERIC or false;
 pub const LOG_OBJ_CALLS: bool = LOG_GENERIC or false;
 pub const LOG_VMEM: bool = LOG_GENERIC or false;

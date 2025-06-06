@@ -54,13 +54,34 @@ pub fn init() !void {
     debugType(Frame);
     debugType(Vmem);
     debugType(Vmem.Mapping);
+    debugType(Receiver);
+    debugType(Reply);
+    debugType(Sender);
+    debugType(Notify);
     debugType(X86IoPortAllocator);
     debugType(X86IoPort);
     debugType(X86IrqAllocator);
     debugType(X86Irq);
 }
 
-pub var obj_accesses: std.EnumArray(abi.ObjectType, std.atomic.Value(usize)) = .initFill(.init(0));
+pub fn incCount(ty: abi.ObjectType) void {
+    if (!conf.LOG_OBJ_STATS) return;
+    _ = obj_counts.getPtr(ty).fetchAdd(1, .monotonic);
+
+    log.debug("objects: (new {})", .{ty});
+    var it = obj_counts.iterator();
+    while (it.next()) |e| {
+        const v = e.value.load(.monotonic);
+        log.debug(" - {}: {}", .{ e.key, v });
+    }
+}
+
+pub fn decCount(ty: abi.ObjectType) void {
+    if (!conf.LOG_OBJ_STATS) return;
+    _ = obj_counts.getPtr(ty).fetchSub(1, .monotonic);
+}
+
+var obj_counts: std.EnumArray(abi.ObjectType, std.atomic.Value(usize)) = .initFill(.init(0));
 
 //
 
