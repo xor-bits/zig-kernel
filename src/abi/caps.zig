@@ -12,6 +12,10 @@ pub const ROOT_X86_IRQ_ALLOCATOR: X86IrqAllocator = .{ .cap = 6 };
 
 //
 
+pub const Handle = extern struct {
+    cap: u32 = 0,
+};
+
 /// capability that allows kernel object allocation
 pub const Memory = extern struct {
     cap: u32 = 0,

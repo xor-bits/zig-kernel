@@ -27,13 +27,8 @@ pub export var export_vfs = abi.loader.Resource.new(.{
     .ty = .receiver,
 });
 
-pub export var import_ps2 = abi.loader.Resource.new(.{
-    .name = "hiillos.ps2.ipc",
-    .ty = .sender,
-});
-
-pub export var import_hpet = abi.loader.Resource.new(.{
-    .name = "hiillos.hpet.ipc",
+pub export var import_initfs = abi.loader.Resource.new(.{
+    .name = "hiillos.initfsd.ipc",
     .ty = .sender,
 });
 
@@ -46,9 +41,7 @@ var initfs_root: *DirNode = undefined;
 //
 
 pub fn main() !void {
-    log.info("hello from vfs, export_vfs={}", .{
-        export_vfs.handle,
-    });
+    log.info("hello from vfs", .{});
 
     if (abi.conf.IPC_BENCHMARK) {
         const recv = caps.Receiver{ .cap = export_vfs.handle };
@@ -61,38 +54,27 @@ pub fn main() !void {
             }
         }
     }
-}
-
-pub fn _main() !void {
-    log.info("hello from vfs", .{});
-
-    const root = abi.RootProtocol.Client().init(abi.rt.root_ipc);
-    const vm_client = abi.VmProtocol.Client().init(abi.rt.vm_ipc);
-
-    log.debug("requesting memory", .{});
-    var res: Error!void, const memory: caps.Memory = try root.call(.memory, {});
-    try res;
-
-    // endpoint for vfs server <-> unix app communication
-    log.debug("allocating vfs endpoint", .{});
-    const vfs_recv = try memory.alloc(caps.Receiver);
-    const vfs_send = try vfs_recv.subscribe();
-
-    log.debug("requesting initfs sender", .{});
-    res, const initfs_sender: caps.Sender = try root.call(.initfs, {});
-    try res;
-    const initfs_client = abi.InitfsProtocol.Client().init(initfs_sender);
-
-    res, const entries_frame: caps.Frame, const entries = try initfs_client.call(.list, {});
-    try res;
-
-    res, const addr, _ = try vm_client.call(.mapFrame, .{ abi.rt.vmem_handle, entries_frame, abi.sys.Rights{}, abi.sys.MapFlags{} });
-    try res;
 
     global_root = try DirNode.create();
 
     fs_root = try DirNode.create();
     initfs_root = try DirNode.create();
+
+    const initfs = abi.InitfsProtocol.Client().init(.{ .cap = import_initfs.handle });
+    const res, const entries_frame, const entries = try initfs.call(.list, {});
+    try res;
+
+    const vmem = try caps.Vmem.self();
+    defer vmem.close();
+
+    const addr = try vmem.map(
+        entries_frame,
+        0,
+        0,
+        0,
+        .{},
+        .{},
+    );
 
     try putDir(global_root, "initfs://", initfs_root);
     try putDir(global_root, "fs://", fs_root);
@@ -134,11 +116,6 @@ pub fn _main() !void {
 
     // inform the root that vfs is ready
     log.debug("vfs ready", .{});
-    res, _ = try root.call(.serverReady, .{ abi.ServerKind.vfs, vfs_send });
-    try res;
-
-    // const root_node = try DirNode.create();
-    // root_node.inode;
 
     // const server = abi.vfsProtocol.Server(.{}).init(vfs_recv);
     // try server.run();

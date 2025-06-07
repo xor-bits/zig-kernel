@@ -49,7 +49,6 @@ pub const Receiver = struct {
         if (conf.LOG_OBJ_STATS)
             caps.decCount(.receiver);
 
-        // TODO: wake the waiting threads or what
         if (self.receiver.load(.monotonic)) |receiver| {
             receiver.deinit();
         }
@@ -77,7 +76,6 @@ pub const Receiver = struct {
     // might block the user-space thread (kernel-space should only ever block after a syscall is complete)
     /// returns true if the current thread went to sleep
     fn recvNoFail(self: *@This(), thread: *caps.Thread, trap: *arch.SyscallRegs) bool {
-
         // stop the thread early to hold the lock for a shorter time
         thread.status = .waiting;
         thread.trap = trap.*;

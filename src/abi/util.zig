@@ -278,14 +278,14 @@ const MessageUsage = struct {
         var enc: DataEntryEnc = undefined;
 
         switch (ty) {
-            caps.Memory,
+            caps.Handle,
             caps.Thread,
+            caps.Process,
             caps.Vmem,
             caps.Frame,
-            caps.DeviceFrame,
             caps.Receiver,
-            caps.Sender,
             caps.Reply,
+            caps.Sender,
             caps.Notify,
             caps.X86IoPortAllocator,
             caps.X86IoPort,

@@ -8,6 +8,7 @@ pub const epoch = @import("epoch.zig");
 pub const input = @import("input.zig");
 pub const loader = @import("loader.zig");
 pub const lock = @import("lock.zig");
+pub const lpc = @import("lpc.zig");
 pub const mem = @import("mem.zig");
 pub const ring = @import("ring.zig");
 pub const rt = @import("rt.zig");
@@ -226,30 +227,58 @@ pub const PmProtocol = util.Protocol(struct {
     execElf: fn (path: [32:0]u8) struct { sys.Error!void, usize },
 });
 
+// pub const VfsProtocol2 = struct {
+//     pub const NamespaceRequest = struct {};
+//     pub const NamespaceResult = struct {};
+//     pub const Client = util.Client;
+//     pub const Server = util.Server;
+// };
+
+pub const File = struct {
+    pub const OpenOptions = packed struct {
+        mode: enum(u2) {
+            read_only = 1,
+            write_only = 2,
+            read_write = 3,
+            _,
+        },
+        file_policy: enum(u2) {
+            create_new = 1,
+            use_existing = 2,
+            create_if_missing = 3,
+            _,
+        },
+        dir_policy: enum(u2) {
+            create_new = 1,
+            use_existing = 2,
+            create_if_missing = 3,
+            _,
+        },
+        type: enum(u1) {
+            file,
+            dir,
+        },
+        _: u1 = 0,
+    };
+};
+
 pub const VfsProtocol = util.Protocol(struct {
-    /// open a namespace, like fs://, initfs:// or fs:///app/1
-    namespaceShort: fn (path: [32:0]u8) struct { sys.Error!void, usize },
+    /// open a new file handle
+    open: fn (path: caps.Frame, path_frame_offs: usize, path_len: usize, open_opts: u8) struct { sys.Error!void, caps.Sender },
 
-    // /// open a namespace, like fs://, initfs:// or fs:///app/1
-    // namespace: fn (path: [128:0]u8) struct { sys.Error!void, usize },
+    // TODO: pager backed Frames
+    /// create a (possibly shared) handle to contents of a file
+    frame: fn () struct { sys.Error!void, caps.Frame },
 
-    // /// open a sub-namespace, /app/1 in fs://
-    // subnamespaceShort: fn (ns_handle: usize, path: [24:0]u8) struct { sys.Error!void, usize },
+    // seekRelative: fn (offs: i128) struct {},
 
-    /// close a namespace handle
-    closeNamespace: fn (handle: usize) struct { sys.Error!void, void },
+    // seekStart: fn (offs: i128) struct {},
 
-    /// open a file within a namespace
-    openShort: fn (ns_handle: usize, path: [24:0]u8) struct { sys.Error!void, usize },
+    // seekEnd: fn (offs: i128) struct {},
 
-    // /// open a file within a namespace
-    // open: fn (ns_handle: usize, path: [120:0]u8) struct { sys.Error!void, usize },
+    read: fn (buf: caps.Frame, buf_offs: usize, buf_len: usize) struct { sys.Error!void, usize },
 
-    /// close a file handle
-    close: fn (handle: usize) struct { sys.Error!void, void },
-
-    /// gets a shared 4K page in a file
-    getPage: fn (handle: usize, index: usize) struct { sys.Error!void, caps.Frame },
+    write: fn (buf: caps.Frame, buf_offs: usize, buf_len: usize) struct { sys.Error!void, usize },
 });
 
 pub const HpetProtocol = util.Protocol(struct {
