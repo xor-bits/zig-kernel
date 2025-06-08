@@ -83,36 +83,43 @@ pub fn main() !void {
     initfsd_entry.value_ptr.* = .{
         .handle = (try initfsd.getReceiver()).cap,
         .type = .receiver,
+        .given = 1,
     };
     const hpet_entry = try resources.getOrPut(("hiillos.root.hpet" ++ .{0} ** 90).*);
     hpet_entry.value_ptr.* = .{
         .handle = boot_info.hpet.cap,
         .type = .frame,
+        .given = 1,
     };
     // const hpet_info_entry = try resources.getOrPut(("hiillos.root.hpet_info" ++ .{0} ** 85).*);
     // hpet_info_entry.value_ptr.* = .{
     //     .handle = boot_info.hpet_info.cap,
     //     .type = .frame,
+    //     .given = 1,
     // };
     const fb_entry = try resources.getOrPut(("hiillos.root.fb" ++ .{0} ** 92).*);
     fb_entry.value_ptr.* = .{
         .handle = boot_info.framebuffer.cap,
         .type = .frame,
+        .given = 1,
     };
     const fb_info_entry = try resources.getOrPut(("hiillos.root.fb_info" ++ .{0} ** 87).*);
     fb_info_entry.value_ptr.* = .{
         .handle = boot_info.framebuffer_info.cap,
         .type = .frame,
+        .given = 1,
     };
     const mcfg_entry = try resources.getOrPut(("hiillos.root.mcfg" ++ .{0} ** 90).*);
     mcfg_entry.value_ptr.* = .{
         .handle = boot_info.mcfg.cap,
         .type = .frame,
+        .given = 1,
     };
     const mcfg_info_entry = try resources.getOrPut(("hiillos.root.mcfg_info" ++ .{0} ** 85).*);
     mcfg_info_entry.value_ptr.* = .{
         .handle = boot_info.mcfg_info.cap,
         .type = .frame,
+        .given = 1,
     };
 
     // find all critical system servers in the initfs
@@ -270,6 +277,7 @@ fn createAllImports(
                             @truncate(imp.val.note),
                         )).cap,
                         .type = .x86_ioport,
+                        .given = 1,
                     };
                 },
                 .x86_irq => {
@@ -279,12 +287,14 @@ fn createAllImports(
                             @truncate(imp.val.note),
                         )).cap,
                         .type = .x86_irq,
+                        .given = 1,
                     };
                 },
                 .x86_irq_allocator => {
                     result.value_ptr.* = Resource{
                         .handle = try abi.sys.handleDuplicate(caps.ROOT_X86_IRQ_ALLOCATOR.cap),
                         .type = .x86_irq_allocator,
+                        .given = 1,
                     };
                 },
                 else => {
@@ -371,7 +381,7 @@ fn grantAllImports(
                 .x86_irq,
                 .frame,
                 => b: {
-                    if (res.given != 0) {
+                    if (res.given != 1) {
                         log.warn("duplicate request to the same import resource", .{});
                         continue;
                     }
