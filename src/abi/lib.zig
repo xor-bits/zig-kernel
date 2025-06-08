@@ -265,7 +265,9 @@ pub const File = struct {
 pub const VfsProtocol = util.Protocol(struct {
     /// open a new file handle
     open: fn (path: caps.Frame, path_frame_offs: usize, path_len: usize, open_opts: u8) struct { sys.Error!void, caps.Sender },
+});
 
+pub const FdProtocol = util.Protocol(struct {
     // TODO: pager backed Frames
     /// create a (possibly shared) handle to contents of a file
     frame: fn () struct { sys.Error!void, caps.Frame },

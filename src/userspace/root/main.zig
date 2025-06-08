@@ -217,7 +217,7 @@ fn createAllExports(
 
             const result = try resources.getOrPut(exp.val.name);
             if (result.found_existing) {
-                log.warn("export resource collision: '{s}'", .{exp.name});
+                log.warn("export resource collision: '{s}'", .{exp.val.getName()});
                 continue;
             }
 
@@ -259,10 +259,7 @@ fn createAllImports(
             });
 
             const result = try resources.getOrPut(imp.val.name);
-            if (result.found_existing) {
-                log.warn("import resource collision: '{s}'", .{imp.name});
-                continue;
-            }
+            if (result.found_existing) continue;
 
             // FIXME: validate the data
             switch (imp.val.ty) {
