@@ -623,8 +623,9 @@ pub const Entry = packed struct {
         return Self.newAny(isr);
     }
 
+    /// LLVM generated ISR
     pub fn generate(comptime handler: anytype) Self {
-        const handler_wrapper = struct {
+        const HandlerWrapper = struct {
             fn interrupt(interrupt_stack_frame: *const InterruptStackFrame) callconv(.Interrupt) void {
                 const is_user = interrupt_stack_frame.code_segment == @as(u16, GdtDescriptor.user_code_selector);
                 if (is_user) swapgs();
@@ -634,11 +635,12 @@ pub const Entry = packed struct {
             }
         };
 
-        return Self.new(handler_wrapper.interrupt);
+        return Self.new(HandlerWrapper.interrupt);
     }
 
+    /// LLVM generated ISR
     pub fn generateWithEc(comptime handler: anytype) Self {
-        const handler_wrapper = struct {
+        const HandlerWrapper = struct {
             fn interrupt(interrupt_stack_frame: *const InterruptStackFrame, ec: u64) callconv(.Interrupt) void {
                 const is_user = interrupt_stack_frame.code_segment == @as(u16, GdtDescriptor.user_code_selector);
                 if (is_user) swapgs();
@@ -648,7 +650,91 @@ pub const Entry = packed struct {
             }
         };
 
-        return Self.newWithEc(handler_wrapper.interrupt);
+        return Self.newWithEc(HandlerWrapper.interrupt);
+    }
+
+    /// custom ISR with `*arch.SyscallRegs` support
+    pub fn generateTrap(comptime handler: anytype) Self {
+        const HandlerWrapper = struct {
+            fn interrupt() callconv(.naked) noreturn {
+                asm volatile (SyscallRegs.push ++
+                        \\ xorq %rbp, %rbp
+                        // set up the *SyscallRegs argument
+                        \\ movq %rsp, %rdi
+                        \\ call {wrapper}
+                    ++ SyscallRegs.pop ++
+                        \\ iretq
+                    :
+                    : [wrapper] "r" (@intFromPtr(&wrapper)),
+                    : "memory"
+                );
+            }
+
+            fn wrapper(rsp: u64) void {
+                const trap: *SyscallRegs = @ptrFromInt(rsp);
+                const interrupt_stack_frame: *const InterruptStackFrame = @ptrFromInt(rsp - @sizeOf(InterruptStackFrame));
+
+                const is_user = interrupt_stack_frame.code_segment == @as(u16, GdtDescriptor.user_code_selector);
+                if (is_user) swapgs();
+                defer if (is_user) swapgs();
+
+                handler.handler(trap, interrupt_stack_frame);
+            }
+        };
+
+        return Self.newAny(@intFromPtr(&HandlerWrapper.interrupt));
+    }
+
+    /// custom ISR with `*arch.SyscallRegs` support
+    pub fn generateTrapWithEc(comptime handler: anytype) Self {
+        const HandlerWrapper = struct {
+            fn interrupt() callconv(.naked) noreturn {
+                const instr =
+                    // push a dummy rsp and all other regs
+                    \\ push %rax
+                ++ SyscallRegs.push ++
+                    \\
+                    // \\ cld
+                    // \\ xorq %rbp, %rbp
+                    // set up the *SyscallRegs argument
+                    \\ movq %rsp, %rdi
+                    \\ movq %[f], %%rax
+                    // @sizeOf(SyscallRegs) is 128, so the stack is aligned to 0x10
+                    \\ call *%%rax
+
+                    // pop all other regs and discard the dummy rsp and discard the error code
+                ++ SyscallRegs.pop ++
+                    \\ add $16, %rsp
+                    \\ iretq
+                ;
+
+                asm volatile (instr
+                    :
+                    : [f] "i" (&wrapper),
+                    : "memory"
+                );
+            }
+
+            fn wrapper(rsp: u64) callconv(.SysV) void {
+                const trap: *SyscallRegs = @ptrFromInt(rsp);
+                const ec: *const u64 = @ptrFromInt(rsp + @sizeOf(SyscallRegs));
+                const interrupt_stack_frame: *const InterruptStackFrame = @ptrFromInt(rsp + @sizeOf(SyscallRegs) + 8);
+
+                const is_user = interrupt_stack_frame.code_segment == @as(u16, GdtDescriptor.user_code_selector);
+                if (is_user) swapgs();
+                defer if (is_user) swapgs();
+
+                // replace the dummy values with the real values
+                // $$$ FIXME: sysretq doesnt preserve RCX and R11 unlike iretq
+                trap.user_instr_ptr = interrupt_stack_frame.ip;
+                trap.user_stack_ptr = interrupt_stack_frame.sp;
+                trap.rflags = @bitCast(interrupt_stack_frame.cpu_flags);
+
+                handler.handler(trap, interrupt_stack_frame, ec.*);
+            }
+        };
+
+        return Self.newAny(@intFromPtr(&HandlerWrapper.interrupt));
     }
 
     fn newAny(isr: usize) Self {
@@ -854,8 +940,8 @@ pub const Idt = extern struct {
             }
         }).withStack(2).asInt();
         // page fault
-        entries[14] = Entry.generateWithEc(struct {
-            fn handler(interrupt_stack_frame: *const InterruptStackFrame, ec: u64) void {
+        entries[14] = Entry.generateTrapWithEc(struct {
+            fn handler(_: *SyscallRegs, interrupt_stack_frame: *const InterruptStackFrame, ec: u64) void {
                 const pfec: PageFaultError = @bitCast(ec);
                 const target_addr = Cr2.read().page_fault_addr;
 
@@ -871,6 +957,7 @@ pub const Idt = extern struct {
                 const thread = cpuLocal().current_thread.?;
 
                 const vaddr = addr.Virt.fromUser(target_addr) catch |err| {
+                    log.warn("unhandled page fault: {}", .{err});
                     thread.unhandledPageFault(
                         target_addr,
                         caused_by,
@@ -882,6 +969,7 @@ pub const Idt = extern struct {
 
                 if (pfec.user_mode and !conf.KERNEL_PANIC_ON_USER_FAULT) {
                     thread.proc.vmem.pageFault(caused_by, vaddr) catch |err| {
+                        log.warn("unhandled page fault: {}", .{err});
                         thread.unhandledPageFault(
                             target_addr,
                             caused_by,
@@ -891,6 +979,26 @@ pub const Idt = extern struct {
                         );
                     };
 
+                    // log.warn(
+                    //     \\page fault 0x{x}
+                    //     \\ - user: {any}
+                    //     \\ - caused by write: {any}
+                    //     \\ - instruction fetch: {any}
+                    //     \\ - ip: 0x{x}
+                    //     \\ - sp: 0x{x}
+                    //     \\ - pfec: {}
+                    // , .{
+                    //     target_addr,
+                    //     pfec.user_mode,
+                    //     pfec.caused_by_write,
+                    //     pfec.instruction_fetch,
+                    //     interrupt_stack_frame.ip,
+                    //     interrupt_stack_frame.sp,
+                    //     pfec,
+                    // });
+
+                    // log.info("trap={}", .{trap});
+                    // sysret(trap);
                     return;
                 }
 
@@ -901,6 +1009,7 @@ pub const Idt = extern struct {
                     \\ - instruction fetch: {any}
                     \\ - ip: 0x{x}
                     \\ - sp: 0x{x}
+                    \\ - pfec: {}
                     \\ - line:
                     \\{}
                 , .{
@@ -910,6 +1019,7 @@ pub const Idt = extern struct {
                     pfec.instruction_fetch,
                     interrupt_stack_frame.ip,
                     interrupt_stack_frame.sp,
+                    pfec,
                     logs.Addr2Line{ .addr = interrupt_stack_frame.ip },
                 });
             }
@@ -1100,6 +1210,14 @@ pub const InterruptStackFrame = extern struct {
 
     /// stack(data) privilege level before the interrupt
     stack_segment: u16,
+};
+
+pub const InterruptStackFrameRaw = extern struct {
+    ip: usize,
+    code_segment: u64,
+    cpu_flags: Rflags,
+    sp: usize,
+    stack_segment: u64,
 };
 
 fn interruptEc(interrupt_stack_frame: *const InterruptStackFrame, ec: u64) callconv(.Interrupt) void {
@@ -1368,6 +1486,46 @@ pub const SyscallRegs = extern struct {
         self.arg4 = regs[4];
         self.arg5 = regs[5];
     }
+
+    pub const push =
+        \\
+        \\ push %rax
+        \\ push %rbx
+        \\ push %rcx
+        \\ push %rdx
+        \\ push %rdi
+        \\ push %rsi
+        \\ push %rbp
+        \\ push %r8
+        \\ push %r9
+        \\ push %r10
+        \\ push %r11
+        \\ push %r12
+        \\ push %r13
+        \\ push %r14
+        \\ push %r15
+        \\
+    ;
+
+    pub const pop =
+        \\
+        \\ popq %r15
+        \\ popq %r14
+        \\ popq %r13
+        \\ popq %r12
+        \\ popq %r11
+        \\ popq %r10
+        \\ popq %r9
+        \\ popq %r8
+        \\ popq %rbp
+        \\ popq %rsi
+        \\ popq %rdi
+        \\ popq %rdx
+        \\ popq %rcx
+        \\ popq %rbx
+        \\ popq %rax
+        \\
+    ;
 };
 
 const syscall_enter = std.fmt.comptimePrint(
@@ -1380,57 +1538,29 @@ const syscall_enter = std.fmt.comptimePrint(
     \\ movq %rsp, %gs:{0d}
     \\ movq %gs:{1d}, %rsp
     \\ pushq %gs:{0d}
-
-    // save all (lol thats a lie) registers
-    \\ push %rax
-    \\ push %rbx
-    \\ push %rcx
-    \\ push %rdx
-    \\ push %rdi
-    \\ push %rsi
-    \\ push %rbp
-    \\ push %r8
-    \\ push %r9
-    \\ push %r10
-    \\ push %r11
-    \\ push %r12
-    \\ push %r13
-    \\ push %r14
-    \\ push %r15
-
-    // set up the *SyscallRegs argument
+++ SyscallRegs.push ++
     \\ xorq %rbp, %rbp
+    // set up the *SyscallRegs argument
     \\ movq %rsp, %rdi
-, .{ @offsetOf(CpuConfig, "rsp_user"), @offsetOf(CpuConfig, "rsp_kernel") });
+,
+    .{ @offsetOf(CpuConfig, "rsp_user"), @offsetOf(CpuConfig, "rsp_kernel") },
+);
 
 const sysret_instr = std.fmt.comptimePrint(
-    \\ popq %r15
-    \\ popq %r14
-    \\ popq %r13
-    \\ popq %r12
-    \\ popq %r11
-    \\ popq %r10
-    \\ popq %r9
-    \\ popq %r8
-    \\ popq %rbp
-    \\ popq %rsi
-    \\ popq %rdi
-    \\ popq %rdx
-    \\ popq %rcx
-    \\ popq %rbx
-    \\ popq %rax
+    SyscallRegs.pop ++
+        // load the user stack by temporarily storing
+        // the user RSP in the kernel GS structure
+        \\ popq %gs:{0d}
+        \\ movq %gs:{0d}, %rsp
+        \\ swapgs
 
-    // load the user stack by temporarily storing
-    // the user RSP in the kernel GS structure
-    \\ popq %gs:{0d}
-    \\ movq %gs:{0d}, %rsp
-    \\ swapgs
-
-    // and finally the actual sysret
-    // FIXME: NMI,MCE interrupt race condition
-    // (https://wiki.osdev.org/SYSENTER#Security_of_SYSRET)
-    \\ sysretq
-, .{@offsetOf(CpuConfig, "rsp_user")});
+        // and finally the actual sysret
+        // FIXME: NMI,MCE interrupt race condition
+        // (https://wiki.osdev.org/SYSENTER#Security_of_SYSRET)
+        \\ sysretq
+    ,
+    .{@offsetOf(CpuConfig, "rsp_user")},
+);
 
 pub fn sysret(args: *SyscallRegs) noreturn {
     const instr =

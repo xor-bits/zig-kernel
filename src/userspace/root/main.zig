@@ -441,6 +441,7 @@ pub export fn _start() linksection(".text._start") callconv(.Naked) noreturn {
 }
 
 export fn zigMain() noreturn {
+    log.info("hello", .{});
     // switch to a bigger stack (256KiB, because the initfs deflate takes up over 128KiB on its own)
     mapStack() catch |err| {
         std.debug.panic("not enough memory for a stack: {}", .{err});

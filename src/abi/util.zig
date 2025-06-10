@@ -647,7 +647,7 @@ test "comptime RPC Protocol generator" {
     const client = Proto.Client().init(.{});
     const res1 = client.call(.hello1, .{5});
     const res2 = client.call(.hello2, {});
-    const res3 = client.call(.hello3, .{try caps.ROOT_MEMORY.alloc(caps.Frame)});
+    const res3 = client.call(.hello3, .{try caps.Frame.create(0x1000)});
 
     try std.testing.expect(@TypeOf(res1) == sys.Error!struct { sys.Error!void });
     try std.testing.expect(@TypeOf(res2) == sys.Error!struct { void });
