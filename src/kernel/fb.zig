@@ -66,6 +66,8 @@ const glyphs = font.glyphs;
 
 var fb_lazy_init = lazy.Lazy(void).new();
 pub fn print(comptime fmt: []const u8, args: anytype) void {
+    if (!pmem.isInitialized()) return;
+
     _ = fb_lazy_init.getOrInit(lazy.fnPtrAsInit(void, init_fb)) orelse {
         return;
     };
@@ -102,17 +104,19 @@ pub fn clear() void {
 var cursor_x: u32 = 0;
 var cursor_y: u32 = 0;
 var fb: util.Image([*]volatile u8) = undefined;
-var terminal_buf: []u8 = undefined;
-var terminal_buf_prev: []u8 = undefined;
+var terminal_buf: []u8 = &.{};
+var terminal_buf_prev: []u8 = &.{};
 var terminal_size: struct { w: u32, h: u32 } = undefined;
 var initialized: bool = false;
 
 fn init_fb() void {
     const framebuffer_response = framebuffer.response orelse {
+        uart.print("failed to init fb log: no fb response", .{});
         return;
     };
 
     if (framebuffer_response.framebuffer_count < 1) {
+        uart.print("failed to init fb log: no fbs", .{});
         return;
     }
 
@@ -131,6 +135,7 @@ fn init_fb() void {
     };
     const terminal_buf_size = terminal_size.w * terminal_size.h;
     const whole_terminal_buf = pmem.page_allocator.alloc(u8, terminal_buf_size * 2) catch {
+        uart.print("failed to init fb log: no memory {}", .{terminal_buf_size * 2});
         return;
     };
 

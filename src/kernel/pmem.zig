@@ -117,10 +117,17 @@ pub fn totalPages() usize {
     return usable.load(.monotonic);
 }
 
+pub fn isInitialized() bool {
+    return pmem_ready;
+}
+
 //
 
-/// tells if the frame allocator can be used already (debugging)
+/// tells if the frame allocator can be used already internally (debugging)
 var initialized = if (conf.IS_DEBUG) false else {};
+
+/// tells if the frame allocator can be used already by other parts of the kernel
+var pmem_ready = false;
 
 /// approximately 2 bits for each 4KiB page to track
 /// 4KiB, 8KiB, 16KiB, 32KiB, .. 2MiB, 4MiB, .., 512MiB and 1GiB chunks
@@ -314,7 +321,7 @@ pub fn init() !void {
         };
     }
 
-    initialized = if (conf.IS_DEBUG) true else {};
+    util.volat(&initialized).* = if (conf.IS_DEBUG) true else {};
 
     log.info("freeing usable memory", .{});
     for (memory_response.entries()) |memory_map_entry| {
@@ -345,6 +352,8 @@ pub fn init() !void {
             _ = usable.fetchAdd(n_pages, .monotonic);
         }
     }
+
+    util.volat(&pmem_ready).* = true;
 
     printInfo();
 }

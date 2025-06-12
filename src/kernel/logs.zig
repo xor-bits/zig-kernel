@@ -42,18 +42,21 @@ fn logFn(comptime message_level: std.log.Level, comptime scope: @TypeOf(.enum_li
     if (arch.cpuIdSafe()) |id| {
         const fmt = "\x1B[90m[ " ++ level_col ++ level_txt ++ "\x1B[90m" ++ scope_txt ++ " #{} ]: \x1B[0m";
 
-        uart.print(fmt, .{id});
-        uart.print(format ++ "\n", args);
-
-        if (conf.KERNEL_PANIC_RSOD and scope == .panic) {
+        if (abi.conf.ENABLE_UART_LOG) {
+            uart.print(fmt, .{id});
+            uart.print(format ++ "\n", args);
+        }
+        if (abi.conf.ENABLE_FB_LOG or (conf.KERNEL_PANIC_RSOD and scope == .panic)) {
             fb.print(fmt, .{id});
             fb.print(format ++ "\n", args);
         }
     } else {
         const fmt = "\x1B[90m[ " ++ level_col ++ level_txt ++ "\x1B[90m" ++ scope_txt ++ " #? ]: \x1B[0m" ++ format;
 
-        uart.print(fmt ++ "\n", args);
-        if (conf.KERNEL_PANIC_RSOD and scope == .panic) {
+        if (abi.conf.ENABLE_UART_LOG) {
+            uart.print(fmt ++ "\n", args);
+        }
+        if (abi.conf.ENABLE_FB_LOG or (conf.KERNEL_PANIC_RSOD and scope == .panic)) {
             fb.print(fmt ++ "\n", args);
         }
     }

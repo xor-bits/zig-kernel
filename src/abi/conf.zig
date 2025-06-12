@@ -1,5 +1,8 @@
 const builtin = @import("builtin");
 
+pub const ENABLE_FB_LOG: bool = false;
+pub const ENABLE_UART_LOG: bool = true;
+
 pub const LOG_EVERYTHING: bool = false;
 pub const LOG_STATS: bool = LOG_EVERYTHING or false;
 pub const LOG_GENERIC: bool = LOG_EVERYTHING or false;
