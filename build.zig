@@ -14,6 +14,7 @@ const Opts = struct {
     testing: bool,
     cpus: u8,
     kvm: bool,
+    sound: bool,
 };
 
 fn options(b: *std.Build, target: std.Build.ResolvedTarget) Opts {
@@ -57,6 +58,10 @@ fn options(b: *std.Build, target: std.Build.ResolvedTarget) Opts {
 
         // QEMU KVM hardware acceleration
         .kvm = b.option(bool, "kvm", "QEMU KVM hardware acceleration") orelse
+            true,
+
+        // QEMU virtio-sound device
+        .sound = b.option(bool, "sound", "Add virtio-sound device to QEMU") orelse
             true,
     };
 }
@@ -118,12 +123,15 @@ fn runQemu(b: *std.Build, opts: *const Opts, os_iso: std.Build.LazyPath) void {
         "std",
         "-usb",
         "-device",
-        "virtio-sound",
-        "-device",
         "usb-tablet",
         "-drive",
     });
+
     qemu_step.addPrefixedFileArg("format=raw,file=", os_iso);
+
+    if (opts.sound) {
+        qemu_step.addArgs(&.{ "-device", "virtio-sound" });
+    }
 
     if (opts.kvm) {
         qemu_step.addArgs(&.{
