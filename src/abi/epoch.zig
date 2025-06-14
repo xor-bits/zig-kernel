@@ -13,7 +13,7 @@ const lock = @import("lock.zig");
 pub fn init_thread() void {
     const l = locals();
     l.* = .{
-        .hazard = .{std.ArrayList(DeferFunc).init(root.epoch_allocator)} ** 3,
+        .hazard = .{std.ArrayList(DeferFunc).init(allocator())} ** 3,
     };
 
     var all_locals_now = all_locals.load(.monotonic);
@@ -108,7 +108,7 @@ fn tryAdvance() usize {
     return new_epoch;
 }
 
-pub fn deferDeinit(guard: Guard, allocator: std.mem.Allocator, ptr: anytype) void {
+pub fn deferDeinit(guard: Guard, alloc: std.mem.Allocator, ptr: anytype) void {
     const Obj = struct {
         allocator: std.mem.Allocator,
         ptr: @TypeOf(ptr),
@@ -124,7 +124,7 @@ pub fn deferDeinit(guard: Guard, allocator: std.mem.Allocator, ptr: anytype) voi
 
     var data: [3]usize = undefined;
     @as(*Obj, @ptrCast(&data)).* = Obj{
-        .allocator = allocator,
+        .allocator = alloc,
         .ptr = ptr,
     };
 
@@ -271,4 +271,8 @@ fn CachePadded(comptime T: type) type {
 
 fn locals() *Locals {
     return root.epoch_locals();
+}
+
+fn allocator() std.mem.Allocator {
+    return root.epoch_allocator;
 }

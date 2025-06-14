@@ -354,3 +354,21 @@ pub const Mode = packed struct {
     _reserved0: u3 = 0,
     _reserved1: u16 = 0,
 };
+
+test {
+    _ = btree;
+    _ = caps;
+    _ = conf;
+    _ = epoch;
+    _ = input;
+    _ = loader;
+    _ = lock;
+    _ = lpc;
+    _ = mem;
+    _ = ring;
+    _ = rt;
+    _ = sys;
+    _ = thread;
+    _ = util;
+    std.testing.refAllDeclsRecursive(@This());
+}

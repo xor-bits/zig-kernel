@@ -12,11 +12,12 @@ pub var vm_ipc: caps.Sender = .{ .cap = 0 };
 pub var vmem_handle: usize = 0;
 
 pub fn installRuntime() void {
-    // ??? wtf zig
-    // export fn doesnt work without this random empty function that is called in comptime
+    @export(&_start, .{
+        .name = "_start",
+    });
 }
 
-pub export fn _start() callconv(.SysV) noreturn {
+fn _start() callconv(.SysV) noreturn {
     thread.callFn(root.main, .{});
     sys.selfStop();
 }
