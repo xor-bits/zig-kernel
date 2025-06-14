@@ -371,5 +371,6 @@ test {
     _ = sys;
     _ = thread;
     _ = util;
+    _ = relocator;
     std.testing.refAllDeclsRecursive(@This());
 }
