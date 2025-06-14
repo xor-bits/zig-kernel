@@ -670,7 +670,7 @@ test "comptime RPC Protocol generator" {
         }
     };
 
-    const server = Proto.Server(void, .{
+    const server = Proto.Server(.{ .Context = void }, .{
         .hello1 = S.hello1,
         .hello2 = S.hello2,
         .hello3 = S.hello3,
