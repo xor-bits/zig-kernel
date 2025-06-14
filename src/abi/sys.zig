@@ -192,14 +192,6 @@ pub const MapFlags = packed struct {
     fixed: bool = false,
     _: u7 = 0,
     // global: bool = false,
-
-    pub fn asInt(self: MapFlags) u16 {
-        return @bitCast(self);
-    }
-
-    pub fn fromInt(i: u64) MapFlags {
-        return @bitCast(@as(u16, @truncate(i)));
-    }
 };
 
 /// syscall interface Error type

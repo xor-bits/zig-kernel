@@ -17,18 +17,6 @@ pub const Handle = extern struct {
     cap: u32 = 0,
 };
 
-/// capability that allows kernel object allocation
-pub const Memory = extern struct {
-    cap: u32 = 0,
-
-    pub const Type: abi.ObjectType = .memory;
-
-    pub fn alloc(self: @This(), comptime Obj: type) sys.Error!Obj {
-        _ = self;
-        return Obj{ .cap = 0 };
-    }
-};
-
 /// capability to manage a single process
 pub const Process = extern struct {
     cap: u32 = 0,
@@ -201,13 +189,6 @@ pub const Frame = extern struct {
     }
 };
 
-/// capability to a MMIO physical memory region
-pub const DeviceFrame = extern struct {
-    cap: u32 = 0,
-
-    pub const Type: abi.ObjectType = .device_frame;
-};
-
 /// capability to **the** receiver end of an endpoint,
 /// there can only be a single receiver
 pub const Receiver = extern struct {
@@ -239,14 +220,6 @@ pub const Receiver = extern struct {
 
     pub fn replyRecv(self: @This(), msg: sys.Message) sys.Error!sys.Message {
         return try sys.receiverReplyRecv(self.cap, msg);
-    }
-
-    pub fn saveCaller(self: @This()) sys.Error!Reply {
-        return .{ .cap = sys.receiverSaveCaller(self.cap) };
-    }
-
-    pub fn loadCaller(self: @This(), reply_cap: Reply) sys.Error!void {
-        return sys.receiverLoadCaller(self.cap, reply_cap.cap);
     }
 };
 

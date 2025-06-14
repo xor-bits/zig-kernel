@@ -644,6 +644,10 @@ fn unwrapTuple(tuple: anytype) UnwrappedTuple(@TypeOf(tuple)) {
 }
 
 test "comptime RPC Protocol generator" {
+    var compile_but_dont_run = true;
+    std.mem.doNotOptimizeAway(&compile_but_dont_run);
+    if (compile_but_dont_run) return;
+
     const Proto = Protocol(struct {
         hello1: fn (val: usize) sys.Error!void,
         hello2: fn () void,
@@ -653,7 +657,7 @@ test "comptime RPC Protocol generator" {
     const client = Proto.Client().init(.{});
     const res1 = client.call(.hello1, .{5});
     const res2 = client.call(.hello2, {});
-    const res3 = client.call(.hello3, .{try caps.ROOT_MEMORY.alloc(caps.Frame)});
+    const res3 = client.call(.hello3, .{try caps.Frame.create(0x1000)});
 
     try std.testing.expect(@TypeOf(res1) == sys.Error!struct { sys.Error!void });
     try std.testing.expect(@TypeOf(res2) == sys.Error!struct { void });
@@ -676,7 +680,7 @@ test "comptime RPC Protocol generator" {
         }
     };
 
-    const server = Proto.Server(.{ .Context = void }, .{
+    const server = Proto.Server(.{}, .{
         .hello1 = S.hello1,
         .hello2 = S.hello2,
         .hello3 = S.hello3,

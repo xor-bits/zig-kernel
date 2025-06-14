@@ -361,6 +361,7 @@ pub const Mode = packed struct {
 };
 
 test {
+    _ = btree;
     _ = caps;
     _ = conf;
     _ = epoch;

@@ -2,6 +2,7 @@
 
 const std = @import("std");
 const root = @import("root");
+const builtin = @import("builtin");
 
 const conf = @import("conf.zig");
 const mem = @import("mem.zig");
@@ -11,13 +12,9 @@ const lock = @import("lock.zig");
 //
 
 pub fn init_thread() void {
-    const epoch_alloc = if (@hasDecl(root, "epoch_allocator"))
-        root.epoch_allocator
-    else // we're testing. though maybe std.testing.allocator could be used? idk
-        std.heap.page_allocator;
     const l = locals();
     l.* = .{
-        .hazard = .{std.ArrayList(DeferFunc).init(epoch_alloc)} ** 3,
+        .hazard = .{std.ArrayList(DeferFunc).init(allocator())} ** 3,
     };
 
     var all_locals_now = all_locals.load(.monotonic);
@@ -112,7 +109,7 @@ fn tryAdvance() usize {
     return new_epoch;
 }
 
-pub fn deferDeinit(guard: Guard, allocator: std.mem.Allocator, ptr: anytype) void {
+pub fn deferDeinit(guard: Guard, alloc: std.mem.Allocator, ptr: anytype) void {
     const Obj = struct {
         allocator: std.mem.Allocator,
         ptr: @TypeOf(ptr),
@@ -128,7 +125,7 @@ pub fn deferDeinit(guard: Guard, allocator: std.mem.Allocator, ptr: anytype) voi
 
     var data: [3]usize = undefined;
     @as(*Obj, @ptrCast(&data)).* = Obj{
-        .allocator = allocator,
+        .allocator = alloc,
         .ptr = ptr,
     };
 
@@ -273,13 +270,16 @@ fn CachePadded(comptime T: type) type {
     };
 }
 
+var single_thread_test_locals: Locals = .{};
+
 fn locals() *Locals {
-    if (@hasDecl(root, "epoch_locals")) {
-        return root.epoch_locals();
-    } else {
-        // we're testing
-        return &fallback_locals;
-    }
+    if (builtin.is_test) return &single_thread_test_locals;
+
+    return root.epoch_locals();
 }
 
-var fallback_locals: Locals = .{};
+fn allocator() std.mem.Allocator {
+    if (builtin.is_test) return mem.slab_allocator;
+
+    return root.epoch_allocator;
+}
