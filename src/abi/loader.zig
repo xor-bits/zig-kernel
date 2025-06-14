@@ -3,6 +3,7 @@ const abi = @import("lib.zig");
 
 const caps = abi.caps;
 const log = std.log.scoped(.loader);
+const relocator = @import("relocator.zig");
 
 //
 
@@ -23,8 +24,9 @@ pub fn load(vmem: caps.Vmem, elf: []const u8) !usize {
     defer self_vmem.close();
 
     var loader = try Elf.init(elf);
-    const entry = try loader.loadInto(self_vmem, vmem);
-    return entry;
+    const entry_addr = try loader.loadInto(self_vmem, vmem);
+    try relocator.relocate(vmem, elf, 0);
+    return entry_addr;
 }
 
 pub fn prepareSpawn(vmem: caps.Vmem, thread: caps.Thread, entry: u64) !void {
@@ -162,13 +164,16 @@ pub const Elf = struct {
         const bytes = try Elf.getProgramData(bin, phdr);
         try frame.write(data_off, bytes);
 
+        const slide = 0x4000_0000; // TODO: pick random page
+        const seg_va = seg_bot + slide;
+
         _ = try vmem_dst.map(
             frame,
             0,
-            seg_bot,
+            seg_va,
             seg_size,
             rights,
-            .{ .fixed = true },
+            .{},
         );
     }
 
