@@ -361,5 +361,19 @@ pub const Mode = packed struct {
 };
 
 test {
+    _ = caps;
+    _ = conf;
+    _ = epoch;
+    _ = input;
+    _ = loader;
+    _ = lock;
+    _ = lpc;
+    _ = mem;
+    _ = ring;
+    _ = rt;
+    _ = sys;
+    _ = thread;
+    _ = util;
+    _ = relocator;
     std.testing.refAllDeclsRecursive(@This());
 }
