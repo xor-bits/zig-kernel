@@ -9,6 +9,7 @@ pub const ROOT_SELF_PROC: Process = .{ .cap = 3 };
 pub const ROOT_BOOT_INFO: Frame = .{ .cap = 4 };
 pub const ROOT_X86_IOPORT_ALLOCATOR: X86IoPortAllocator = .{ .cap = 5 };
 pub const ROOT_X86_IRQ_ALLOCATOR: X86IrqAllocator = .{ .cap = 6 };
+pub const ROOT_MEMORY: Memory = .{ .cap = 7 };
 
 //
 
@@ -21,6 +22,11 @@ pub const Memory = extern struct {
     cap: u32 = 0,
 
     pub const Type: abi.ObjectType = .memory;
+
+    pub fn alloc(self: @This(), comptime Obj: type) sys.Error!Obj {
+        _ = self;
+        return Obj{ .cap = 0 };
+    }
 };
 
 /// capability to manage a single process
@@ -236,11 +242,11 @@ pub const Receiver = extern struct {
     }
 
     pub fn saveCaller(self: @This()) sys.Error!Reply {
-        return .{ .cap = try sys.receiverSaveCaller(self.cap) };
+        return .{ .cap = sys.receiverSaveCaller(self.cap) };
     }
 
     pub fn loadCaller(self: @This(), reply_cap: Reply) sys.Error!void {
-        return try sys.receiverLoadCaller(self.cap, reply_cap.cap);
+        return sys.receiverLoadCaller(self.cap, reply_cap.cap);
     }
 };
 
