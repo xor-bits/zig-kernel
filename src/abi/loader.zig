@@ -138,78 +138,43 @@ pub const Elf = struct {
         return crc;
     }
 
-    pub fn loadInto(self: *@This(), self_vmem: caps.Vmem, vmem: caps.Vmem) !usize {
-        // TODO: syscall to write directly into a `caps.Vmem`
-        // TODO: combine contiguous Frames
+    fn handleLoadableSegment(
+        bin: []const u8,
+        phdr: std.elf.Elf64_Phdr,
+        vmem_dst: caps.Vmem,
+    ) !void {
+        if (phdr.p_type != std.elf.PT_LOAD or phdr.p_memsz == 0) return;
 
-        for (try self.getProgram()) |program_header| {
-            if (program_header.p_type != std.elf.PT_LOAD) continue;
-            if (program_header.p_memsz == 0) continue;
+        const seg_bot = std.mem.alignBackward(usize, phdr.p_vaddr, 0x1000);
+        const seg_top = std.mem.alignForward(usize, phdr.p_vaddr + phdr.p_memsz, 0x1000);
+        const seg_size = seg_top - seg_bot;
 
-            // log.debug("loading phdr", .{});
+        const rights = abi.sys.Rights{
+            .readable = phdr.p_flags & std.elf.PF_R != 0,
+            .writable = phdr.p_flags & std.elf.PF_W != 0,
+            .executable = phdr.p_flags & std.elf.PF_X != 0,
+        };
 
-            const bytes = try getProgramData(self.data, program_header);
+        const frame = try caps.Frame.create(seg_size);
+        defer frame.close();
 
-            const rights = abi.sys.Rights{
-                .readable = program_header.p_flags & std.elf.PF_R != 0,
-                .writable = program_header.p_flags & std.elf.PF_W != 0,
-                .executable = program_header.p_flags & std.elf.PF_X != 0,
-            };
+        const data_off = phdr.p_vaddr - seg_bot;
+        const bytes = try Elf.getProgramData(bin, phdr);
+        try frame.write(data_off, bytes);
 
-            const segment_vaddr_bottom = std.mem.alignBackward(usize, program_header.p_vaddr, 0x1000);
-            const segment_vaddr_top = std.mem.alignForward(usize, program_header.p_vaddr + program_header.p_memsz, 0x1000);
-            const segment_data_bottom_offset = program_header.p_vaddr - segment_vaddr_bottom;
-            // const data_vaddr_bottom = program_header.p_vaddr;
-            // const data_vaddr_top = data_vaddr_bottom + program_header.p_filesz;
-            // const zero_vaddr_bottom = std.mem.alignForward(usize, data_vaddr_top, 0x1000);
-            // const zero_vaddr_top = segment_vaddr_top;
+        _ = try vmem_dst.map(
+            frame,
+            0,
+            seg_bot,
+            seg_size,
+            rights,
+            .{ .fixed = true },
+        );
+    }
 
-            // log.info("flags: {}, segment_vaddr_bottom=0x{x} segment_vaddr_top=0x{x} data_vaddr_bottom=0x{x} data_vaddr_top=0x{x}", .{
-            //     rights,
-            //     segment_vaddr_bottom,
-            //     segment_vaddr_top,
-            //     data_vaddr_bottom,
-            //     data_vaddr_top,
-            // });
-
-            const size = segment_vaddr_top - segment_vaddr_bottom;
-            const frame = try caps.Frame.create(size);
-            defer frame.close();
-
-            // TODO: Frame.write instead of Vmem.map + memcpy + Vmem.unmap
-            const loader_tmp = try self_vmem.map(
-                frame,
-                0,
-                0,
-                size,
-                .{ .writable = true },
-                .{},
-            );
-
-            // log.info("copying to [ 0x{x}..0x{x} ]", .{
-            //     segment_vaddr_bottom + segment_data_bottom_offset,
-            //     segment_vaddr_bottom + segment_data_bottom_offset + program_header.p_filesz,
-            // });
-            abi.util.copyForwardsVolatile(u8, @as(
-                [*]volatile u8,
-                @ptrFromInt(loader_tmp + segment_data_bottom_offset),
-            )[0..program_header.p_filesz], bytes);
-
-            try self_vmem.unmap(
-                loader_tmp,
-                size,
-            );
-
-            _ = try vmem.map(
-                frame,
-                0,
-                segment_vaddr_bottom,
-                size,
-                rights,
-                .{ .fixed = true },
-            );
-        }
-
+    pub fn loadInto(self: *@This(), _: caps.Vmem, vmem: caps.Vmem) !usize {
+        const phdrs = try self.getProgram();
+        for (phdrs) |ph| try handleLoadableSegment(self.data, ph, vmem);
         return (try self.getHeader()).entry;
     }
 
