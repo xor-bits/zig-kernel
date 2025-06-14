@@ -5,6 +5,8 @@ const caps = abi.caps;
 const log = std.log.scoped(.loader);
 const relocator = @import("relocator.zig");
 
+const Slide = usize;
+
 //
 
 pub fn exec(elf: []const u8) !void {
@@ -127,6 +129,7 @@ pub const Elf = struct {
     symbol_table: ?[]const u8 = null,
     string_table: ?[]const u8 = null,
     section_header_string_table: ?[]const u8 = null,
+    slide: Slide = 0,
 
     pub fn init(elf: []const u8) !@This() {
         return .{ .data = elf };
@@ -144,6 +147,7 @@ pub const Elf = struct {
         bin: []const u8,
         phdr: std.elf.Elf64_Phdr,
         vmem_dst: caps.Vmem,
+        slide: Slide,
     ) !void {
         if (phdr.p_type != std.elf.PT_LOAD or phdr.p_memsz == 0) return;
 
@@ -164,8 +168,8 @@ pub const Elf = struct {
         const bytes = try Elf.getProgramData(bin, phdr);
         try frame.write(data_off, bytes);
 
-        const slide = 0x4000_0000; // TODO: pick random page
-        const seg_va = seg_bot + slide;
+        const run_addr = seg_bot + slide;
+        const seg_va = run_addr;
 
         _ = try vmem_dst.map(
             frame,
@@ -178,8 +182,10 @@ pub const Elf = struct {
     }
 
     pub fn loadInto(self: *@This(), _: caps.Vmem, vmem: caps.Vmem) !usize {
+        self.slide = 0x4000_0000;
+
         const phdrs = try self.getProgram();
-        for (phdrs) |ph| try handleLoadableSegment(self.data, ph, vmem);
+        for (phdrs) |ph| try handleLoadableSegment(self.data, ph, vmem, self.slide);
         return (try self.getHeader()).entry;
     }
 
@@ -192,6 +198,7 @@ pub const Elf = struct {
             string_table: []const u8,
             sections: []const std.elf.Elf64_Shdr,
             symbols: []const std.elf.Elf64_Sym,
+            slide: Slide,
 
             pub const Next = struct {
                 val: T,
@@ -228,7 +235,7 @@ pub const Elf = struct {
 
                     return .{
                         .val = std.mem.bytesAsValue(T, bytes).*,
-                        .addr = sym.st_value,
+                        .addr = sym.st_value + self.slide,
                         .name = sym_name,
                     };
                 }
@@ -248,6 +255,7 @@ pub const Elf = struct {
             .string_table = try self.getStringTable(),
             .sections = try self.getSections(),
             .symbols = try self.symbols(),
+            .slide = self.slide,
         };
     }
 
