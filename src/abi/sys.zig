@@ -192,12 +192,12 @@ pub const MapFlags = packed struct {
     _: u7 = 0,
     // global: bool = false,
 
-    pub fn asInt(self: MapFlags) u64 {
-        return @as(u8, @bitCast(self));
+    pub fn asInt(self: MapFlags) u16 {
+        return @bitCast(self);
     }
 
     pub fn fromInt(i: u64) MapFlags {
-        return @as(MapFlags, @bitCast(@as(u8, @truncate(i))));
+        return @bitCast(@as(u16, @truncate(i)));
     }
 };
 
@@ -616,6 +616,17 @@ pub fn receiverReplyRecv(recv: u32, msg: Message) Error!Message {
     _ = try decode(res);
 
     return @bitCast([_]usize{ arg0, arg1, arg2, arg3, arg4, arg5 });
+}
+
+pub fn receiverSaveCaller(recv: u32) u32 {
+    _ = recv;
+    std.debug.panic("receiverSaveCaller not implemented", .{});
+}
+
+pub fn receiverLoadCaller(recv: u32, reply: u32) void {
+    _ = recv;
+    _ = reply;
+    std.debug.panic("receiverLoadCaller not implemented", .{});
 }
 
 pub fn replyCreate() Error!u32 {
