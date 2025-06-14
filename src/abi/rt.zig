@@ -1,5 +1,6 @@
 const std = @import("std");
 const root = @import("root");
+const builtin = @import("builtin");
 
 const caps = @import("caps.zig");
 const sys = @import("sys.zig");
@@ -16,7 +17,13 @@ pub fn installRuntime() void {
     // export fn doesnt work without this random empty function that is called in comptime
 }
 
-pub export fn _start() callconv(.SysV) noreturn {
+fn _rt_start() callconv(.SysV) noreturn {
     thread.callFn(root.main, .{});
     sys.selfStop();
+}
+
+comptime {
+    if (!builtin.is_test) {
+        @export(&_rt_start, .{ .name = "_start" });
+    }
 }
