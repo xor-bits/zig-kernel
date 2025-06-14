@@ -299,6 +299,26 @@ pub const Elf = struct {
         )[0 .. symbol_table.len / @sizeOf(std.elf.Elf64_Sym)];
     }
 
+    pub fn getSectionData(bin: []const u8, shdr: std.elf.Elf64_Shdr) ![]const u8 {
+        // bounds checking
+        if (bin.len < std.math.add(
+            u64,
+            shdr.sh_offset,
+            shdr.sh_size,
+        ) catch return error.OutOfBounds)
+            return error.OutOfBounds;
+
+        return bin[shdr.sh_offset..][0..shdr.sh_size];
+    }
+
+    pub fn getSections(self: *@This()) ![]const std.elf.Elf64_Shdr {
+        if (self.sections) |s| return s;
+
+        const header = try self.getHeader();
+        self.sections = try sectionHeaders(self.data, header);
+        return self.sections.?;
+    }
+
     fn getHeader(self: *@This()) !std.elf.Header {
         if (self.header) |h| return h;
 
@@ -313,14 +333,6 @@ pub const Elf = struct {
         const header = try self.getHeader();
         self.program = try programHeaders(self.data, header);
         return self.program.?;
-    }
-
-    fn getSections(self: *@This()) ![]const std.elf.Elf64_Shdr {
-        if (self.sections) |s| return s;
-
-        const header = try self.getHeader();
-        self.sections = try sectionHeaders(self.data, header);
-        return self.sections.?;
     }
 
     fn getSymbolTable(self: *@This()) ![]const u8 {
@@ -385,18 +397,6 @@ pub const Elf = struct {
             return error.OutOfBounds;
 
         return bin[phdr.p_offset..][0..phdr.p_filesz];
-    }
-
-    fn getSectionData(bin: []const u8, shdr: std.elf.Elf64_Shdr) ![]const u8 {
-        // bounds checking
-        if (bin.len < std.math.add(
-            u64,
-            shdr.sh_offset,
-            shdr.sh_size,
-        ) catch return error.OutOfBounds)
-            return error.OutOfBounds;
-
-        return bin[shdr.sh_offset..][0..shdr.sh_size];
     }
 
     fn programHeaders(bin: []const u8, header: std.elf.Header) ![]const std.elf.Elf64_Phdr {
