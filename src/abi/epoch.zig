@@ -11,9 +11,13 @@ const lock = @import("lock.zig");
 //
 
 pub fn init_thread() void {
+    const epoch_alloc = if (@hasDecl(root, "epoch_allocator"))
+        root.epoch_allocator
+    else // we're testing. though maybe std.testing.allocator could be used? idk
+        std.heap.page_allocator;
     const l = locals();
     l.* = .{
-        .hazard = .{std.ArrayList(DeferFunc).init(root.epoch_allocator)} ** 3,
+        .hazard = .{std.ArrayList(DeferFunc).init(epoch_alloc)} ** 3,
     };
 
     var all_locals_now = all_locals.load(.monotonic);
@@ -270,5 +274,12 @@ fn CachePadded(comptime T: type) type {
 }
 
 fn locals() *Locals {
-    return root.epoch_locals();
+    if (@hasDecl(root, "epoch_locals")) {
+        return root.epoch_locals();
+    } else {
+        // we're testing
+        return &fallback_locals;
+    }
 }
+
+var fallback_locals: Locals = .{};
