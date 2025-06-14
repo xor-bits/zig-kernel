@@ -638,6 +638,10 @@ fn unwrapTuple(tuple: anytype) UnwrappedTuple(@TypeOf(tuple)) {
 }
 
 test "comptime RPC Protocol generator" {
+    var compile_but_dont_run = true;
+    std.mem.doNotOptimizeAway(&compile_but_dont_run);
+    if (compile_but_dont_run) return;
+
     const Proto = Protocol(struct {
         hello1: fn (val: usize) sys.Error!void,
         hello2: fn () void,

@@ -2,6 +2,7 @@
 
 const std = @import("std");
 const root = @import("root");
+const builtin = @import("builtin");
 
 const conf = @import("conf.zig");
 const mem = @import("mem.zig");
@@ -269,10 +270,16 @@ fn CachePadded(comptime T: type) type {
     };
 }
 
+var single_thread_test_locals: Locals = .{};
+
 fn locals() *Locals {
+    if (builtin.is_test) return &single_thread_test_locals;
+
     return root.epoch_locals();
 }
 
 fn allocator() std.mem.Allocator {
+    if (builtin.is_test) return mem.slab_allocator;
+
     return root.epoch_allocator;
 }
