@@ -6,16 +6,6 @@ const log = std.log.scoped(.loader);
 
 //
 
-/// compute the final value that should be written for a given relocation
-/// type
-pub inline fn calcPatch(typ: u32, sym_val: u64, addend: u64) ?u64 {
-    return switch (typ) {
-        @intFromEnum(std.elf.R_X86_64.RELATIVE) => addend,
-        @intFromEnum(std.elf.R_X86_64.GLOB_DAT), @intFromEnum(std.elf.R_X86_64.JUMP_SLOT) => sym_val + addend,
-        else => null,
-    };
-}
-
 pub fn exec(elf: []const u8) !void {
     const vmem = try caps.Vmem.create();
     defer vmem.close();
@@ -149,121 +139,78 @@ pub const Elf = struct {
     }
 
     pub fn loadInto(self: *@This(), self_vmem: caps.Vmem, vmem: caps.Vmem) !usize {
-        try self.loadSegments(self_vmem, vmem);
-        try self.applyRelocations(vmem);
-        return (try self.getHeader()).entry;
-    }
+        // TODO: syscall to write directly into a `caps.Vmem`
+        // TODO: combine contiguous Frames
 
-    /// copy all PT_LOAD segments into the target address space
-    fn loadSegments(
-        self: *@This(),
-        /// unused
-        _: caps.Vmem,
-        vmem: caps.Vmem,
-    ) !void {
-        for (try self.getProgram()) |ph| {
-            if (ph.p_type != std.elf.PT_LOAD or ph.p_memsz == 0) continue;
+        for (try self.getProgram()) |program_header| {
+            if (program_header.p_type != std.elf.PT_LOAD) continue;
+            if (program_header.p_memsz == 0) continue;
+
+            // log.debug("loading phdr", .{});
+
+            const bytes = try getProgramData(self.data, program_header);
 
             const rights = abi.sys.Rights{
-                .readable = ph.p_flags & std.elf.PF_R != 0,
-                .writable = ph.p_flags & std.elf.PF_W != 0,
-                .executable = ph.p_flags & std.elf.PF_X != 0,
+                .readable = program_header.p_flags & std.elf.PF_R != 0,
+                .writable = program_header.p_flags & std.elf.PF_W != 0,
+                .executable = program_header.p_flags & std.elf.PF_X != 0,
             };
 
-            const v_bottom = std.mem.alignBackward(usize, ph.p_vaddr, 0x1000);
-            const v_top = std.mem.alignForward(usize, ph.p_vaddr + ph.p_memsz, 0x1000);
-            const data_off = ph.p_vaddr - v_bottom;
-            const size = v_top - v_bottom;
+            const segment_vaddr_bottom = std.mem.alignBackward(usize, program_header.p_vaddr, 0x1000);
+            const segment_vaddr_top = std.mem.alignForward(usize, program_header.p_vaddr + program_header.p_memsz, 0x1000);
+            const segment_data_bottom_offset = program_header.p_vaddr - segment_vaddr_bottom;
+            // const data_vaddr_bottom = program_header.p_vaddr;
+            // const data_vaddr_top = data_vaddr_bottom + program_header.p_filesz;
+            // const zero_vaddr_bottom = std.mem.alignForward(usize, data_vaddr_top, 0x1000);
+            // const zero_vaddr_top = segment_vaddr_top;
 
+            // log.info("flags: {}, segment_vaddr_bottom=0x{x} segment_vaddr_top=0x{x} data_vaddr_bottom=0x{x} data_vaddr_top=0x{x}", .{
+            //     rights,
+            //     segment_vaddr_bottom,
+            //     segment_vaddr_top,
+            //     data_vaddr_bottom,
+            //     data_vaddr_top,
+            // });
+
+            const size = segment_vaddr_top - segment_vaddr_bottom;
             const frame = try caps.Frame.create(size);
             defer frame.close();
 
-            try frame.write(data_off, try getProgramData(self.data, ph));
+            // TODO: Frame.write instead of Vmem.map + memcpy + Vmem.unmap
+            const loader_tmp = try self_vmem.map(
+                frame,
+                0,
+                0,
+                size,
+                .{ .writable = true },
+                .{},
+            );
+
+            // log.info("copying to [ 0x{x}..0x{x} ]", .{
+            //     segment_vaddr_bottom + segment_data_bottom_offset,
+            //     segment_vaddr_bottom + segment_data_bottom_offset + program_header.p_filesz,
+            // });
+            abi.util.copyForwardsVolatile(u8, @as(
+                [*]volatile u8,
+                @ptrFromInt(loader_tmp + segment_data_bottom_offset),
+            )[0..program_header.p_filesz], bytes);
+
+            try self_vmem.unmap(
+                loader_tmp,
+                size,
+            );
 
             _ = try vmem.map(
                 frame,
                 0,
-                v_bottom,
+                segment_vaddr_bottom,
                 size,
                 rights,
                 .{ .fixed = true },
             );
         }
-    }
 
-    /// apply supported relocations in-place
-    fn applyRelocations(self: *@This(), vmem: caps.Vmem) !void {
-        const sections = try self.getSections();
-        for (sections) |sect| switch (sect.sh_type) {
-            std.elf.SHT_RELA => try self.handleRela(vmem, sect),
-            std.elf.SHT_REL => try self.handleRel(vmem, sect),
-            else => {},
-        };
-    }
-
-    fn handleRela(
-        self: *@This(),
-        vmem: caps.Vmem,
-        sect: std.elf.Elf64_Shdr,
-    ) !void {
-        const data = try getSectionData(self.data, sect);
-        const relas = sliceFromBytes(std.elf.Elf64_Rela, data);
-
-        var syms_opt: ?[]const std.elf.Elf64_Sym = null;
-
-        for (relas) |rela| {
-            const typ: u32 = @intCast(rela.r_info & 0xffffffff);
-            const sym_idx: usize = @intCast(rela.r_info >> 32);
-            const addend: u64 = @as(u64, @bitCast(rela.r_addend));
-
-            const sym_val: u64 = blk: {
-                if (sym_idx == 0) break :blk 0;
-                if (syms_opt == null) syms_opt = try self.symbols();
-                const syms = syms_opt.?;
-                if (sym_idx >= syms.len) return error.OutOfBounds;
-                break :blk syms[sym_idx].st_value;
-            };
-
-            const patch_val = calcPatch(typ, sym_val, addend) orelse continue;
-            try writeU64(vmem, rela.r_offset, patch_val);
-        }
-    }
-
-    fn handleRel(
-        self: *@This(),
-        vmem: caps.Vmem,
-        sect: std.elf.Elf64_Shdr,
-    ) !void {
-        const data = try getSectionData(self.data, sect);
-        const rels = sliceFromBytes(std.elf.Elf64_Rel, data);
-        var syms_opt: ?[]const std.elf.Elf64_Sym = null;
-        var buf: [8]u8 = undefined;
-
-        for (rels) |rel| {
-            const typ: u32 = @intCast(rel.r_info & 0xffffffff);
-            const sym_idx: usize = @intCast(rel.r_info >> 32);
-
-            try vmem.read(rel.r_offset, &buf);
-            const addend: u64 = std.mem.readInt(u64, &buf, .little);
-
-            const sym_val: u64 = blk: {
-                if (sym_idx == 0) break :blk 0;
-                if (syms_opt == null) syms_opt = try self.symbols();
-                const syms = syms_opt.?;
-                if (sym_idx >= syms.len) return error.OutOfBounds;
-                break :blk syms[sym_idx].st_value;
-            };
-
-            const patch_val = calcPatch(typ, sym_val, addend) orelse continue;
-            try writeU64(vmem, rel.r_offset, patch_val);
-        }
-    }
-
-    fn resolveSym(self: *@This(), idx: usize) !u64 {
-        if (idx == 0) return 0; // STN_UNDEF
-        const syms = try self.symbols();
-        if (idx >= syms.len) return error.OutOfBounds;
-        return syms[idx].st_value;
+        return (try self.getHeader()).entry;
     }
 
     pub fn ExternStructIterator(
@@ -307,10 +254,10 @@ pub const Elf = struct {
                         continue;
 
                     const offs = sym.st_value - sect.sh_addr;
-                    const byte = sect_data[offs..][0..sym.st_size];
+                    const bytes = sect_data[offs..][0..sym.st_size];
 
                     return .{
-                        .val = std.mem.bytesAsValue(T, byte).*,
+                        .val = std.mem.bytesAsValue(T, bytes).*,
                         .addr = sym.st_value,
                         .name = sym_name,
                     };
@@ -381,7 +328,10 @@ pub const Elf = struct {
     pub fn symbols(self: *@This()) ![]const std.elf.Elf64_Sym {
         const symbol_table = try self.getSymbolTable();
 
-        return sliceFromBytes(std.elf.Elf64_Sym, symbol_table);
+        return @as(
+            [*]const std.elf.Elf64_Sym,
+            @alignCast(@ptrCast(symbol_table)),
+        )[0 .. symbol_table.len / @sizeOf(std.elf.Elf64_Sym)];
     }
 
     fn getHeader(self: *@This()) !std.elf.Header {
@@ -494,7 +444,7 @@ pub const Elf = struct {
         ) catch return error.OutOfBounds)
             return error.OutOfBounds;
 
-        const program_headers = sliceFromBytes(std.elf.Elf64_Phdr, bin[header.phoff .. header.phoff + header.phnum * @sizeOf(std.elf.Elf64_Phdr)]);
+        const program_headers: [*]const std.elf.Elf64_Phdr = @alignCast(@ptrCast(bin.ptr + header.phoff));
         return program_headers[0..header.phnum];
     }
 
@@ -508,91 +458,7 @@ pub const Elf = struct {
         ) catch return error.OutOfBounds)
             return error.OutOfBounds;
 
-        const section_headers = sliceFromBytes(std.elf.Elf64_Shdr, bin[header.shoff .. header.shoff + header.shnum * @sizeOf(std.elf.Elf64_Shdr)]);
+        const section_headers: [*]const std.elf.Elf64_Shdr = @alignCast(@ptrCast(bin.ptr + header.shoff));
         return section_headers[0..header.shnum];
     }
 };
-
-inline fn writeU64(vmem: caps.Vmem, addr: usize, val: u64) !void {
-    var buf: [8]u8 = undefined;
-    std.mem.writeInt(u64, &buf, val, .little);
-    try vmem.write(addr, &buf);
-}
-
-inline fn sliceFromBytes(comptime T: type, byte: []const u8) []const T {
-    return @as([*]const T, @ptrCast(@alignCast(byte.ptr)))[0 .. byte.len / @sizeOf(T)];
-}
-
-inline fn writeU64Buf(mem: []u8, offs: usize, val: u64) !void {
-    if (offs + 8 > mem.len) return error.OutOfBounds;
-    const dest: *[8]u8 = @ptrCast(mem[offs .. offs + 8].ptr);
-    std.mem.writeInt(u64, dest, val, .little);
-}
-
-inline fn bytes(val: u64) [8]u8 {
-    var buf: [8]u8 = undefined;
-    std.mem.writeInt(u64, &buf, val, .little);
-    return buf;
-}
-
-/// apply relocations directly to a writable memory slice
-pub fn applyRelocationsInSlice(
-    mem: []u8,
-    relas: []const std.elf.Elf64_Rela,
-    rels: []const std.elf.Elf64_Rel,
-    symbols: []const std.elf.Elf64_Sym,
-) !void {
-    // rela
-    for (relas) |rela| {
-        const typ: u32 = @intCast(rela.r_info & 0xffffffff);
-        const sym_idx: usize = @intCast(rela.r_info >> 32);
-        const addend: u64 = @as(u64, @bitCast(rela.r_addend));
-        const sym_val: u64 = if (sym_idx == 0) 0 else blk: {
-            if (sym_idx >= symbols.len) return error.OutOfBounds;
-            break :blk symbols[sym_idx].st_value;
-        };
-        const patch = calcPatch(typ, sym_val, addend) orelse continue;
-        try writeU64Buf(mem, rela.r_offset, patch);
-    }
-
-    // rel
-    var tmp: [8]u8 = undefined;
-    for (rels) |rel| {
-        const typ: u32 = @intCast(rel.r_info & 0xffffffff);
-        const sym_idx: usize = @intCast(rel.r_info >> 32);
-        if (rel.r_offset + 8 > mem.len) return error.OutOfBounds;
-        std.mem.copyForwards(u8, tmp[0..], mem[rel.r_offset .. rel.r_offset + 8]);
-        const addend = std.mem.readInt(u64, &tmp, .little);
-        const sym_val: u64 = if (sym_idx == 0) 0 else blk: {
-            if (sym_idx >= symbols.len) return error.OutOfBounds;
-            break :blk symbols[sym_idx].st_value;
-        };
-        const patch = calcPatch(typ, sym_val, addend) orelse continue;
-        try writeU64Buf(mem, rel.r_offset, patch);
-    }
-}
-
-test "applyRelocationsInSlice patches buffer" {
-    var mem = [_]u8{0} ** 16;
-
-    const syms = [_]std.elf.Elf64_Sym{
-        .{ .st_name = 0, .st_info = 0, .st_other = 0, .st_shndx = 0, .st_value = 0, .st_size = 0 },
-        .{ .st_name = 0, .st_info = 0, .st_other = 0, .st_shndx = 0, .st_value = 0x1000, .st_size = 0 },
-    };
-
-    const relas = [_]std.elf.Elf64_Rela{
-        .{ .r_offset = 0, .r_info = (@as(u64, 0) << 32) | @intFromEnum(std.elf.R_X86_64.RELATIVE), .r_addend = 0x55 },
-    };
-
-    const add_bytes = bytes(0x33);
-    std.mem.copyForwards(u8, mem[8..16], add_bytes[0..]);
-
-    const rels = [_]std.elf.Elf64_Rel{
-        .{ .r_offset = 8, .r_info = (@as(u64, 1) << 32) | @intFromEnum(std.elf.R_X86_64.GLOB_DAT) },
-    };
-
-    try applyRelocationsInSlice(&mem, &relas, &rels, &syms);
-
-    try std.testing.expectEqualSlices(u8, &bytes(0x55), mem[0..8]);
-    try std.testing.expectEqualSlices(u8, &bytes(0x1033), mem[8..16]);
-}
