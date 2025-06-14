@@ -44,8 +44,8 @@ pub const CapMutex = struct {
                 }
             }
 
-            self.sleepers.store(true, .acquire);
-            self.notify.wait();
+            self.sleepers.store(true, .release);
+            self.notify.wait() catch unreachable;
             if (self.tryLock()) return;
         }
     }
