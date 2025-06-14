@@ -212,27 +212,18 @@ pub const Vmem = struct {
         if (self.mappings.items.len == 0)
             return Error.InvalidAddress;
 
-        const vaddr_end_exclusive = try addr.Virt.fromUser(vaddr.raw + len);
         const vaddr_end_inclusive = try addr.Virt.fromUser(vaddr.raw + len - 1);
 
         const idx_beg: usize = self.find(vaddr) orelse return Error.InvalidAddress;
-        const idx_end: usize = 1 + (self.find(vaddr_end_exclusive) orelse (self.mappings.items.len - 1));
+        const idx_end: usize = self.find(vaddr_end_inclusive) orelse return Error.InvalidAddress;
 
         if (!self.mappings.items[idx_beg].overlaps(vaddr, 1))
             return Error.InvalidAddress;
-
-        // log.info("vaddr=0x{x} idx_beg={} idx_end={} mapping={}", .{
-        //     vaddr.raw,
-        //     idx_beg,
-        //     idx_end,
-        //     self.mappings.items[idx_beg],
-        // });
-
-        std.debug.assert(self.mappings.items[idx_beg].overlaps(vaddr, 1));
-        std.debug.assert(self.mappings.items[idx_end - 1].overlaps(vaddr_end_inclusive, 1));
+        if (!self.mappings.items[idx_end].overlaps(vaddr_end_inclusive, 1))
+            return Error.InvalidAddress;
 
         // make sure the mappings are contiguous (no unmapped holes)
-        for (idx_beg..@max(idx_beg, idx_end - 1)) |idx| {
+        for (idx_beg..idx_end) |idx| {
             const prev_mapping = &self.mappings.items[idx];
             const next_mapping = &self.mappings.items[idx + 1];
 
@@ -241,7 +232,7 @@ pub const Vmem = struct {
                 return Error.InvalidAddress;
         }
 
-        return .{ idx_beg, idx_end };
+        return .{ idx_beg, idx_end + 1 };
     }
 
     pub fn switchTo(self: *@This()) void {
