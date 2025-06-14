@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 const abi = @import("lib.zig");
 const caps = @import("caps.zig");
@@ -168,6 +169,11 @@ pub fn Protocol(comptime spec: type) type {
                 }
 
                 pub fn call(self: @This(), comptime id: MessageVariant, args: TupleWithoutFirst(VariantOf(id).input_ty)) sys.Error!VariantOf(id).output_ty {
+                    if (builtin.is_test) {
+                        // in host unit tests we cannot actually make capability
+                        // calls
+                        return @as(VariantOf(id).output_ty, undefined);
+                    }
                     const variant = VariantOf(id);
 
                     var msg: sys.Message = undefined;

@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 const abi = @import("lib.zig");
 const ring = @import("ring.zig");
@@ -531,6 +532,9 @@ pub fn receiverCreate() Error!u32 {
 }
 
 pub fn receiverRecv(recv: u32) Error!Message {
+    if (builtin.is_test) {
+        return Error.InvalidCapability;
+    }
     var arg0: usize = undefined; // arrays dont work on outputs for whatever reason
     var arg1: usize = undefined;
     var arg2: usize = undefined;
@@ -557,6 +561,9 @@ pub fn receiverRecv(recv: u32) Error!Message {
 }
 
 pub fn receiverReply(recv: u32, msg: Message) Error!void {
+    if (builtin.is_test) {
+        return Error.InvalidCapability;
+    }
     var _msg = msg;
     _msg.cap_or_stamp = recv;
     const msg_regs = @as([6]usize, @bitCast(_msg));
@@ -584,6 +591,9 @@ pub fn receiverReply(recv: u32, msg: Message) Error!void {
 }
 
 pub fn receiverReplyRecv(recv: u32, msg: Message) Error!Message {
+    if (builtin.is_test) {
+        return Error.InvalidCapability;
+    }
     var _msg = msg;
     _msg.cap_or_stamp = recv;
     const msg_regs = @as([6]usize, @bitCast(_msg));
@@ -653,6 +663,11 @@ pub fn senderCreate(recv: u32, stamp: u32) Error!u32 {
 }
 
 pub fn senderCall(recv: u32, msg: Message) Error!Message {
+    if (builtin.is_test) {
+        // when running unit tests on the host we obviously cannot perform a
+        // kernel syscall
+        return msg;
+    }
     var _msg = msg;
     _msg.cap_or_stamp = recv;
     const msg_regs = @as([6]usize, @bitCast(_msg));
@@ -749,6 +764,9 @@ pub fn selfStop() noreturn {
 }
 
 pub fn selfSetExtra(idx: u7, val: u64, is_cap: bool) Error!void {
+    if (builtin.is_test) {
+        return;
+    }
     const res = asm volatile ("syscall"
         : [ret] "={rax}" (-> usize),
         : [id] "{rax}" (@intFromEnum(Id.self_set_extra)),
@@ -762,6 +780,9 @@ pub fn selfSetExtra(idx: u7, val: u64, is_cap: bool) Error!void {
 }
 
 pub fn selfGetExtra(idx: u7) Error!struct { val: u64, is_cap: bool } {
+    if (builtin.is_test) {
+        return .{ .val = 0, .is_cap = false };
+    }
     var val: u64 = undefined;
     const res = asm volatile ("syscall"
         : [ret] "={rax}" (-> usize),
