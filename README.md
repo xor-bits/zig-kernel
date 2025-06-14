@@ -34,7 +34,7 @@ zig build # generates the os.iso in zig-out/os.iso
 
 ```bash
 zig build run --prominent-compile-errors --summary none -freference-trace \
- -Doptimize=ReleaseSmall -Duefi=false -Ddebug=1 -Dgdb=false -Ddisplay=false -Dtest=true
+ -Doptimize=Debug -Duefi=false -Ddebug=1 -Dgdb=false -Ddisplay=true -Dtest=true -Dcpus=1
 ```
 
 ## Stuff included here
