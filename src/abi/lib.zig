@@ -15,6 +15,7 @@ pub const rt = @import("rt.zig");
 pub const sys = @import("sys.zig");
 pub const thread = @import("thread.zig");
 pub const util = @import("util.zig");
+pub const relocator = @import("relocator.zig");
 
 //
 
@@ -84,6 +85,10 @@ pub const ObjectType = enum(u8) {
     /// capability to **a** notify object
     /// there can be multiple of them
     notify,
+    /// capability to the memory allocator
+    memory,
+    /// capability to a device frame
+    device_frame,
 
     /// x86 specific capability that allows allocating `x86_ioport` capabilities
     x86_ioport_allocator,
@@ -354,3 +359,7 @@ pub const Mode = packed struct {
     _reserved0: u3 = 0,
     _reserved1: u16 = 0,
 };
+
+test {
+    std.testing.refAllDeclsRecursive(@This());
+}
